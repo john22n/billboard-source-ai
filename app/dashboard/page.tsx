@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation"
 import { AppSidebar } from "@/components/app-sidebar"
 import { ChartAreaInteractive } from "@/components/chart-area-interactive"
 import { DataTable } from "@/components/data-table"
@@ -7,10 +8,18 @@ import {
   SidebarInset,
   SidebarProvider,
 } from "@/components/ui/sidebar"
+import { getSession } from '@/lib/auth'
 
 import data from "./data.json"
 
-export default function Page() {
+export default async function Page() {
+  const session = await getSession()
+  console.log(session)
+
+  if (!session) {
+    redirect('/')
+  }
+
   return (
     <SidebarProvider
       style={

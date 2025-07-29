@@ -1,5 +1,6 @@
 "use client"
 
+import { PhoneCall } from 'lucide-react'
 import {
   IconDots,
   IconFolder,
@@ -38,7 +39,10 @@ export function NavDocuments({
 
   return (
     <SidebarGroup className="group-data-[collapsible=icon]:hidden">
-      <SidebarGroupLabel>Documents</SidebarGroupLabel>
+      <SidebarGroupLabel>
+        <PhoneCall />
+        Calls
+      </SidebarGroupLabel>
       <SidebarMenu>
         {items.map((item) => (
           <SidebarMenuItem key={item.name}>

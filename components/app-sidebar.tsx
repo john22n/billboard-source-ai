@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { BrainCircuit } from 'lucide-react'
 import {
   IconCamera,
   IconChartBar,
@@ -131,7 +132,7 @@ const data = {
       icon: IconSearch,
     },
   ],
-  documents: [
+  calls: [
     {
       name: "Data Library",
       url: "#",
@@ -161,8 +162,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               className="data-[slot=sidebar-menu-button]:!p-1.5"
             >
               <a href="#">
-                <IconInnerShadowTop className="!size-5" />
-                <span className="text-base font-semibold">Acme Inc.</span>
+                <BrainCircuit className="!size-5" />
+                <span className="text-base font-semibold">Billboard Source AI.</span>
               </a>
             </SidebarMenuButton>
           </SidebarMenuItem>
@@ -170,7 +171,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       </SidebarHeader>
       <SidebarContent>
         <NavMain items={data.navMain} />
-        <NavDocuments items={data.documents} />
+        <NavDocuments items={data.calls} />
         <NavSecondary items={data.navSecondary} className="mt-auto" />
       </SidebarContent>
       <SidebarFooter>
