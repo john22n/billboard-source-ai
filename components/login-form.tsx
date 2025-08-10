@@ -56,7 +56,7 @@ export function LoginForm({
       <div className="grid gap-6">
         <div className="grid gap-3">
           <Label htmlFor="email">Email</Label>
-          <Input id="email" type="email" name="email" placeholder="m@example.com" required disabled={isPending} />
+          <Input id="email" type="email" name="email" placeholder="m@example.com" required disabled={isPending} className='bg-white' />
           {state?.errors?.email && (
             <p id="password-error" className="text-sm text-red-500">
               {state.errors.email[0]}
@@ -73,7 +73,7 @@ export function LoginForm({
               Forgot your password?
             </a>
           </div>
-          <Input id="password" type="password" required name="password" disabled={isPending} />
+          <Input id="password" type="password" required name="password" disabled={isPending} className='bg-white' />
           {state?.errors?.password && (
             <p id="password-error" className="text-sm text-red-500">
               {state.errors.password[0]}
