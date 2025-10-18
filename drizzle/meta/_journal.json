@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1760562772587,
+      "tag": "0000_melted_the_enforcers",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1760638902608,
+      "tag": "0001_stale_ultimatum",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1760743814683,
+      "tag": "0002_omniscient_karen_page",
+      "breakpoints": true
+    }
+  ]
+}

@@ -2,7 +2,6 @@
 import { useRef, useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface TranscriptItem {
   id: string;
@@ -16,6 +15,11 @@ export default function RealtimeTranscribe() {
   const dataChannel = useRef<RTCDataChannel | null>(null);
   const peerConnection = useRef<RTCPeerConnection | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  
+  // Add refs for tracking session timing and log ID
+  const sessionStartTime = useRef<number | null>(null);
+  const logId = useRef<number | null>(null);
+  
   const [isActive, setIsActive] = useState(false);
   const [status, setStatus] = useState("Idle");
   const [transcripts, setTranscripts] = useState<TranscriptItem[]>([]);
@@ -41,6 +45,12 @@ export default function RealtimeTranscribe() {
       }
 
       const EPHEMERAL_KEY = data.value;
+      
+      // Store the logId and start time for cost tracking
+      logId.current = data.logId;
+      sessionStartTime.current = Date.now();
+      console.log(`📊 Session started - Log ID: ${logId.current}`);
+      
       setStatus("Starting peer connection...");
 
       // Create a peer connection
@@ -55,8 +65,16 @@ export default function RealtimeTranscribe() {
       };
 
       // Add local audio track for microphone input in the browser
-      const ms = await navigator.mediaDevices.getUserMedia({ audio: true });
-      pc.addTrack(ms.getTracks()[0]);
+      if (typeof window !== "undefined" && navigator.mediaDevices?.getUserMedia) {
+        try {
+          const ms = await navigator.mediaDevices.getUserMedia({ audio: true });
+          pc.addTrack(ms.getTracks()[0]);
+        } catch (err) {
+          console.error("Error accessing microphone:", err);
+        }
+      } else {
+        console.warn("Media devices not available in this environment.");
+      }
 
       // Set up data channel for events
       const dc = pc.createDataChannel("oai-events");
@@ -168,7 +186,40 @@ export default function RealtimeTranscribe() {
     }
   };
 
-  const stopTranscription = () => {
+  const stopTranscription = async () => {
+    // Calculate session duration and update cost
+    if (sessionStartTime.current && logId.current) {
+      const sessionEndTime = Date.now();
+      const durationSeconds = (sessionEndTime - sessionStartTime.current) / 1000;
+      
+      console.log(`📊 Session ended - Duration: ${durationSeconds.toFixed(2)}s`);
+      
+      try {
+        const costResponse = await fetch('/api/openai/update-cost', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            logId: logId.current,
+            durationSeconds: durationSeconds
+          })
+        });
+
+        if (costResponse.ok) {
+          const costData = await costResponse.json();
+          console.log(`✅ Cost updated: $${costData.cost} for ${durationSeconds.toFixed(2)}s`);
+        } else {
+          console.error('Failed to update cost:', await costResponse.text());
+        }
+      } catch (error) {
+        console.error('Error updating cost:', error);
+      }
+      
+      // Reset tracking refs
+      sessionStartTime.current = null;
+      logId.current = null;
+    }
+
+    // Clean up connections
     if (dataChannel.current) {
       dataChannel.current.close();
     }

@@ -1,9 +1,20 @@
 import { NextResponse } from "next/server";
+import { getSession } from "@/lib/auth";
+import { db } from "@/db";
+import { openaiLogs } from "@/db/schema";
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
 
 export async function GET() {
   try {
+    const session = await getSession();
+    if (!session?.userId) {
+      return NextResponse.json(
+        { error: "Unauthorized - Please log in" },
+        { status: 401 }
+      );
+    }
+
     const response = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
       method: "POST",
       headers: {
@@ -27,8 +38,7 @@ export async function GET() {
           }
         }
       })
-    })
-
+    });
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -40,7 +50,27 @@ export async function GET() {
     }
 
     const data = await response.json();
-    return NextResponse.json(data);
+
+    // Create pending log entry
+    const [logEntry] = await db.insert(openaiLogs).values({
+      userId: session.userId,
+      model: 'gpt-4o-transcribe',
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      cost: "0.000000",
+      sessionId: data.session_id,
+      status: "pending"
+    }).returning();
+
+    console.log(`📝 Created pending log (id: ${logEntry.id}) for session ${data.session_id}`);
+
+    // Return both the OpenAI data and our log ID
+    return NextResponse.json({
+      ...data,
+      logId: logEntry.id // Client will need this to update the log
+    });
+    
   } catch (error) {
     console.error("Token generation error:", error);
     return NextResponse.json(
@@ -49,4 +79,3 @@ export async function GET() {
     );
   }
 }
-
