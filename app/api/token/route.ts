@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { db } from "@/db";
-import { openaiLogs } from "@/db/schema";
+import { createPendingLog } from "@/lib/dal";
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
 
@@ -27,7 +26,7 @@ export async function GET() {
           audio: {
             input: {
               transcription: {
-                language: "es",
+                language: "en",
                 model: "gpt-4o-transcribe",
                 prompt: "Expect words related to programming, development, and technology."
               },
@@ -50,27 +49,27 @@ export async function GET() {
     }
 
     const data = await response.json();
+    
+    // ✅ CRITICAL: Log the response to see the structure
+    console.log("OpenAI full response:", JSON.stringify(data, null, 2));
+
+    // ✅ CRITICAL: Extract session ID correctly
+    const sessionId = data.session?.id || data.id || "unknown";
+    
+    console.log("Extracted sessionId:", sessionId);
 
     // Create pending log entry
-    const [logEntry] = await db.insert(openaiLogs).values({
-      userId: session.userId,
-      model: 'gpt-4o-transcribe',
-      promptTokens: 0,
-      completionTokens: 0,
-      totalTokens: 0,
-      cost: "0.000000",
-      sessionId: data.session_id,
-      status: "pending"
-    }).returning();
-
-    console.log(`📝 Created pending log (id: ${logEntry.id}) for session ${data.session_id}`);
-
-    // Return both the OpenAI data and our log ID
-    return NextResponse.json({
-      ...data,
-      logId: logEntry.id // Client will need this to update the log
-    });
+    const logEntry = await createPendingLog(session.userId, sessionId);
     
+    console.log(`📝 Created pending log (id: ${logEntry.id}) for session ${sessionId}`);
+
+    // Return the correct structure
+    return NextResponse.json({
+      value: data.value,
+      session_id: sessionId,
+      logId: logEntry.id,
+      expires_at: data.expires_at
+    });
   } catch (error) {
     console.error("Token generation error:", error);
     return NextResponse.json(

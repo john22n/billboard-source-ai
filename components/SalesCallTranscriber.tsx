@@ -16,7 +16,6 @@ export default function RealtimeTranscribe() {
   const peerConnection = useRef<RTCPeerConnection | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   
-  // Add refs for tracking session timing and log ID
   const sessionStartTime = useRef<number | null>(null);
   const logId = useRef<number | null>(null);
   
@@ -25,7 +24,6 @@ export default function RealtimeTranscribe() {
   const [transcripts, setTranscripts] = useState<TranscriptItem[]>([]);
   const [interimTranscript, setInterimTranscript] = useState("");
 
-  // Auto-scroll to bottom when new transcripts arrive
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -46,43 +44,49 @@ export default function RealtimeTranscribe() {
 
       const EPHEMERAL_KEY = data.value;
       
-      // Store the logId and start time for cost tracking
       logId.current = data.logId;
       sessionStartTime.current = Date.now();
       console.log(`📊 Session started - Log ID: ${logId.current}`);
       
       setStatus("Starting peer connection...");
 
-      // Create a peer connection
       const pc = new RTCPeerConnection();
       peerConnection.current = pc;
 
-      // Set up to play remote audio from the model
       audioElement.current = document.createElement("audio");
       audioElement.current.autoplay = true;
       pc.ontrack = (e) => {
+        console.log("🔊 Remote track received");
         audioElement.current!.srcObject = e.streams[0];
       };
 
-      // Add local audio track for microphone input in the browser
+      // Add microphone
       if (typeof window !== "undefined" && navigator.mediaDevices?.getUserMedia) {
         try {
           const ms = await navigator.mediaDevices.getUserMedia({ audio: true });
           pc.addTrack(ms.getTracks()[0]);
+          console.log("🎤 Microphone track added");
         } catch (err) {
           console.error("Error accessing microphone:", err);
+          setStatus("Microphone access denied");
+          return;
         }
       } else {
-        console.warn("Media devices not available in this environment.");
+        console.warn("Media devices not available.");
+        setStatus("Microphone not available");
+        return;
       }
 
-      // Set up data channel for events
+      // ✅ CRITICAL FOR SAFARI: Create data channel BEFORE creating offer
       const dc = pc.createDataChannel("oai-events");
       dataChannel.current = dc;
+      
+      console.log("📡 Data channel created, state:", dc.readyState);
 
       dc.onopen = () => {
-        console.log("Data channel opened");
-        // Configure session for transcription-only mode
+        console.log("🟢🟢🟢 DATA CHANNEL OPENED! 🟢🟢🟢");
+        setStatus("Data channel open - speak now!");
+        
         const sessionConfig = {
           type: "session.update",
           session: {
@@ -107,21 +111,25 @@ export default function RealtimeTranscribe() {
             },
           },
         };
+        
+        console.log("📤 Sending config");
         dc.send(JSON.stringify(sessionConfig));
-        console.log("Session configured for transcription");
+        console.log("✅ Config sent!");
+      };
+
+      dc.onclose = () => {
+        console.log("🔴 Data channel CLOSED");
       };
 
       dc.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data);
-          console.log("Event from model:", message);
+          console.log("📨 TYPE:", message.type);
 
-          // Handle transcription delta events (incremental)
           if (message.type === "conversation.item.input_audio_transcription.delta") {
             setInterimTranscript((prev) => prev + message.delta);
           }
 
-          // Handle transcription completed events (final)
           if (message.type === "conversation.item.input_audio_transcription.completed") {
             const newTranscript: TranscriptItem = {
               id: message.item_id,
@@ -130,29 +138,30 @@ export default function RealtimeTranscribe() {
               timestamp: Date.now(),
             };
             setTranscripts((prev) => [...prev, newTranscript]);
-            setInterimTranscript(""); // Clear interim transcript
+            setInterimTranscript("");
           }
 
-          // Handle errors
           if (message.type === "error") {
-            console.error("API Error:", message);
+            console.error("❌ ERROR:", message);
             setStatus(`Error: ${message.error?.message || "Unknown error"}`);
           }
         } catch (error) {
-          console.error("Error parsing message:", error);
+          console.error("Parse error:", error);
         }
       };
 
       dc.onerror = (error) => {
-        console.error("Data channel error:", error);
+        console.error("❌ DC ERROR:", error);
         setStatus("Data channel error");
       };
 
-      // Create offer and set local description
+      // Create offer AFTER data channel is set up
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
+      console.log("📝 Offer created");
 
-      setStatus("Connecting to OpenAI Realtime API...");
+      setStatus("Connecting to OpenAI...");
+      
       const sdpResponse = await fetch(
         "https://api.openai.com/v1/realtime/calls",
         {
@@ -167,8 +176,8 @@ export default function RealtimeTranscribe() {
 
       if (!sdpResponse.ok) {
         const err = await sdpResponse.text();
-        console.error("Realtime API error:", err);
-        setStatus("Realtime API error");
+        console.error("API error:", err);
+        setStatus("API error");
         return;
       }
 
@@ -177,22 +186,21 @@ export default function RealtimeTranscribe() {
         sdp: await sdpResponse.text(),
       };
       await pc.setRemoteDescription(answer);
+      console.log("✅ Remote description set");
 
       setStatus("Connected — transcribing...");
       setIsActive(true);
     } catch (error) {
-      console.error("Transcription setup failed:", error);
+      console.error("Setup failed:", error);
       setStatus("Error during setup");
     }
   };
 
   const stopTranscription = async () => {
-    // Calculate session duration and update cost
     if (sessionStartTime.current && logId.current) {
-      const sessionEndTime = Date.now();
-      const durationSeconds = (sessionEndTime - sessionStartTime.current) / 1000;
+      const durationSeconds = (Date.now() - sessionStartTime.current) / 1000;
       
-      console.log(`📊 Session ended - Duration: ${durationSeconds.toFixed(2)}s`);
+      console.log(`📊 Ended - Duration: ${durationSeconds.toFixed(2)}s`);
       
       try {
         const costResponse = await fetch('/api/openai/update-cost', {
@@ -206,20 +214,16 @@ export default function RealtimeTranscribe() {
 
         if (costResponse.ok) {
           const costData = await costResponse.json();
-          console.log(`✅ Cost updated: $${costData.cost} for ${durationSeconds.toFixed(2)}s`);
-        } else {
-          console.error('Failed to update cost:', await costResponse.text());
+          console.log(`✅ Cost: $${costData.cost}`);
         }
       } catch (error) {
-        console.error('Error updating cost:', error);
+        console.error('Cost error:', error);
       }
       
-      // Reset tracking refs
       sessionStartTime.current = null;
       logId.current = null;
     }
 
-    // Clean up connections
     if (dataChannel.current) {
       dataChannel.current.close();
     }
@@ -230,7 +234,7 @@ export default function RealtimeTranscribe() {
       audioElement.current.srcObject = null;
     }
     setIsActive(false);
-    setStatus("Session stopped");
+    setStatus("Stopped");
     setInterimTranscript("");
   };
 
@@ -321,8 +325,7 @@ export default function RealtimeTranscribe() {
 
           <div className="text-xs text-gray-500 mt-2">
             <p>
-              💡 <strong>Tip:</strong> Speak clearly into your microphone. Final
-              transcripts appear in blue, interim transcripts in yellow.
+              💡 <strong>Tip:</strong> Speak clearly. Blue = final, yellow = processing.
             </p>
           </div>
         </CardContent>

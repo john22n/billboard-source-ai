@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { db } from "@/db";
-import { openaiLogs } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { updateLogCost } from "@/lib/dal";
 
 export async function POST(req: Request) {
   try {
@@ -23,41 +21,23 @@ export async function POST(req: Request) {
       );
     }
 
-    // Calculate cost: $0.06 per minute for audio input
-    const durationMinutes = durationSeconds / 60;
-    const actualCost = durationMinutes * 0.06;
+    // Call DAL function
+    const result = await updateLogCost(logId, session.userId, durationSeconds);
 
-    // Update the log (ensure it belongs to this user for security)
-    const result = await db
-      .update(openaiLogs)
-      .set({
-        totalTokens: Math.round(durationSeconds), // Store seconds for reference
-        cost: actualCost.toFixed(6),
-        status: "completed"
-      })
-      .where(
-        and(
-          eq(openaiLogs.id, logId),
-          eq(openaiLogs.userId, session.userId)
-        )
-      )
-      .returning();
-
-    if (result.length === 0) {
+    if (!result) {
       return NextResponse.json(
         { error: "Log not found or unauthorized" },
         { status: 404 }
       );
     }
 
-    console.log(`✅ Updated log ${logId}: ${durationSeconds}s = $${actualCost.toFixed(6)}`);
+    console.log(`✅ Updated log ${logId}: ${durationSeconds}s = $${result.cost}`);
 
     return NextResponse.json({
       success: true,
-      cost: actualCost.toFixed(6),
+      cost: result.cost,
       durationSeconds
     });
-    
   } catch (error) {
     console.error("Cost update error:", error);
     return NextResponse.json(
