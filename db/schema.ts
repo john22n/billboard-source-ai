@@ -6,7 +6,8 @@ import { pgTable, serial, text, timestamp, integer, numeric, pgEnum, uuid, varch
 export const user = pgTable('User', {
   id: varchar('id', { length: 21 }).primaryKey().notNull(),
   email: varchar('email', { length: 64 }).notNull(),
-  password: varchar('password', { length: 64 })
+  password: varchar('password', { length: 64 }),
+  role: varchar('role', { length: 20 }).default('user')
 })
 
 export type User = InferSelectModel<typeof user>;

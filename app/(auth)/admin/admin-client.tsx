@@ -24,6 +24,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Trash2 } from "lucide-react"
 import { deleteUsers } from "@/actions/user-actions"
 import { useRouter } from "next/navigation"
+import type { User } from "@/db/schema"
 
 // ✅ Helper function to safely convert any value to a number
 function costToNumber(cost: any): number {
@@ -44,9 +45,15 @@ function costToNumber(cost: any): number {
   return 0
 }
 
+interface UserCost {
+  id: string
+  email: string
+  cost: string | number // numeric from DB can be string or number
+}
+
 interface AdminClientProps {
-  initialUsers: any[]
-  initialCosts: any[]
+  initialUsers: User[]
+  initialCosts: UserCost[]
 }
 
 export default function AdminClient({ 
