@@ -1,116 +1,73 @@
-import { NextRequest, NextResponse } from 'next/server';
-import OpenAI from 'openai';
+import { NextResponse } from "next/server";
+import { getSession } from "@/lib/auth";
+import { createPendingLog } from "@/lib/dal";
 
-export const runtime = 'nodejs';
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
-
-/**
- * POST: Create transcription session for real-time sales call
- * Uses gpt-4o-transcribe for high-accuracy transcription
- */
-export async function POST(req: NextRequest) {
+export async function GET() {
   try {
-    const body = await req.json().catch(() => ({}));
-    const {
-      language = 'en',
-      customInstructions,
-      speakerDiarization = true,
-    } = body;
-
-    // Build instructions for sales call transcription
-    const instructions = customInstructions || `
-You are transcribing a sales call. Please:
-- Transcribe all speech accurately
-- Identify different speakers (e.g., "Sales Rep:", "Customer:")
-- Include natural pauses and emphasis
-- Maintain professional terminology
-- Note any important background information mentioned
-${speakerDiarization ? '- Label speakers clearly' : ''}
-    `.trim();
-
-    // Create session with gpt-4o-transcribe model
-    const sessionResponse = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-transcribe', // Specialized transcription model
-        voice: 'alloy',
-        modalities: ['text'], // Text output only (no audio generation)
-        instructions: instructions,
-        input_audio_format: 'pcm16',
-        turn_detection: null, // Continuous transcription, no turn detection
-      }),
-    });
-
-    if (!sessionResponse.ok) {
-      const errorData = await sessionResponse.json();
-      throw new Error(errorData.error?.message || 'Failed to create session');
-    }
-
-    const sessionData = await sessionResponse.json();
-
-    return NextResponse.json({
-      success: true,
-      clientSecret: sessionData.client_secret.value,
-      sessionId: sessionData.id,
-      expiresAt: sessionData.expires_at,
-      model: 'gpt-4o-transcribe',
-    });
-
-  } catch (error) {
-    console.error('Error creating transcription session:', error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to create session'
-      },
-      { status: 500 }
-    );
-  }
-}
-
-/**
- * PUT: Upload and transcribe a pre-recorded sales call file
- */
-export async function PUT(req: NextRequest) {
-  try {
-    const formData = await req.formData();
-    const file = formData.get('file') as File;
-
-    if (!file) {
+    const session = await getSession();
+    if (!session?.userId) {
       return NextResponse.json(
-        { error: 'No file provided' },
-        { status: 400 }
+        { error: "Unauthorized - Please log in" },
+        { status: 401 }
       );
     }
 
-    // Transcribe using Whisper with detailed output
-    const transcription = await openai.audio.transcriptions.create({
-      file: file,
-      model: 'whisper-1',
-      language: 'en',
-      response_format: 'verbose_json',
-      timestamp_granularities: ['word', 'segment'],
+    const response = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        session: {
+          type: "transcription",
+          audio: {
+            input: {
+              transcription: {
+                language: "en",
+                model: "gpt-4o-transcribe",
+                prompt: "Expect words related to programming, development, and technology."
+              },
+              noise_reduction: {
+                type: "near_field"
+              }
+            }
+          }
+        }
+      })
     });
 
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("OpenAI error:", errorText);
+      return NextResponse.json(
+        { error: "Failed to generate token", details: errorText },
+        { status: response.status }
+      );
+    }
+
+    const data = await response.json();
+    
+    // Extract session ID from nested object
+    const sessionId = data.session?.id || data.id || "unknown";
+
+    // Create pending log entry
+    const logEntry = await createPendingLog(session.userId, sessionId);
+    
+    console.log(`📝 Created pending log (id: ${logEntry.id}) for session ${sessionId}`);
+
+    // ✅ CRITICAL: Return in the EXACT format your original component expects
     return NextResponse.json({
-      success: true,
-      text: transcription.text,
-      segments: (transcription as any).segments,
-      words: (transcription as any).words,
-      duration: (transcription as any).duration,
+      value: data.value,           // Your component looks for data.value
+      session_id: sessionId,        // Include session ID
+      logId: logEntry.id           // For cost tracking
     });
-
   } catch (error) {
-    console.error('Error transcribing file:', error);
+    console.error("Token generation error:", error);
     return NextResponse.json(
-      { error: 'Failed to transcribe file' },
+      { error: "Failed to generate token", details: String(error) },
       { status: 500 }
     );
   }

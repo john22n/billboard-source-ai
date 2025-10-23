@@ -1,21 +1,19 @@
-'use client'
-import { GalleryVerticalEnd } from "lucide-react"
-import { SignupForm } from "@/components/sign-up"
-import Spline from "@splinetool/react-spline"
+// app/admin/page.tsx
+import { getAllUsers, getUserCosts } from "@/lib/dal";
+import AdminClient from "./admin-client";
 
-export default function LoginPage() {
-  return (
-    <div className="grid min-h-svh lg:grid-cols-2">
-      <div className="flex flex-col gap-4 p-6 md:p-10">
-        <div className="flex flex-1 items-center justify-center">
-          <div className="w-full max-w-xs">
-            <SignupForm />
-          </div>
-        </div>
-      </div>
-      <div className="bg-muted relative hidden lg:block">
-        user table TODO: create table of users already create perform actions such as delete
-      </div>
-    </div>
-  )
+export default async function AdminPage() {
+  try {
+    // Fetch data directly in the Server Component
+    const users = await getAllUsers();
+    const userCosts = await getUserCosts();
+
+    // Pass data to Client Component
+    return <AdminClient initialUsers={users || []} initialCosts={userCosts || []} />;
+  } catch (error) {
+    console.error("Failed to fetch admin data:", error);
+    
+    // Return client with empty arrays on error
+    return <AdminClient initialUsers={[]} initialCosts={[]} />;
+  }
 }
