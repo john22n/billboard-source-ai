@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Trash2 } from "lucide-react"
+import { Trash2, ArrowLeft } from "lucide-react"
 import { deleteUsers } from "@/actions/user-actions"
 import { useRouter } from "next/navigation"
 import type { User } from "@/db/schema"
@@ -87,6 +87,11 @@ export default function AdminClient({
     })
   }
 
+  // Navigate back to dashboard
+  const handleBackToDashboard = () => {
+    router.push('/dashboard')
+  }
+
   // Calculate total cost with guard
   const totalCostNumber = Array.isArray(initialCosts) 
     ? initialCosts.reduce((sum, u) => sum + costToNumber(u.cost), 0)
@@ -107,8 +112,17 @@ export default function AdminClient({
       {/* Right side: User tables */}
       <div className="relative hidden lg:flex flex-col justify-center items-center p-10 w-full gap-5 lg:bg-primary-foreground">
         {/* Header Row */}
-        <div className="w-full flex items-center justify-center mb-4 relative">
-          <h2 className="text-2xl font-semibold text-center w-full">
+        <div className="w-full flex items-center justify-between mb-4">
+          {/* Dashboard Button */}
+          <Button 
+            size="sm" 
+            onClick={handleBackToDashboard}
+            
+          >
+            back to Dashboard
+          </Button>
+
+          <h2 className="text-2xl font-semibold">
             User Management
           </h2>
 
@@ -117,9 +131,8 @@ export default function AdminClient({
             size="sm"
             disabled={selectedUsers.length === 0 || isPending}
             onClick={handleDelete}
-            className="absolute right-0"
           >
-            <Trash2 className="mr-2 h-4 w-4" /> 
+            <Trash2 className="mr-2 h-4 w-4" />
             {isPending ? "Deleting..." : "Delete Selected"}
           </Button>
         </div>

@@ -115,6 +115,19 @@ export async function updateLogCost(
 
   return result[0] || null;
 }
+
+/**
+ * Promote a user to admin role
+ */
+export async function promoteToAdmin(email: string) {
+  const result = await db
+    .update(user)
+    .set({ role: 'admin' })
+    .where(eq(user.email, email))
+    .returning()
+  
+  return result[0] || null
+}
 /*
 // Fetcher functions for React Query
 export async function getIssue(id: number) {
