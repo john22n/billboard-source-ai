@@ -1,6 +1,6 @@
 "use client"
 
-import { History, Mic } from 'lucide-react'
+import { Mic } from 'lucide-react'
 import {
   IconDots,
   IconFolder,

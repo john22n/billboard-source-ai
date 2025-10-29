@@ -21,7 +21,7 @@ export const openaiLogs = pgTable("openai_logs", {
   completionTokens: integer("completion_tokens").notNull(),
   totalTokens: integer("total_tokens").notNull(),
   cost: numeric("cost", { precision: 10, scale: 6 }).notNull(),
-  sessionId: text("session_id"), // Add this - nullable since not all logs are sessions
-  status: text("status").default("completed"), // Add this - "pending" or "completed"
+  sessionId: text("session_id"),
+  status: text("status").default("completed"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

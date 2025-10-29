@@ -7,13 +7,11 @@ import {
 } from "@/components/ui/sidebar"
 import SalesCallTranscriber from "@/components/SalesCallTranscriber"
 import { getCurrentUser } from '@/lib/dal'
-import data from "./data.json"
 
 export default async function Page() {
-  // Get the current user
+
   const currentUser = await getCurrentUser()
   
-  // Redirect to home if not logged in
   if (!currentUser) {
     redirect('/')
   }

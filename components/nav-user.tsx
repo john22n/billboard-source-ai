@@ -1,8 +1,8 @@
 "use client"
+
 import {
   IconDotsVertical,
   IconLogout,
-  IconShield,
 } from "@tabler/icons-react"
 import { ShieldUser } from 'lucide-react';
 import {
@@ -48,7 +48,7 @@ export function NavUser({
     })
   }
 
-  const isAdmin = user.role === 'admin' // ✅ Check if user is admin
+  const isAdmin = user.role === 'admin'
 
   return (
     <SidebarMenu>
@@ -98,7 +98,6 @@ export function NavUser({
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
 
-             {/* ✅ Show Admin button only if user is admin */}
             {isAdmin && (
               <>
                 <DropdownMenuItem onClick={() => router.push('/admin')}>

@@ -1,18 +1,18 @@
-import 'dotenv/config' // ✅ Add this at the very top
+import 'dotenv/config' 
 import { drizzle } from 'drizzle-orm/node-postgres'
 import { Pool } from 'pg'
 import { user } from '@/db/schema'
 import { eq } from 'drizzle-orm'
 
 async function makeAdmin() {
-  // Check if DATABASE_URL exists
+  
   if (!process.env.DATABASE_URL) {
     console.error('❌ ERROR: DATABASE_URL not found in environment variables')
     console.log('Make sure you have a .env or .env.local file with DATABASE_URL')
     process.exit(1)
   }
 
-  console.log('Database URL:', process.env.DATABASE_URL.substring(0, 30) + '...') // Show first 30 chars for debugging
+  console.log('Database URL:', process.env.DATABASE_URL.substring(0, 30) + '...')
 
   const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
@@ -20,7 +20,6 @@ async function makeAdmin() {
 
   const db = drizzle(pool)
 
-  // ✅ CHANGE THIS to your actual email
   const email = 'John@billboardsource.com'
   
   console.log(`Promoting user: ${email}`)
