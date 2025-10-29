@@ -3,9 +3,8 @@ import { getSession } from './auth'
 import { and, eq, inArray, sql } from 'drizzle-orm'
 import { cache } from 'react'
 import { openaiLogs, user } from '@/db/schema'
-import { unstable_cacheTag as cacheTag } from 'next/cache'
 
-//current user
+
 export const getCurrentUser = cache(async () => {
   const session = await getSession()
   if (!session) return null
@@ -26,7 +25,6 @@ export const getCurrentUser = cache(async () => {
   }
 })
 
-// get user by email
 export const getUserByEmail = cache(async (email: string) => {
   try {
     const result = await db.select().from(user).where(eq(user.email, email))
@@ -38,9 +36,6 @@ export const getUserByEmail = cache(async (email: string) => {
 })
 
 
-/**
- * Create a pending log entry for a new transcription session
- */
 export async function createPendingLog(userId: string, sessionId: string) {
   const [logEntry] = await db
     .insert(openaiLogs)
@@ -59,23 +54,14 @@ export async function createPendingLog(userId: string, sessionId: string) {
   return logEntry;
 }
 
-/**
- * Get all users from the database
- */
 export async function getAllUsers() {
   return await db.select().from(user);
 }
 
-/**
- * Delete multiple users by their IDs
- */
 export async function deleteUsersByIds(ids: string[]) {
   return await db.delete(user).where(inArray(user.id, ids));
 }
 
-/**
- * Get aggregated OpenAI costs for all users
- */
 export async function getUserCosts() {
   return await db
     .select({
@@ -94,14 +80,14 @@ export async function updateLogCost(
   userId: string,
   durationSeconds: number
 ) {
-  // Calculate cost: $0.06 per minute for audio input
+ 
   const durationMinutes = durationSeconds / 60;
   const actualCost = durationMinutes * 0.06;
 
   const result = await db
     .update(openaiLogs)
     .set({
-      totalTokens: Math.round(durationSeconds), // Store seconds for reference
+      totalTokens: Math.round(durationSeconds), 
       cost: actualCost.toFixed(6),
       status: "completed"
     })
@@ -114,6 +100,16 @@ export async function updateLogCost(
     .returning();
 
   return result[0] || null;
+}
+
+export async function promoteToAdmin(email: string) {
+  const result = await db
+    .update(user)
+    .set({ role: 'admin' })
+    .where(eq(user.email, email))
+    .returning()
+  
+  return result[0] || null
 }
 /*
 // Fetcher functions for React Query

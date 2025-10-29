@@ -1,4 +1,3 @@
-// app/admin/admin-client.tsx
 'use client'
 
 import { useState, useTransition } from "react"
@@ -21,12 +20,12 @@ import {
 } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Trash2 } from "lucide-react"
+import { Trash2, ArrowLeft } from "lucide-react"
 import { deleteUsers } from "@/actions/user-actions"
 import { useRouter } from "next/navigation"
 import type { User } from "@/db/schema"
 
-// ✅ Helper function to safely convert any value to a number
+
 function costToNumber(cost: any): number {
   if (cost == null) return 0
   if (typeof cost === "number") return cost
@@ -48,7 +47,7 @@ function costToNumber(cost: any): number {
 interface UserCost {
   id: string
   email: string
-  cost: string | number // numeric from DB can be string or number
+  cost: string | number 
 }
 
 interface AdminClientProps {
@@ -64,14 +63,12 @@ export default function AdminClient({
   const [isPending, startTransition] = useTransition()
   const router = useRouter()
 
-  // Toggle checkbox selection
   const toggleSelect = (id: string) => {
     setSelectedUsers(prev =>
       prev.includes(id) ? prev.filter(u => u !== id) : [...prev, id]
     )
   }
 
-  // Delete users using Server Action
   const handleDelete = async () => {
     if (selectedUsers.length === 0) return
 
@@ -80,14 +77,17 @@ export default function AdminClient({
       
       if (result.success) {
         setSelectedUsers([])
-        router.refresh() // Refresh the page data
+        router.refresh() 
       } else {
         console.error("Failed to delete:", result.message)
       }
     })
   }
 
-  // Calculate total cost with guard
+  const handleBackToDashboard = () => {
+    router.push('/dashboard')
+  }
+
   const totalCostNumber = Array.isArray(initialCosts) 
     ? initialCosts.reduce((sum, u) => sum + costToNumber(u.cost), 0)
     : 0
@@ -95,7 +95,7 @@ export default function AdminClient({
 
   return (
     <div className="grid min-h-svh lg:grid-cols-2">
-      {/* Left side: Signup */}
+  
       <div className="flex flex-col gap-4 p-6 md:p-10">
         <div className="flex flex-1 items-center justify-center">
           <div className="w-full max-w-xs">
@@ -104,11 +104,17 @@ export default function AdminClient({
         </div>
       </div>
 
-      {/* Right side: User tables */}
       <div className="relative hidden lg:flex flex-col justify-center items-center p-10 w-full gap-5 lg:bg-primary-foreground">
-        {/* Header Row */}
-        <div className="w-full flex items-center justify-center mb-4 relative">
-          <h2 className="text-2xl font-semibold text-center w-full">
+        <div className="w-full flex items-center justify-between mb-4">
+          <Button 
+            size="sm" 
+            onClick={handleBackToDashboard}
+            
+          >
+            back to Dashboard
+          </Button>
+
+          <h2 className="text-2xl font-semibold">
             User Management
           </h2>
 
@@ -117,9 +123,8 @@ export default function AdminClient({
             size="sm"
             disabled={selectedUsers.length === 0 || isPending}
             onClick={handleDelete}
-            className="absolute right-0"
           >
-            <Trash2 className="mr-2 h-4 w-4" /> 
+            <Trash2 className="mr-2 h-4 w-4" />
             {isPending ? "Deleting..." : "Delete Selected"}
           </Button>
         </div>
@@ -130,7 +135,6 @@ export default function AdminClient({
             <TabsTrigger value="costs">User Costs</TabsTrigger>
           </TabsList>
 
-          {/* ---- USERS TAB ---- */}
           <TabsContent value="users">
             <Table>
               <TableCaption>Manage registered users.</TableCaption>
@@ -169,7 +173,6 @@ export default function AdminClient({
             </Table>
           </TabsContent>
 
-          {/* ---- COSTS TAB ---- */}
           <TabsContent value="costs">
             <Table>
               <TableCaption>OpenAI usage cost per user.</TableCaption>
