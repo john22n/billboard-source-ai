@@ -3,6 +3,18 @@ import { NextResponse } from "next/server";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
 
 export async function GET() {
+
+  const instructions = `
+You are transcribing a live sales call in real time.
+Your tasks:
+- Accurately transcribe everything said by both speakers.
+- Identify and label speakers clearly (e.g., "Sales Rep:", "Customer:").
+- Update form fields dynamically as the conversation progresses, based on what is being discussed.
+- Use JSON updates to represent progress (e.g., {"field": "customer_needs", "value": "They are interested in premium support"}).
+- Do NOT summarize — keep context incremental.
+- Use Spanish ("es") for transcription text if the call is in Spanish.
+`.trim();
+
   try {
     const response = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
       method: "POST",
@@ -18,7 +30,7 @@ export async function GET() {
               transcription: {
                 language: "es",
                 model: "gpt-4o-transcribe",
-                prompt: "Expect words related to programming, development, and technology."
+                prompt: instructions
               },
               noise_reduction: {
                 type: "near_field"
