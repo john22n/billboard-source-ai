@@ -7,11 +7,12 @@ import {
 } from "@/components/ui/sidebar"
 import SalesCallTranscriber from "@/components/SalesCallTranscriber"
 import { getCurrentUser } from '@/lib/dal'
+import { getSession } from '@/lib/auth'
 
 export default async function Page() {
 
   const currentUser = await getCurrentUser()
-  
+
   if (!currentUser) {
     redirect('/')
   }
@@ -25,7 +26,7 @@ export default async function Page() {
         } as React.CSSProperties
       }
     >
-      <AppSidebar 
+      <AppSidebar
         variant="inset"
         user={{
           name: currentUser.email.split('@')[0],
@@ -36,17 +37,9 @@ export default async function Page() {
       />
       <SidebarInset>
         <SiteHeader />
-        <div className="flex flex-1 flex-col">
-          <div className="@container/main flex flex-1 flex-col gap-2">
-            <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
-              <SalesCallTranscriber />
-              {/*<SectionCards />
-                <div className="px-4 lg:px-6">
-                  <ChartAreaInteractive />
-                </div>
-                <DataTable data={data} />
-              */}
-            </div>
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <div className="@container/main flex flex-1 flex-col overflow-hidden">
+            <SalesCallTranscriber />
           </div>
         </div>
       </SidebarInset>
