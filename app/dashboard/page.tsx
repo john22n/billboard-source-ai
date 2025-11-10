@@ -7,7 +7,6 @@ import {
 } from "@/components/ui/sidebar"
 import SalesCallTranscriber from "@/components/SalesCallTranscriber"
 import { getCurrentUser } from '@/lib/dal'
-import { getSession } from '@/lib/auth'
 
 export default async function Page() {
 

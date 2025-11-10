@@ -71,14 +71,18 @@ export async function signIn(formData: FormData): Promise<ActionResponse> {
     }
 
     //verify password
+    if (!user.password) {
+      return {
+        success: false,
+        message: "Invalid credentials"
+      }
+    }
+
     const isPasswordValid = await verifyPassword(data.password, user.password)
     if (!isPasswordValid) {
       return {
         success: false,
-        message: 'Invalid email or password',
-        errors: {
-          password: ['Invalid email or password']
-        },
+        message: "Invalid credentials"
       }
     }
 
@@ -98,7 +102,7 @@ export async function signIn(formData: FormData): Promise<ActionResponse> {
   }
 }
 
-export async function signUp(formData: FormData): Promise<ActionResponse> {
+export async function signUp(prevState: ActionResponse, formData: FormData): Promise<ActionResponse> {
   try {
     // extract data from form
     const data = {

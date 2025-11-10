@@ -11,7 +11,7 @@ export const billboardLeadSchema = z.object({
   hasMediaExperience: z.boolean().nullable(),
   hasDoneBillboards: z.boolean().nullable(),
   businessDescription: z.string().nullable(),
-  yearStarted: z.string().nullable(),
+  yearsInBusiness: z.string().nullable(),
   billboardPurpose: z.string().nullable(),
   targetCity: z.string().nullable(),
   targetArea: z.string().nullable(),

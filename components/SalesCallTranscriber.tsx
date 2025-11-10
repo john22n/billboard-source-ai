@@ -28,7 +28,6 @@ export default function SalesCallTranscriber() {
   const [status, setStatus] = useState("Idle");
   const [transcripts, setTranscripts] = useState<TranscriptItem[]>([]);
   const [interimTranscript, setInterimTranscript] = useState("");
-  const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
 
   // Billboard form extraction hook (using AI SDK)
@@ -49,28 +48,28 @@ export default function SalesCallTranscriber() {
 
   // Merge AI data with manual edits (manual edits take precedence)
   const formData = {
-    leadType: manualEdits.leadType ?? aiFormData?.leadType ?? null,
-    name: manualEdits.name ?? aiFormData?.name ?? "",
-    phone: manualEdits.phone ?? aiFormData?.phone ?? "",
-    email: manualEdits.email ?? aiFormData?.email ?? "",
-    website: manualEdits.website ?? aiFormData?.website ?? "",
-    advertiser: manualEdits.advertiser ?? aiFormData?.advertiser ?? "",
-    hasMediaExperience: manualEdits.hasMediaExperience ?? aiFormData?.hasMediaExperience ?? null,
-    hasDoneBillboards: manualEdits.hasDoneBillboards ?? aiFormData?.hasDoneBillboards ?? null,
-    businessDescription: manualEdits.businessDescription ?? aiFormData?.businessDescription ?? "",
-    yearsInBusiness: manualEdits.yearsInBusiness ?? aiFormData?.yearsInBusiness ?? "",
-    billboardPurpose: manualEdits.billboardPurpose ?? aiFormData?.billboardPurpose ?? "",
-    targetCity: manualEdits.targetCity ?? aiFormData?.targetCity ?? "",
-    targetArea: manualEdits.targetArea ?? aiFormData?.targetArea ?? "",
-    startMonth: manualEdits.startMonth ?? aiFormData?.startMonth ?? "",
-    campaignLength: manualEdits.campaignLength ?? aiFormData?.campaignLength ?? null,
-    budgetRange: manualEdits.budgetRange ?? aiFormData?.budgetRange ?? null,
-    decisionMaker: manualEdits.decisionMaker ?? aiFormData?.decisionMaker ?? null,
-    notes: manualEdits.notes ?? aiFormData?.notes ?? "",
+    leadType: manualEdits?.leadType ?? aiFormData?.leadType ?? null,
+    name: manualEdits?.name ?? aiFormData?.name ?? "",
+    phone: manualEdits?.phone ?? aiFormData?.phone ?? "",
+    email: manualEdits?.email ?? aiFormData?.email ?? "",
+    website: manualEdits?.website ?? aiFormData?.website ?? "",
+    advertiser: manualEdits?.advertiser ?? aiFormData?.advertiser ?? "",
+    hasMediaExperience: manualEdits?.hasMediaExperience ?? aiFormData?.hasMediaExperience ?? null,
+    hasDoneBillboards: manualEdits?.hasDoneBillboards ?? aiFormData?.hasDoneBillboards ?? null,
+    businessDescription: manualEdits?.businessDescription ?? aiFormData?.businessDescription ?? "",
+    yearsInBusiness: manualEdits?.yearsInBusiness ?? aiFormData?.yearsInBusiness ?? "",
+    billboardPurpose: manualEdits?.billboardPurpose ?? aiFormData?.billboardPurpose ?? "",
+    targetCity: manualEdits?.targetCity ?? aiFormData?.targetCity ?? "",
+    targetArea: manualEdits?.targetArea ?? aiFormData?.targetArea ?? "",
+    startMonth: manualEdits?.startMonth ?? aiFormData?.startMonth ?? "",
+    campaignLength: manualEdits?.campaignLength ?? aiFormData?.campaignLength ?? null,
+    budgetRange: manualEdits?.budgetRange ?? aiFormData?.budgetRange ?? null,
+    decisionMaker: manualEdits?.decisionMaker ?? aiFormData?.decisionMaker ?? null,
+    notes: manualEdits?.notes ?? aiFormData?.notes ?? "",
   };
 
   // Handle manual field updates
-  const updateField = (field: string, value: any) => {
+  const updateField = (field: string, value: string | boolean | null) => {
     setManualEdits(prev => ({ ...prev, [field]: value }));
   };
 
@@ -111,7 +110,7 @@ export default function SalesCallTranscriber() {
     if (fullTranscript.length > 50 && !isExtracting) {
       extractFields(fullTranscript);
     }
-  }, [fullTranscript]); // Only depend on the memoized transcript, not extractFields
+  }, [fullTranscript, extractFields, isExtracting]); // Only depend on the memoized transcript, not extractFields
 
   const startTranscription = async () => {
     try {
@@ -311,7 +310,6 @@ export default function SalesCallTranscriber() {
     if (!acceptedFiles || acceptedFiles.length === 0) return;
 
     const droppedFile = acceptedFiles[0];
-    setFile(droppedFile);
     setIsUploading(true);
     setStatus("Uploading and transcribing...");
 

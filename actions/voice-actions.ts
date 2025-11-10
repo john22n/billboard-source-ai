@@ -51,7 +51,6 @@ export async function generateTextResponse(prompt: string) {
     const { text } = await generateText({
       model: openai('gpt-4o'),
       prompt,
-      maxTokens: 500,
     });
 
     return {
@@ -73,10 +72,9 @@ export async function streamTextResponse(prompt: string) {
     const result = await streamText({
       model: openai('gpt-4o'),
       prompt,
-      maxTokens: 500,
     });
 
-    return result.toAIStreamResponse();
+    return result.toTextStreamResponse();
   } catch (error) {
     console.error('Error streaming text:', error);
     throw error;
@@ -172,7 +170,6 @@ export async function chatCompletion(messages: Array<{ role: 'user' | 'assistant
         role: msg.role,
         content: msg.content,
       })),
-      maxTokens: 1000,
     });
 
     return {

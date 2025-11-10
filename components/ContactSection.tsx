@@ -10,7 +10,7 @@ export function Contact() {
               <h2 className="text-4xl font-bold text-primary">Get in Touch</h2>
               
               <p className="text-gray-600 text-base sm:text-lg">
-                Have questions or want to learn more? We'd love to hear from you.
+                Have questions or want to learn more? We&apos;d love to hear from you.
               </p>
               
               <div className="text-lg text-gray-800">

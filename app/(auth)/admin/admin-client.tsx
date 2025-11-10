@@ -20,13 +20,15 @@ import {
 } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Trash2, ArrowLeft } from "lucide-react"
+import { Trash2 } from "lucide-react"
 import { deleteUsers } from "@/actions/user-actions"
 import { useRouter } from "next/navigation"
 import type { User } from "@/db/schema"
 
+// Define a type for the cost parameter
+type CostValue = string | number | { toNumber?: () => number; toFixed?: () => string } | null | undefined
 
-function costToNumber(cost: any): number {
+function costToNumber(cost: CostValue): number {
   if (cost == null) return 0
   if (typeof cost === "number") return cost
   if (typeof cost === "string") {
@@ -64,17 +66,15 @@ export default function AdminClient({
   const router = useRouter()
 
   const toggleSelect = (id: string) => {
-    setSelectedUsers(prev =>
+    setSelectedUsers((prev: string[]) =>
       prev.includes(id) ? prev.filter(u => u !== id) : [...prev, id]
     )
   }
 
   const handleDelete = async () => {
     if (selectedUsers.length === 0) return
-
     startTransition(async () => {
       const result = await deleteUsers(selectedUsers)
-      
       if (result.success) {
         setSelectedUsers([])
         router.refresh() 
@@ -95,7 +95,6 @@ export default function AdminClient({
 
   return (
     <div className="grid min-h-svh lg:grid-cols-2">
-  
       <div className="flex flex-col gap-4 p-6 md:p-10">
         <div className="flex flex-1 items-center justify-center">
           <div className="w-full max-w-xs">
@@ -103,21 +102,17 @@ export default function AdminClient({
           </div>
         </div>
       </div>
-
       <div className="relative hidden lg:flex flex-col justify-center items-center p-10 w-full gap-5 lg:bg-primary-foreground">
         <div className="w-full flex items-center justify-between mb-4">
           <Button 
             size="sm" 
             onClick={handleBackToDashboard}
-            
           >
             back to Dashboard
           </Button>
-
           <h2 className="text-2xl font-semibold">
             User Management
           </h2>
-
           <Button
             variant="destructive"
             size="sm"
@@ -128,13 +123,11 @@ export default function AdminClient({
             {isPending ? "Deleting..." : "Delete Selected"}
           </Button>
         </div>
-
         <Tabs defaultValue="users" className="w-full">
           <TabsList className="grid w-full grid-cols-2 mb-6">
             <TabsTrigger value="users">User Accounts</TabsTrigger>
             <TabsTrigger value="costs">User Costs</TabsTrigger>
           </TabsList>
-
           <TabsContent value="users">
             <Table>
               <TableCaption>Manage registered users.</TableCaption>
@@ -172,7 +165,6 @@ export default function AdminClient({
               </TableBody>
             </Table>
           </TabsContent>
-
           <TabsContent value="costs">
             <Table>
               <TableCaption>OpenAI usage cost per user.</TableCaption>
