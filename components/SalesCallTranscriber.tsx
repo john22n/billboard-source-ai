@@ -57,7 +57,7 @@ export default function SalesCallTranscriber() {
     hasMediaExperience: manualEdits?.hasMediaExperience ?? aiFormData?.hasMediaExperience ?? null,
     hasDoneBillboards: manualEdits?.hasDoneBillboards ?? aiFormData?.hasDoneBillboards ?? null,
     businessDescription: manualEdits?.businessDescription ?? aiFormData?.businessDescription ?? "",
-    yearsInBusiness: manualEdits?.yearStarted ?? aiFormData?.yearStarted ?? "",
+    yearsInBusiness: manualEdits?.yearsInBusiness ?? aiFormData?.yearsInBusiness ?? "",
     billboardPurpose: manualEdits?.billboardPurpose ?? aiFormData?.billboardPurpose ?? "",
     targetCity: manualEdits?.targetCity ?? aiFormData?.targetCity ?? "",
     targetArea: manualEdits?.targetArea ?? aiFormData?.targetArea ?? "",

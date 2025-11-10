@@ -11,7 +11,7 @@ export interface BillboardFormData {
   hasMediaExperience: boolean | null;
   hasDoneBillboards: boolean | null;
   businessDescription: string | null;
-  yearStarted: string | null;
+  yearsInBusiness: string | null;
   billboardPurpose: string | null;
   targetCity: string | null;
   targetArea: string | null;
