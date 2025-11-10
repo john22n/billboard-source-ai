@@ -85,12 +85,12 @@ export async function POST(req: Request) {
 
     return result.toTextStreamResponse()
 
-  } catch (error: any) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    console.error("Billboard field extraction error:", error);
-    return Response.json(
-      { error: "Field extraction failed", details: message },
-      { status: 500 }
+  } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      console.error("Billboard field extraction error:", error);
+      return Response.json(
+        { error: "Field extraction failed", details: message },
+        { status: 500 }
     );
   }
 }

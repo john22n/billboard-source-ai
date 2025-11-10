@@ -5,7 +5,6 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import toast from 'react-hot-toast'
 import { signUp, type ActionResponse } from "@/actions/auth"
 
 const initalState: ActionResponse = {
@@ -20,34 +19,12 @@ interface SignupFormProps extends React.ComponentProps<"form"> {
 
 export function SignupForm({
   className,
-  onSuccess,
   ...props
 }: SignupFormProps) {
-  const [state, formAction, isPending] = useActionState<ActionResponse>(
-    async (prevState: ActionResponse, formData: FormData) => {
-      try {
-        const result = await signUp(formData)
-        
-        // Handle successful submission
-        if (result.success) {
-          toast.success('Account created successfully')
-          
-          // Call the onSuccess callback to refresh the parent's user list
-          onSuccess?.()
-        }
-        
-        return result
-      } catch (error) {
-        toast.error(`${state.message}`)
-        return {
-          success: false,
-          message: (error as Error).message || 'error occurred',
-          errors: undefined
-        }
-      }
-    }, 
-    initalState
-  )
+ const [state, formAction, isPending] = useActionState<ActionResponse, FormData>(
+  async (prevState, formData) => await signUp(prevState, formData),
+  initalState
+)
 
   return (
     <form action={formAction} className={cn("flex flex-col gap-6", className)} {...props}>

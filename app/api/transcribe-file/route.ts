@@ -89,7 +89,6 @@ Focus on:
 - Overall outcome and next steps`,
           prompt: transcript,
           temperature: 0.3,
-          maxTokens: 500,
         }),
         generateObject({
           model: openai("gpt-4o"),
@@ -126,10 +125,11 @@ Focus on:
         sentiment: sentimentResult.object,
       },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
     console.error("❌ Transcription error:", error);
     return NextResponse.json(
-      { error: "Failed to transcribe file", details: error.message },
+      { error: "Failed to transcribe file", details: errorMessage },
       { status: 500 }
     );
   }

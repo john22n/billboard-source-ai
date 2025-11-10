@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Theme } from "@radix-ui/themes"
 import { Geist, Geist_Mono } from "next/font/google";
-import { HeaderNav } from "@/components/header-nav"
 import { Toaster } from 'react-hot-toast'
 import "./globals.css";
 

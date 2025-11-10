@@ -1,9 +1,5 @@
-import Image from "next/image";
-import Link from "next/link";
-import { Button } from "@/components/ui/button"
 import { HeaderNav } from '@/components/header-nav'
 import { Footer } from '@/components/Footer'
-import { title } from "process";
 import { Welcome } from "@/components/WelcomeSection";
 import { About } from "@/components/AboutSection";
 import { Product } from "@/components/ProductSection";

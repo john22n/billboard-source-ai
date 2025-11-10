@@ -92,7 +92,6 @@ export async function POST(req: NextRequest) {
             "Provide a brief 2-3 sentence summary of the ongoing sales conversation. Focus on current topics being discussed.",
           prompt: transcript,
           temperature: 0.3,
-          maxTokens: 100,
         }),
         // ✅ Using generateObject from Vercel AI SDK
         generateObject({
@@ -136,7 +135,6 @@ Structure your summary with:
 5. **Outcome**: How the call concluded and next steps`,
         prompt: transcript,
         temperature: 0.3,
-        maxTokens: 800,
       }),
 
       // ✅ Key Points with generateObject
@@ -190,12 +188,13 @@ Structure your summary with:
         recommendations: recommendationsResult.object,
       },
     });
-  } catch (error: any) {
-    console.error("❌ Analysis error:", error);
-    return NextResponse.json(
-      { error: "Failed to analyze transcript", details: error.message },
-      { status: 500 }
-    );
+  } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      console.error("❌ Analysis error:", error);
+      return NextResponse.json(
+        { error: "Failed to analyze transcript", details: errorMessage },
+        { status: 500 }
+      );
   }
 }
 

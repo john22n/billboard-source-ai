@@ -1,6 +1,5 @@
 'use client'
 
-import { GalleryVerticalEnd } from "lucide-react"
 import { LoginForm } from "@/components/login-form"
 import Spline from "@splinetool/react-spline"
 

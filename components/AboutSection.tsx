@@ -31,12 +31,12 @@ export function About() {
             <p className="text-base md:text-lg lg:text-xl text-muted-foreground mb-4 leading-relaxed">
               Our one-stop service provides you with an efficient, 
               timesaving source to handle every aspect of your outdoor advertising purchase. 
-              At Billboard Source, we do the work so you don’t have to.
+              At Billboard Source, we do the work so you don&apos;t have to.
             </p>
             
             {/* Paragraphs */}
             <p className="text-base md:text-lg lg:text-xl text-muted-foreground leading-relaxed">
-              Whether you're looking for a single billboard location or wanting help creating an entire outdoor media plan, 
+              Whether you&apos;re looking for a single billboard location or wanting help creating an entire outdoor media plan, 
               Billboard Source can save you both time and money. Our nationwide service and industry knowledge gives you the competitive advantage!
             </p>
 
