@@ -6,7 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { useBillboardFormExtraction } from "@/hooks/useBillboardFormExtraction";
+import { useBillboardFormExtraction, type BillboardFormData } from "@/hooks/useBillboardFormExtraction";
 
 interface TranscriptItem {
   id: string;
@@ -44,7 +44,7 @@ export default function SalesCallTranscriber() {
   } = useBillboardFormExtraction();
 
   // Local state for manual user edits (overrides AI suggestions)
-  const [manualEdits, setManualEdits] = useState<Partial<typeof aiFormData>>({});
+  const [manualEdits, setManualEdits] = useState<Partial<BillboardFormData>>({});
 
   // Merge AI data with manual edits (manual edits take precedence)
   const formData = {
@@ -310,7 +310,6 @@ export default function SalesCallTranscriber() {
     if (!files || files.length === 0) return;
 
     const selectedFile = files[0];
-    setFile(selectedFile);
     setIsUploading(true);
     setStatus("Uploading and transcribing...");
 
