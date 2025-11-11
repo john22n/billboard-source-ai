@@ -6,34 +6,41 @@ import { streamObject } from "ai";
 import { z } from "zod";
 
 const billboardLeadSchema = z.object({
-  leadType: z.enum(["tire-kicker", "panel-requestor", "availer"]).nullable(),
-  name: z.string().nullable(),
-  phone: z.string().nullable(),
-  email: z.string().nullable(),
-  website: z.string().nullable(),
-  advertiser: z.string().nullable(),
-  hasMediaExperience: z.boolean().nullable(),
-  hasDoneBillboards: z.boolean().nullable(),
-  businessDescription: z.string().nullable(),
-  yearsInBusiness: z.string().nullable(),
-  billboardPurpose: z.string().nullable(),
-  targetCity: z.string().nullable(),
-  targetArea: z.string().nullable(),
-  startMonth: z.string().nullable(),
+  leadType: z
+    .enum(["tire-kicker", "panel-requestor", "availer"])
+    .nullable()
+    .describe("Type of lead: tire-kicker (low intent), panel-requestor (wants availability info), or availer (ready to book)."),
+  name: z.string().nullable().describe("Full name business contact."),
+  phone: z.string().nullable().describe("Phone number for the contact."),
+  email: z.string().nullable().describe("Email address of the contact."),
+  website: z.string().nullable().describe("Website URL of the advertiser or business."),
+  advertiser: z.string().nullable().describe("Name of the business or brand being advertised."),
+  hasMediaExperience: z.boolean().nullable().describe("True if the lead has prior media buying or advertising experience."),
+  hasDoneBillboards: z.boolean().nullable().describe("True if the lead has previously run billboard campaigns."),
+  businessDescription: z.string().nullable().describe("Short summary of what the business does."),
+  yearsInBusiness: z.string().nullable().describe("Number of years the business has been operating."),
+  billboardPurpose: z.string().nullable().describe("Purpose or goal of running billboard ads (e.g., brand awareness, event promotion)."),
+  targetCity: z.string().nullable().describe("Primary city where the lead wants billboards."),
+  targetArea: z.string().nullable().describe("Specific area, highway, or neighborhood where billboards are desired."),
+  startMonth: z.string().nullable().describe("Preferred start month of the campaign. for example: January 2026"),
   campaignLength: z
     .enum(["1 Mo", "2 Mo", "3 Mo", "5 Mo", "12 Mo", "TBD"])
-    .nullable(),
-  budgetRange: z.enum(["small", "midsize", "major"]).nullable(),
+    .nullable()
+    .describe("Length of the campaign in months, or TBD if undecided."),
   decisionMaker: z
     .enum(["alone", "partners", "boss", "committee"])
-    .nullable(),
-  notes: z.string().nullable(),
-  confidence: z.object({
-    overall: z.number().min(0).max(100),
-    fieldsExtracted: z.number(),
-    totalFields: z.number(),
-  }),
-});
+    .nullable()
+    .describe("Who makes the advertising decision for this lead."),
+  notes: z.string().nullable().describe("Any extra notes or context from the conversation."),
+  confidence: z
+    .object({
+      overall: z.number().min(0).max(100).describe("Overall confidence score (0–100)."),
+      fieldsExtracted: z.number().describe("Number of fields successfully extracted."),
+      totalFields: z.number().describe("Total number of fields expected."),
+    })
+    .describe("Confidence metadata for this extraction."),
+}).describe("Schema for a billboard advertising lead extracted from a conversation to fill an form input.");
+
 
 const SYSTEM_PROMPT = `You are an AI assistant analyzing sales call transcripts for a billboard advertising company.
 Extract structured information to populate a lead form.
@@ -50,7 +57,7 @@ BUDGET RANGE MAPPING:
 
 EXTRACTION RULES:
 1. Extract only explicit or clearly implied data
-2. Leave fields null when uncertain
+2. Leave fields null or empty when uncertain
 3. Infer leadType based on conversation intent
 4. Include confidence values based on clarity and completeness
 `;
