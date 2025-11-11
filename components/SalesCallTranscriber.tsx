@@ -3,11 +3,10 @@ import { useRef, useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dropzone, DropzoneContent, DropzoneEmptyState } from '@/components/ui/shadcn-io/dropzone';
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { useBillboardFormExtraction } from "@/hooks/useBillboardFormExtraction";
+import { useBillboardFormExtraction, type BillboardFormData } from "@/hooks/useBillboardFormExtraction";
 
 interface TranscriptItem {
   id: string;
@@ -23,6 +22,7 @@ export default function SalesCallTranscriber() {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const sessionStartTime = useRef<number | null>(null);
   const logId = useRef<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [isActive, setIsActive] = useState(false);
   const [status, setStatus] = useState("Idle");
@@ -44,28 +44,27 @@ export default function SalesCallTranscriber() {
   } = useBillboardFormExtraction();
 
   // Local state for manual user edits (overrides AI suggestions)
-  const [manualEdits, setManualEdits] = useState<Partial<typeof aiFormData>>({});
+  const [manualEdits, setManualEdits] = useState<Partial<BillboardFormData>>({});
 
   // Merge AI data with manual edits (manual edits take precedence)
   const formData = {
-    leadType: manualEdits?.leadType ?? aiFormData?.leadType ?? null,
-    name: manualEdits?.name ?? aiFormData?.name ?? "",
-    phone: manualEdits?.phone ?? aiFormData?.phone ?? "",
-    email: manualEdits?.email ?? aiFormData?.email ?? "",
-    website: manualEdits?.website ?? aiFormData?.website ?? "",
-    advertiser: manualEdits?.advertiser ?? aiFormData?.advertiser ?? "",
-    hasMediaExperience: manualEdits?.hasMediaExperience ?? aiFormData?.hasMediaExperience ?? null,
-    hasDoneBillboards: manualEdits?.hasDoneBillboards ?? aiFormData?.hasDoneBillboards ?? null,
-    businessDescription: manualEdits?.businessDescription ?? aiFormData?.businessDescription ?? "",
-    yearsInBusiness: manualEdits?.yearsInBusiness ?? aiFormData?.yearsInBusiness ?? "",
-    billboardPurpose: manualEdits?.billboardPurpose ?? aiFormData?.billboardPurpose ?? "",
-    targetCity: manualEdits?.targetCity ?? aiFormData?.targetCity ?? "",
-    targetArea: manualEdits?.targetArea ?? aiFormData?.targetArea ?? "",
-    startMonth: manualEdits?.startMonth ?? aiFormData?.startMonth ?? "",
-    campaignLength: manualEdits?.campaignLength ?? aiFormData?.campaignLength ?? null,
-    budgetRange: manualEdits?.budgetRange ?? aiFormData?.budgetRange ?? null,
-    decisionMaker: manualEdits?.decisionMaker ?? aiFormData?.decisionMaker ?? null,
-    notes: manualEdits?.notes ?? aiFormData?.notes ?? "",
+    leadType: manualEdits.leadType ?? aiFormData?.leadType ?? null,
+    name: manualEdits.name ?? aiFormData?.name ?? "",
+    phone: manualEdits.phone ?? aiFormData?.phone ?? "",
+    email: manualEdits.email ?? aiFormData?.email ?? "",
+    website: manualEdits.website ?? aiFormData?.website ?? "",
+    advertiser: manualEdits.advertiser ?? aiFormData?.advertiser ?? "",
+    hasMediaExperience: manualEdits.hasMediaExperience ?? aiFormData?.hasMediaExperience ?? null,
+    hasDoneBillboards: manualEdits.hasDoneBillboards ?? aiFormData?.hasDoneBillboards ?? null,
+    businessDescription: manualEdits.businessDescription ?? aiFormData?.businessDescription ?? "",
+    yearsInBusiness: manualEdits.yearsInBusiness ?? aiFormData?.yearsInBusiness ?? "",
+    billboardPurpose: manualEdits.billboardPurpose ?? aiFormData?.billboardPurpose ?? "",
+    targetCity: manualEdits.targetCity ?? aiFormData?.targetCity ?? "",
+    targetArea: manualEdits.targetArea ?? aiFormData?.targetArea ?? "",
+    startMonth: manualEdits.startMonth ?? aiFormData?.startMonth ?? "",
+    campaignLength: manualEdits.campaignLength ?? aiFormData?.campaignLength ?? null,
+    decisionMaker: manualEdits.decisionMaker ?? aiFormData?.decisionMaker ?? null,
+    notes: manualEdits.notes ?? aiFormData?.notes ?? "",
   };
 
   // Handle manual field updates
@@ -306,15 +305,16 @@ export default function SalesCallTranscriber() {
     setInterimTranscript("");
   };
 
-  const handleFileDrop = async (acceptedFiles: File[]) => {
-    if (!acceptedFiles || acceptedFiles.length === 0) return;
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
 
-    const droppedFile = acceptedFiles[0];
+    const selectedFile = files[0];
     setIsUploading(true);
     setStatus("Uploading and transcribing...");
 
     const formData = new FormData();
-    formData.append("file", droppedFile);
+    formData.append("file", selectedFile);
 
     try {
       const res = await fetch("/api/transcribe-file", {
@@ -341,7 +341,15 @@ export default function SalesCallTranscriber() {
       setStatus("Error transcribing file");
     } finally {
       setIsUploading(false);
+      // Reset the file input so the same file can be selected again
+      if (event.target) {
+        event.target.value = '';
+      }
     }
+  };
+
+  const handleUploadClick = () => {
+    fileInputRef.current?.click();
   };
 
   const handleRetryExtraction = () => {
@@ -353,15 +361,15 @@ export default function SalesCallTranscriber() {
 
   return (
     <div className="h-full bg-gradient-to-br from-gray-50 to-gray-100 p-4 lg:p-6 flex flex-col overflow-hidden">
-      <div className="max-w-6xl mx-auto w-full flex-1 flex flex-col overflow-hidden">
+      <div className="max-w-7xl mx-auto w-full flex-1 flex flex-col overflow-hidden">
         <Card className="shadow-lg flex flex-col flex-1 overflow-hidden">
-          <CardHeader className="bg-gradient-to-r from-blue-500 to-orange-500 text-white py-3 px-4">
+          <CardHeader className="bg-gradient-to-r from-blue-500/50 to-orange-500/50 text-white py-3 px-4">
             <div className="flex flex-col gap-3">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <CardTitle className="text-lg lg:text-xl">Billboard Lead Form</CardTitle>
 
                 <div className="flex items-center gap-2">
-                  <span className={`text-xs bg-white/20 px-3 py-1 rounded-full flex items-center gap-2 ${
+                  <span className={`text-sm bg-white/20 px-3 py-1 rounded-full flex items-center gap-2 ${
                     (isUploading || isExtracting || status.includes("Fetching") || status.includes("Connecting") || status.includes("Starting") || status.includes("Uploading"))
                       ? "animate-pulse"
                       : ""
@@ -377,7 +385,7 @@ export default function SalesCallTranscriber() {
                       <Button
                         onClick={startTranscription}
                         size="sm"
-                        className="bg-green-600 hover:bg-green-700 text-xs h-7"
+                        className="bg-green-600 hover:bg-green-700 text-sm h-7"
                       >
                         Start Live
                       </Button>
@@ -385,7 +393,7 @@ export default function SalesCallTranscriber() {
                       <Button
                         onClick={stopTranscription}
                         size="sm"
-                        className="bg-red-600 hover:bg-red-700 text-xs h-7"
+                        className="bg-red-600 hover:bg-red-700 text-sm h-7"
                       >
                         Stop
                       </Button>
@@ -394,47 +402,50 @@ export default function SalesCallTranscriber() {
                       onClick={clearAll}
                       size="sm"
                       variant="secondary"
-                      className="text-xs h-7"
+                      className="text-sm h-7"
                     >
                       Clear
+                    </Button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="audio/*,.mp3,.wav,.m4a,.ogg"
+                      onChange={handleFileSelect}
+                      disabled={isUploading || isActive}
+                      className="hidden"
+                    />
+                    <Button
+                      onClick={handleUploadClick}
+                      disabled={isUploading || isActive}
+                      size="sm"
+                      variant="outline"
+                      className="bg-white/10 hover:bg-white/20 text-white border-white/30 text-sm h-7"
+                    >
+                      {isUploading ? "Uploading..." : "Upload"}
                     </Button>
                   </div>
                 </div>
               </div>
-
-              {/* Dropzone moved here */}
-              <Dropzone
-                onDrop={handleFileDrop}
-                accept={{
-                  'audio/*': ['.mp3', '.wav', '.m4a', '.ogg'],
-                }}
-                maxFiles={1}
-                disabled={isUploading || isActive}
-                className="py-2 px-3"
-              >
-                <DropzoneEmptyState />
-                <DropzoneContent />
-              </Dropzone>
             </div>
 
             {/* Status Messages - Compact */}
             {isExtracting && (
               <div className="mt-2 bg-blue-500/30 border border-white/30 rounded px-2 py-1">
-                <p className="text-white text-xs">🤖 AI extracting fields...</p>
+                <p className="text-white text-sm">🤖 AI extracting fields...</p>
               </div>
             )}
 
             {extractionError && (
               <div className="mt-2 bg-red-500/30 border border-white/30 rounded px-2 py-1">
                 <div className="flex items-center justify-between gap-2">
-                  <p className="text-white text-xs">{extractionError}</p>
+                  <p className="text-white text-sm">{extractionError}</p>
                   <div className="flex gap-1">
                     {canRetry && (
                       <Button
                         size="sm"
                         variant="secondary"
                         onClick={handleRetryExtraction}
-                        className="h-5 text-xs px-2"
+                        className="h-5 text-sm px-2"
                       >
                         Retry
                       </Button>
@@ -443,7 +454,7 @@ export default function SalesCallTranscriber() {
                       size="sm"
                       variant="ghost"
                       onClick={clearError}
-                      className="h-5 text-xs px-2 text-white hover:bg-white/20"
+                      className="h-5 text-sm px-2 text-white hover:bg-white/20"
                     >
                       Dismiss
                     </Button>
@@ -454,7 +465,7 @@ export default function SalesCallTranscriber() {
 
             {overallConfidence > 0 && !isExtracting && !extractionError && (
               <div className="mt-2 bg-green-500/30 border border-white/30 rounded px-2 py-1">
-                <p className="text-white text-xs">✓ Confidence: {overallConfidence}%</p>
+                <p className="text-white text-sm">✓ Confidence: {overallConfidence}%</p>
               </div>
             )}
           </CardHeader>
@@ -471,8 +482,8 @@ export default function SalesCallTranscriber() {
                 <div className="space-y-3 pb-4">
                   {/* Lead Type */}
                   <div>
-                    <Label className="text-gray-700 font-semibold text-sm">LEAD TYPE:</Label>
-                    <div className="flex gap-3 mt-1">
+                    <Label className="text-gray-700 font-semibold text-base">LEAD TYPE:</Label>
+                    <div className={`flex gap-3 mt-1 p-2 rounded ${formData.leadType === null ? 'bg-red-50' : 'border-2 border-green-500'}`}>
                       <Label className="flex items-center gap-1.5 cursor-pointer">
                         <input
                           type="radio"
@@ -481,7 +492,7 @@ export default function SalesCallTranscriber() {
                           onChange={() => updateField("leadType", "tire-kicker")}
                           className="h-3.5 w-3.5"
                         />
-                        <span className="text-xs">Tire-Kicker</span>
+                        <span className="text-sm">Tire-Kicker</span>
                       </Label>
                       <Label className="flex items-center gap-1.5 cursor-pointer">
                         <input
@@ -491,7 +502,7 @@ export default function SalesCallTranscriber() {
                           onChange={() => updateField("leadType", "panel-requestor")}
                           className="h-3.5 w-3.5"
                         />
-                        <span className="text-xs">Panel-Requestor</span>
+                        <span className="text-sm">Panel-Requestor</span>
                       </Label>
                       <Label className="flex items-center gap-1.5 cursor-pointer">
                         <input
@@ -501,7 +512,7 @@ export default function SalesCallTranscriber() {
                           onChange={() => updateField("leadType", "availer")}
                           className="h-3.5 w-3.5"
                         />
-                        <span className="text-xs">Availer</span>
+                        <span className="text-sm">Availer</span>
                       </Label>
                     </div>
                   </div>
@@ -509,54 +520,60 @@ export default function SalesCallTranscriber() {
                   {/* Contact Info - 4 columns on larger screens */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     <div>
-                      <Label className="text-gray-700 font-semibold text-xs">NAME:</Label>
+                      <Label className="text-gray-700 font-semibold text-sm">NAME:</Label>
                       <Input
                         value={formData.name ?? ""}
                         onChange={(e) => updateField("name", e.target.value)}
-                        className="mt-0.5 border-orange-200 focus:border-orange-400 h-8 text-sm"
+                        className={`mt-0.5 h-8 text-sm ${!formData.name ? 'bg-red-50 border-orange-200' : 'border-green-500'} focus:border-orange-400`}
                       />
                     </div>
                     <div>
-                      <Label className="text-gray-700 font-semibold text-xs">PHONE:</Label>
+                      <Label className="text-gray-700 font-semibold text-sm">PHONE:</Label>
                       <Input
                         value={formData.phone ?? ""}
                         onChange={(e) => updateField("phone", e.target.value)}
-                        className="mt-0.5 border-orange-200 focus:border-orange-400 h-8 text-sm"
+                        className={`mt-0.5 h-8 text-sm ${!formData.phone ? 'bg-red-50 border-orange-200' : 'border-green-500'} focus:border-orange-400`}
                       />
                     </div>
                     <div>
-                      <Label className="text-gray-700 font-semibold text-xs">EMAIL:</Label>
+                      <Label className="text-gray-700 font-semibold text-sm">EMAIL:</Label>
                       <Input
                         value={formData.email ?? ""}
                         onChange={(e) => updateField("email", e.target.value)}
-                        className="mt-0.5 border-orange-200 focus:border-orange-400 h-8 text-sm"
+                        className={`mt-0.5 h-8 text-sm ${!formData.email ? 'bg-red-50 border-orange-200' : 'border-green-500'} focus:border-orange-400`}
                       />
                     </div>
                     <div>
-                      <Label className="text-gray-700 font-semibold text-xs">WEBSITE:</Label>
+                      <Label className="text-gray-700 font-semibold text-sm">WEBSITE:</Label>
                       <Input
                         value={formData.website ?? ""}
                         onChange={(e) => updateField("website", e.target.value)}
-                        className="mt-0.5 border-orange-200 focus:border-orange-400 h-8 text-sm"
+                        className={`mt-0.5 h-8 text-sm ${!formData.website ? 'bg-red-50 border-orange-200' : 'border-green-500'} focus:border-orange-400`}
                       />
                     </div>
                   </div>
 
-                  {/* Advertiser */}
-                  <div>
-                    <Label className="text-gray-700 font-semibold text-xs">ADVERTISER:</Label>
-                    <Input
-                      value={formData.advertiser ?? ""}
-                      onChange={(e) => updateField("advertiser", e.target.value)}
-                      className="mt-0.5 border-orange-200 focus:border-orange-400 h-8 text-sm"
-                    />
-                  </div>
-
-                  {/* Media Experience & Billboard Experience - in one row */}
+                  {/* Advertiser, Years in Business, Media Experience, and Billboard Experience */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     <div>
-                      <Label className="text-gray-700 font-semibold text-xs">MEDIA EXP?</Label>
-                      <div className="flex gap-3 mt-1">
+                      <Label className="text-gray-700 font-semibold text-sm">ADVERTISER:</Label>
+                      <Input
+                        value={formData.advertiser ?? ""}
+                        onChange={(e) => updateField("advertiser", e.target.value)}
+                        className={`mt-0.5 h-8 text-sm ${!formData.advertiser ? 'bg-red-50 border-orange-200' : 'border-green-500'} focus:border-orange-400`}
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-gray-700 font-semibold text-sm">YEARS IN BUSINESS:</Label>
+                      <Input
+                        value={formData.yearsInBusiness?? ""}
+                        onChange={(e) => updateField("yearsInBusiness", e.target.value)}
+                        className={`mt-0.5 h-8 text-sm ${!formData.yearsInBusiness ? 'bg-red-50 border-orange-200' : 'border-green-500'} focus:border-orange-400`}
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-gray-700 font-semibold text-sm">MEDIA EXP?</Label>
+                      <div className={`flex gap-3 mt-1 p-2 rounded ${formData.hasMediaExperience === null ? 'bg-red-50' : 'border-2 border-green-500'}`}>
                         <Label className="flex items-center gap-1">
                           <input
                             type="radio"
@@ -564,7 +581,7 @@ export default function SalesCallTranscriber() {
                             onChange={() => updateField("hasMediaExperience", true)}
                             className="h-3 w-3"
                           />
-                          <span className="text-xs">Y</span>
+                          <span className="text-sm">Y</span>
                         </Label>
                         <Label className="flex items-center gap-1">
                           <input
@@ -573,13 +590,13 @@ export default function SalesCallTranscriber() {
                             onChange={() => updateField("hasMediaExperience", false)}
                             className="h-3 w-3"
                           />
-                          <span className="text-xs">N</span>
+                          <span className="text-sm">N</span>
                         </Label>
                       </div>
                     </div>
                     <div>
-                      <Label className="text-gray-700 font-semibold text-xs">BILLBOARDS?</Label>
-                      <div className="flex gap-3 mt-1">
+                      <Label className="text-gray-700 font-semibold text-sm">BILLBOARDS?</Label>
+                      <div className={`flex gap-3 mt-1 p-2 rounded ${formData.hasDoneBillboards === null ? 'bg-red-50' : 'border-2 border-green-500'}`}>
                         <Label className="flex items-center gap-1">
                           <input
                             type="radio"
@@ -587,7 +604,7 @@ export default function SalesCallTranscriber() {
                             onChange={() => updateField("hasDoneBillboards", true)}
                             className="h-3 w-3"
                           />
-                          <span className="text-xs">Y</span>
+                          <span className="text-sm">Y</span>
                         </Label>
                         <Label className="flex items-center gap-1">
                           <input
@@ -596,54 +613,46 @@ export default function SalesCallTranscriber() {
                             onChange={() => updateField("hasDoneBillboards", false)}
                             className="h-3 w-3"
                           />
-                          <span className="text-xs">N</span>
+                          <span className="text-sm">N</span>
                         </Label>
                       </div>
-                    </div>
-                    <div className="sm:col-span-2">
-                      <Label className="text-gray-700 font-semibold text-xs">YEARS IN BUSINESS:</Label>
-                      <Input
-                        value={formData.yearsInBusiness?? ""}
-                        onChange={(e) => updateField("yearsInBusiness", e.target.value)}
-                        className="mt-0.5 border-orange-200 focus:border-orange-400 h-8 text-sm"
-                      />
                     </div>
                   </div>
 
                   {/* Business Description */}
                   <div>
-                    <Label className="text-gray-700 font-semibold text-xs">WHAT DOES THE BUSINESS DO?</Label>
+                    <Label className="text-gray-700 font-semibold text-sm">WHAT DOES THE BUSINESS DO?</Label>
                     <Input
                       value={formData.businessDescription ?? ""}
                       onChange={(e) => updateField("businessDescription", e.target.value)}
-                      className="mt-0.5 border-orange-200 focus:border-orange-400 h-8 text-sm"
+                      className={`mt-0.5 h-8 text-sm ${!formData.businessDescription ? 'bg-red-50 border-orange-200' : 'border-green-500'} focus:border-orange-400`}
                     />
                   </div>
 
                   {/* Billboard Purpose, Target City, Target Area */}
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
                     <div>
-                      <Label className="text-gray-700 font-semibold text-xs">BILLBOARD FOR:</Label>
+                      <Label className="text-gray-700 font-semibold text-sm">BILLBOARD FOR:</Label>
                       <Input
                         value={formData.billboardPurpose ?? ""}
                         onChange={(e) => updateField("billboardPurpose", e.target.value)}
-                        className="mt-0.5 border-orange-200 focus:border-orange-400 h-8 text-sm"
+                        className={`mt-0.5 h-8 text-sm ${!formData.billboardPurpose ? 'bg-red-50 border-orange-200' : 'border-green-500'} focus:border-orange-400`}
                       />
                     </div>
                     <div>
-                      <Label className="text-gray-700 font-semibold text-xs">TARGET CITY:</Label>
+                      <Label className="text-gray-700 font-semibold text-sm">TARGET CITY:</Label>
                       <Input
                         value={formData.targetCity ?? ""}
                         onChange={(e) => updateField("targetCity", e.target.value)}
-                        className="mt-0.5 border-orange-200 focus:border-orange-400 h-8 text-sm"
+                        className={`mt-0.5 h-8 text-sm ${!formData.targetCity ? 'bg-red-50 border-orange-200' : 'border-green-500'} focus:border-orange-400`}
                       />
                     </div>
                     <div>
-                      <Label className="text-gray-700 font-semibold text-xs">TARGET AREA (HWY/ST):</Label>
+                      <Label className="text-gray-700 font-semibold text-sm">TARGET AREA (HWY/ST):</Label>
                       <Input
                         value={formData.targetArea ?? ""}
                         onChange={(e) => updateField("targetArea", e.target.value)}
-                        className="mt-0.5 border-orange-200 focus:border-orange-400 h-8 text-sm"
+                        className={`mt-0.5 h-8 text-sm ${!formData.targetArea ? 'bg-red-50 border-orange-200' : 'border-green-500'} focus:border-orange-400`}
                       />
                     </div>
                   </div>
@@ -651,17 +660,17 @@ export default function SalesCallTranscriber() {
                   {/* Start Date & Campaign Length */}
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                     <div>
-                      <Label className="text-gray-700 font-semibold text-xs">START DATE:</Label>
+                      <Label className="text-gray-700 font-semibold text-sm">START DATE:</Label>
                       <Input
                         value={formData.startMonth ?? ""}
                         onChange={(e) => updateField("startMonth", e.target.value)}
                         placeholder="e.g., January 2025"
-                        className="mt-0.5 border-orange-200 focus:border-orange-400 h-8 text-sm"
+                        className={`mt-0.5 h-8 text-sm ${!formData.startMonth ? 'bg-red-50 border-orange-200' : 'border-green-500'} focus:border-orange-400`}
                       />
                     </div>
                     <div>
-                      <Label className="text-gray-700 font-semibold text-xs">LENGTH:</Label>
-                      <div className="flex gap-2 mt-0.5 flex-wrap">
+                      <Label className="text-gray-700 font-semibold text-sm">LENGTH:</Label>
+                      <div className={`flex gap-2 mt-0.5 flex-wrap p-2 rounded ${formData.campaignLength === null ? 'bg-red-50' : 'border-2 border-green-500'}`}>
                         {["1 Mo", "2 Mo", "3 Mo", "6 Mo", "12 Mo", "TBD"].map((length) => (
                           <Label key={length} className="flex items-center gap-1 cursor-pointer">
                             <input
@@ -671,54 +680,17 @@ export default function SalesCallTranscriber() {
                               onChange={() => updateField("campaignLength", length)}
                               className="h-3 w-3"
                             />
-                            <span className="text-xs">{length}</span>
+                            <span className="text-sm">{length}</span>
                           </Label>
                         ))}
                       </div>
                     </div>
                   </div>
 
-                  {/* Budget Range - Compact */}
-                  <div>
-                    <Label className="text-gray-700 font-semibold text-xs">BUDGET RANGE:</Label>
-                    <div className="mt-1 space-y-0.5">
-                      <Label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="budgetRange"
-                          checked={formData.budgetRange === "small"}
-                          onChange={() => updateField("budgetRange", "small")}
-                          className="h-3.5 w-3.5"
-                        />
-                        <span className="text-xs">SMALL: $750-1,500 (1mo) | $2,250-4,500 (3mo) | $9,000-18,000 (12mo)</span>
-                      </Label>
-                      <Label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="budgetRange"
-                          checked={formData.budgetRange === "midsize"}
-                          onChange={() => updateField("budgetRange", "midsize")}
-                          className="h-3.5 w-3.5"
-                        />
-                        <span className="text-xs">MIDSIZE: $1,500-3,000 (1mo) | $4,500-9,000 (3mo) | $18,000-36,000 (12mo)</span>
-                      </Label>
-                      <Label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="budgetRange"
-                          checked={formData.budgetRange === "major"}
-                          onChange={() => updateField("budgetRange", "major")}
-                          className="h-3.5 w-3.5"
-                        />
-                        <span className="text-xs">MAJOR: $3,000-6,000 (1mo) | $9,000-18,000 (3mo) | $36,000-72,000 (12mo)</span>
-                      </Label>
-                    </div>
-                  </div>
-
                   {/* Decision Maker - Compact */}
                   <div>
-                    <Label className="text-gray-700 font-semibold text-xs">DECISION MAKER?</Label>
-                    <div className="flex flex-wrap gap-3 mt-1">
+                    <Label className="text-gray-700 font-semibold text-sm">DECISION MAKER?</Label>
+                    <div className={`flex flex-wrap gap-3 mt-1 p-2 rounded ${formData.decisionMaker === null ? 'bg-red-50' : 'border-2 border-green-500'}`}>
                       <Label className="flex items-center gap-1.5 cursor-pointer">
                         <input
                           type="radio"
@@ -727,7 +699,7 @@ export default function SalesCallTranscriber() {
                           onChange={() => updateField("decisionMaker", "alone")}
                           className="h-3.5 w-3.5"
                         />
-                        <span className="text-blue-500 font-semibold text-xs">YOU ALONE</span>
+                        <span className="text-blue-500 font-semibold text-sm">YOU ALONE</span>
                       </Label>
                       <Label className="flex items-center gap-1.5 cursor-pointer">
                         <input
@@ -737,7 +709,7 @@ export default function SalesCallTranscriber() {
                           onChange={() => updateField("decisionMaker", "partners")}
                           className="h-3.5 w-3.5"
                         />
-                        <span className="text-blue-500 font-semibold text-xs">TALK W/PARTNERS</span>
+                        <span className="text-blue-500 font-semibold text-sm">TALK W/PARTNERS</span>
                       </Label>
                       <Label className="flex items-center gap-1.5 cursor-pointer">
                         <input
@@ -747,7 +719,7 @@ export default function SalesCallTranscriber() {
                           onChange={() => updateField("decisionMaker", "boss")}
                           className="h-3.5 w-3.5"
                         />
-                        <span className="text-blue-500 font-semibold text-xs">MY BOSS</span>
+                        <span className="text-blue-500 font-semibold text-sm">MY BOSS</span>
                       </Label>
                       <Label className="flex items-center gap-1.5 cursor-pointer">
                         <input
@@ -757,19 +729,19 @@ export default function SalesCallTranscriber() {
                           onChange={() => updateField("decisionMaker", "committee")}
                           className="h-3.5 w-3.5"
                         />
-                        <span className="text-blue-500 font-semibold text-xs">COMMITTEE</span>
+                        <span className="text-blue-500 font-semibold text-sm">COMMITTEE</span>
                       </Label>
                     </div>
                   </div>
 
                   {/* Notes - Compact */}
                   <div>
-                    <Label className="text-orange-500 font-semibold text-sm">WHAT DID I TELL THE PERSON?</Label>
+                    <Label className="text-orange-500 font-semibold text-base">WHAT DID I TELL THE PERSON?</Label>
                     <Textarea
                       value={formData.notes ?? ""}
                       onChange={(e) => updateField("notes", e.target.value)}
                       rows={3}
-                      className="mt-1 border-orange-200 focus:border-orange-400 text-sm"
+                      className={`mt-1 text-sm ${!formData.notes ? 'bg-red-50 border-orange-200' : 'border-green-500'} focus:border-orange-400`}
                       placeholder="Notes from the conversation..."
                     />
                   </div>
@@ -785,16 +757,16 @@ export default function SalesCallTranscriber() {
                   {transcripts.map((t) => (
                     <div
                       key={t.id}
-                      className="text-gray-800 bg-white p-2.5 rounded shadow-sm text-sm"
+                      className="text-gray-800 bg-white p-2.5 rounded shadow-sm text-base"
                     >
                       {t.text}
                     </div>
                   ))}
                   {interimTranscript && (
-                    <div className="text-gray-400 italic p-2.5 text-sm">{interimTranscript}</div>
+                    <div className="text-gray-400 italic p-2.5 text-base">{interimTranscript}</div>
                   )}
                   {transcripts.length === 0 && !interimTranscript && (
-                    <p className="text-gray-400 text-center mt-20 text-sm">
+                    <p className="text-gray-400 text-center mt-20 text-base">
                       Transcript will appear here...
                     </p>
                   )}

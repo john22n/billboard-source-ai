@@ -24,7 +24,6 @@ export const billboardLeadSchema = z.object({
   campaignLength: z
     .enum(["4WK", "8WK", "12WK", "24WK", "ANNUAL", "TBD"])
     .nullable(),
-  budgetRange: z.enum(["small", "midsize", "major"]).nullable(),
   decisionMaker: z
     .enum(["alone", "partners", "boss", "committee"])
     .nullable(),

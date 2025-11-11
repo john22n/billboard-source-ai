@@ -17,7 +17,6 @@ export interface BillboardFormData {
   targetArea: string | null;
   startMonth: string | null;
   campaignLength: "4WK" | "8WK" | "12WK" | "24WK" | "ANNUAL" | "TBD" | null;
-  budgetRange: "small" | "midsize" | "major" | null;
   decisionMaker: "alone" | "partners" | "boss" | "committee" | null;
   notes: string | null;
   confidence?: {
