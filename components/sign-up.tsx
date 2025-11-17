@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState } from 'react'
+import { useActionState, useEffect } from 'react'
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -19,12 +19,20 @@ interface SignupFormProps extends React.ComponentProps<"form"> {
 
 export function SignupForm({
   className,
+  onSuccess,
   ...props
 }: SignupFormProps) {
- const [state, formAction, isPending] = useActionState<ActionResponse, FormData>(
-  async (prevState, formData) => await signUp(prevState, formData),
-  initalState
-)
+  const [state, formAction, isPending] = useActionState<ActionResponse, FormData>(
+    async (prevState, formData) => await signUp(prevState, formData),
+    initalState
+  )
+
+  // Call onSuccess when signup is successful
+  useEffect(() => {
+    if (state?.success && onSuccess) {
+      onSuccess();
+    }
+  }, [state?.success, onSuccess]);
 
   return (
     <form action={formAction} className={cn("flex flex-col gap-6", className)} {...props}>
@@ -34,7 +42,6 @@ export function SignupForm({
           Enter the email below
         </p>
       </div>
-      
       <div className="grid gap-6">
         <div className="grid gap-3">
           <Label htmlFor="email">Email</Label>
@@ -52,7 +59,6 @@ export function SignupForm({
             </p>
           )}
         </div>
-        
         <div className="grid gap-3">
           <div className="flex items-center">
             <Label htmlFor="password">Password</Label>
@@ -70,7 +76,6 @@ export function SignupForm({
               {state.errors.password[0]}
             </p>
           )}
-          
           <div className="flex items-center">
             <Label htmlFor="confirmPassword">Confirm Password</Label>
           </div>
@@ -87,7 +92,6 @@ export function SignupForm({
             </p>
           )}
         </div>
-        
         <Button type="submit" className="w-full" disabled={isPending}>
           {isPending ? 'Loading user...' : 'Create User'}
         </Button>
