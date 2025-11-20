@@ -20,11 +20,11 @@ const billboardLeadSchema = z.object({
   businessDescription: z.string().nullable().describe("Short summary of what the business does."),
   yearsInBusiness: z.string().nullable().describe("Number of years the business has been operating."),
   billboardPurpose: z.string().nullable().describe("Purpose or goal of running billboard ads (e.g., brand awareness, event promotion)."),
-  targetCity: z.string().nullable().describe("Primary city where the lead wants billboards."),
-  targetArea: z.string().nullable().describe("Specific area, highway, or neighborhood where billboards are desired."),
+  targetCity: z.string().nullable().describe("City and state where the lead wants billboards, formatted as 'City, State' (e.g., 'Austin, TX' or 'Los Angeles, California')"),
+  targetArea: z.string().nullable().describe("ONLY extract county name OR highway/road name. Examples: 'Travis County', 'I-35', 'Highway 290'. DO NOT include city names here - cities go in targetCity field."),
   startMonth: z.string().nullable().describe("Preferred start month of the campaign. for example: January 2026"),
   campaignLength: z
-    .enum(["1 Mo", "2 Mo", "3 Mo", "5 Mo", "12 Mo", "TBD"])
+    .enum(["1 Mo", "2 Mo", "3 Mo", "6 Mo", "12 Mo", "TBD"])
     .nullable()
     .describe("Length of the campaign in months, or TBD if undecided."),
   decisionMaker: z
@@ -50,16 +50,18 @@ LEAD TYPE DEFINITIONS:
 - "panel-requestor": Wants specific locations or panels
 - "availer": Requests availability or inventory details
 
-BUDGET RANGE MAPPING:
-- "small": $750–18k/year or small market
-- "midsize": $1.5k–36k/year or mid market
-- "major": $3k–72k/year or large market
+LOCATION FORMATTING:
+- Always format targetCity as "City, State" (e.g., "Austin, TX" or "Los Angeles, California")
+- If only city is mentioned, include the state if you can infer it from context
+- Use standard 2-letter state abbreviations when possible (TX, CA, NY, etc.)
+- If multiple cities mentioned, include the primary target city
 
 EXTRACTION RULES:
 1. Extract only explicit or clearly implied data
 2. Leave fields null or empty when uncertain
 3. Infer leadType based on conversation intent
 4. Include confidence values based on clarity and completeness
+5. For targetCity, combine city and state into a single field
 `;
 
 export async function POST(req: Request) {
@@ -98,7 +100,6 @@ export async function POST(req: Request) {
       return Response.json(
         { error: "Field extraction failed", details: message },
         { status: 500 }
-    );
+      );
   }
 }
-

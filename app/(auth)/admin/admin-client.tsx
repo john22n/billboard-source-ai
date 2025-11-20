@@ -24,6 +24,7 @@ import { Trash2 } from "lucide-react"
 import { deleteUsers } from "@/actions/user-actions"
 import { useRouter } from "next/navigation"
 import type { User } from "@/db/schema"
+import { BillboardDataUploader } from "@/components/BillboardDataUploader"
 
 // Define a type for the cost parameter
 type CostValue = string | number | { toNumber?: () => number; toFixed?: () => string } | null | undefined
@@ -111,7 +112,7 @@ export default function AdminClient({
             back to Dashboard
           </Button>
           <h2 className="text-2xl font-semibold">
-            User Management
+            Admin Panel
           </h2>
           <Button
             variant="destructive"
@@ -124,10 +125,12 @@ export default function AdminClient({
           </Button>
         </div>
         <Tabs defaultValue="users" className="w-full">
-          <TabsList className="grid w-full grid-cols-2 mb-6">
+          <TabsList className="grid w-full grid-cols-3 mb-6">
             <TabsTrigger value="users">User Accounts</TabsTrigger>
             <TabsTrigger value="costs">User Costs</TabsTrigger>
+            <TabsTrigger value="billboard">Billboard Data</TabsTrigger>
           </TabsList>
+          
           <TabsContent value="users">
             <Table>
               <TableCaption>Manage registered users.</TableCaption>
@@ -165,6 +168,7 @@ export default function AdminClient({
               </TableBody>
             </Table>
           </TabsContent>
+          
           <TabsContent value="costs">
             <Table>
               <TableCaption>OpenAI usage cost per user.</TableCaption>
@@ -201,6 +205,13 @@ export default function AdminClient({
                 </TableRow>
               </TableFooter>
             </Table>
+          </TabsContent>
+
+          {/* NEW: Billboard Data Tab */}
+          <TabsContent value="billboard" className="w-full">
+            <div className="max-h-[600px] overflow-y-auto">
+              <BillboardDataUploader />
+            </div>
           </TabsContent>
         </Tabs>
       </div>
