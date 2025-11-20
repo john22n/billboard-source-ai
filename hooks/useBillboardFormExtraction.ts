@@ -13,7 +13,7 @@ export interface BillboardFormData {
   businessDescription: string | null;
   yearsInBusiness: string | null;
   billboardPurpose: string | null;
-  targetCity: string | null;
+  targetCityAndState: string | null;
   targetArea: string | null;
   startMonth: string | null;
   campaignLength: "4WK" | "8WK" | "12WK" | "24WK" | "ANNUAL" | "TBD" | null;
