@@ -13,7 +13,7 @@ export const billboardLeadSchema = z.object({
   businessDescription: z.string().nullable(),
   yearsInBusiness: z.string().nullable(),
   billboardPurpose: z.string().nullable(),
-  targetCity: z.string().nullable(),
+  targetCityAndState: z.string().nullable(),
   targetArea: z.string().nullable(),
   startMonth: z
     .enum([

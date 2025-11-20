@@ -66,7 +66,7 @@ export default function SalesCallTranscriber() {
     businessDescription: manualEdits.businessDescription ?? aiFormData?.businessDescription ?? "",
     yearsInBusiness: manualEdits.yearsInBusiness ?? aiFormData?.yearsInBusiness ?? "",
     billboardPurpose: manualEdits.billboardPurpose ?? aiFormData?.billboardPurpose ?? "",
-    targetCity: manualEdits.targetCity ?? aiFormData?.targetCity ?? "",
+    targetCityAndState: manualEdits.targetCityAndState ?? aiFormData?.targetCityAndState ?? "",
     targetArea: manualEdits.targetArea ?? aiFormData?.targetArea ?? "",
     startMonth: manualEdits.startMonth ?? aiFormData?.startMonth ?? "",
     campaignLength: manualEdits.campaignLength ?? aiFormData?.campaignLength ?? null,
@@ -750,11 +750,11 @@ export default function SalesCallTranscriber() {
                               <span className="text-sm">📍</span>Target City & State
                             </Label>
                             <Input
-                              value={formData.targetCity ?? ""}
-                              onChange={(e) => updateField("targetCity", e.target.value)}
+                              value={formData.targetCityAndState ?? ""}
+                              onChange={(e) => updateField("targetCityAndState", e.target.value)}
                               placeholder="Austin, TX"
                               className={`h-9 text-sm ${
-                                !formData.targetCity
+                                !formData.targetCityAndState
                                   ? 'border-slate-300 bg-slate-50 focus:border-orange-400'
                                   : 'border-green-500 bg-green-50/30 focus:border-green-600'
                               }`}
