@@ -1,13 +1,20 @@
 // app/api/billboard-pricing/route.ts
+// Combined RAG + API Route - All-in-one billboard pricing endpoint
 import { NextRequest, NextResponse } from 'next/server';
-import OpenAI from 'openai';
+import { embed, generateText } from 'ai';
+import { openai } from '@ai-sdk/openai';
 import { db } from '@/db';
 import { billboardLocations } from '@/db/schema';
 import { sql, and, ilike, or } from 'drizzle-orm';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+export const maxDuration = 30;
+
+// ============================================================================
+// AI MODELS
+// ============================================================================
+
+const embeddingModel = openai.embedding('text-embedding-3-small');
+const textModel = openai('gpt-4o-mini');
 
 // ============================================================================
 // TYPE DEFINITIONS
@@ -65,21 +72,23 @@ interface ExtractedLocation {
 }
 
 // ============================================================================
-// EXTRACTION FUNCTIONS
+// EXTRACTION FUNCTIONS (Using AI SDK)
 // ============================================================================
 
 /**
- * Use GPT to extract structured location data from transcript
+ * Extract location information from transcript using AI SDK
  */
-async function extractLocationInfo(transcript: string): Promise<ExtractedLocation> {
+async function extractLocationFromTranscript(transcript: string): Promise<ExtractedLocation> {
   try {
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+    const { text } = await generateText({
+      model: textModel,
       messages: [
         {
           role: 'system',
           content: `You are a location extraction assistant. Extract cities, states, and counties mentioned in the conversation.
           
+You MUST respond with ONLY a valid JSON object. No other text.
+
 Return a JSON object with this exact structure:
 {
   "cities": ["array of city names"],
@@ -96,21 +105,23 @@ Rules:
 - If no locations found, return empty arrays with "low" confidence
 
 Examples:
-- "Moundville, Alabama" → cities: ["Moundville"], states: ["AL"], confidence: "high"
-- "Dallas Texas" → cities: ["Dallas"], states: ["TX"], confidence: "high"
-- "somewhere in California" → cities: [], states: ["CA"], confidence: "medium"
-- "Austin, TX" → cities: ["Austin"], states: ["TX"], confidence: "high"`
+- "Moundville, Alabama" → {"cities": ["Moundville"], "states": ["AL"], "confidence": "high"}
+- "Dallas Texas" → {"cities": ["Dallas"], "states": ["TX"], "confidence": "high"}
+- "somewhere in California" → {"cities": [], "states": ["CA"], "confidence": "medium"}
+- "Austin, TX" → {"cities": ["Austin"], "states": ["TX"], "confidence": "high"}`
         },
         {
           role: 'user',
           content: transcript
         }
       ],
-      response_format: { type: 'json_object' },
       temperature: 0.3,
     });
 
-    const extracted = JSON.parse(response.choices[0].message.content || '{}');
+    // Extract JSON from response (handles cases where model adds markdown)
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    const jsonText = jsonMatch ? jsonMatch[0] : text;
+    const extracted = JSON.parse(jsonText);
     return {
       cities: extracted.cities || [],
       states: extracted.states || [],
@@ -124,17 +135,19 @@ Examples:
 }
 
 /**
- * Extract campaign preferences from transcript using GPT
+ * Extract campaign preferences using AI SDK
  * IMPORTANT: Prioritizes the MOST RECENT mentions of campaign length
  */
 async function extractCampaignPreferences(transcript: string): Promise<CampaignPreferences> {
   try {
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+    const { text } = await generateText({
+      model: textModel,
       messages: [
         {
           role: 'system',
           content: `You are a campaign preference extraction assistant. Analyze the conversation to extract billboard campaign preferences.
+
+You MUST respond with ONLY a valid JSON object. No other text.
 
 CRITICAL: If the user changes their mind or mentions multiple campaign lengths, ALWAYS use the MOST RECENT mention. Pay special attention to the END of the conversation.
 
@@ -153,9 +166,9 @@ Rules for desiredLength (USE ONLY THE MOST RECENT MENTION):
 - null if no campaign length mentioned at all
 
 Examples of handling changes:
-- "I want 1 month... actually, make that 12 months" → "52-week" (most recent)
-- "Show me 3 months... or maybe 6 months" → "24-week" (most recent)
-- "I need a year-long campaign" → "52-week"
+- "I want 1 month... actually, make that 12 months" → {"desiredLength": "52-week", "billboardTypes": ["all"], "confidence": "high"}
+- "Show me 3 months... or maybe 6 months" → {"desiredLength": "24-week", "billboardTypes": ["all"], "confidence": "high"}
+- "I need a year-long campaign" → {"desiredLength": "52-week", "billboardTypes": ["all"], "confidence": "high"}
 
 Rules for billboardTypes:
 - Include "static-bulletin" if they mention: "bulletin", "large billboard", "big board", "traditional", "static"
@@ -170,11 +183,13 @@ Set confidence to "high" if explicit mentions, "medium" if implied, "low" if unc
           content: transcript
         }
       ],
-      response_format: { type: 'json_object' },
       temperature: 0.2,
     });
 
-    const extracted = JSON.parse(response.choices[0].message.content || '{}');
+    // Extract JSON from response (handles cases where model adds markdown)
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    const jsonText = jsonMatch ? jsonMatch[0] : text;
+    const extracted = JSON.parse(jsonText);
     return {
       desiredLength: extracted.desiredLength || 'all',
       billboardTypes: extracted.billboardTypes || ['all'],
@@ -337,19 +352,18 @@ async function exactLocationSearch(
 }
 
 /**
- * Query billboard locations using semantic search
+ * Query billboard locations using semantic search with AI SDK embeddings
  */
 async function semanticSearch(
   query: string,
   topK: number = 5
 ): Promise<BillboardSearchResult[]> {
   try {
-    const queryEmbedding = await openai.embeddings.create({
-      model: 'text-embedding-3-small',
-      input: query,
+    // Use AI SDK to generate embedding
+    const { embedding: queryEmbedding } = await embed({
+      model: embeddingModel,
+      value: query,
     });
-
-    const embeddingVector = queryEmbedding.data[0].embedding;
 
     const results = await db.execute(sql`
       SELECT 
@@ -376,10 +390,10 @@ async function semanticSearch(
         digital_24_week,
         digital_52_week,
         digital_impressions,
-        1 - (embedding <=> ${JSON.stringify(embeddingVector)}::vector) as similarity
+        1 - (embedding <=> ${JSON.stringify(queryEmbedding)}::vector) as similarity
       FROM billboard_locations
       WHERE embedding IS NOT NULL
-      ORDER BY embedding <=> ${JSON.stringify(embeddingVector)}::vector
+      ORDER BY embedding <=> ${JSON.stringify(queryEmbedding)}::vector
       LIMIT ${topK}
     `);
 
@@ -606,25 +620,29 @@ function formatBillboardContext(
 
 /**
  * Intelligent hybrid search that prioritizes exact matches
+ * Main function to get billboard pricing context from transcript
  */
-async function getBillboardContextFromTranscript(transcript: string): Promise<string> {
+async function getBillboardPricing(transcript: string): Promise<string> {
   try {
+    console.log('🚀 Starting billboard pricing lookup');
+    
     // Extract both location info and campaign preferences in parallel
     const [locationInfo, preferences] = await Promise.all([
-      extractLocationInfo(transcript),
+      extractLocationFromTranscript(transcript),
       extractCampaignPreferences(transcript)
     ]);
 
-    console.log('Location info:', locationInfo);
-    console.log('Campaign preferences:', preferences);
+    console.log('📍 Location info:', locationInfo);
+    console.log('🎯 Campaign preferences:', preferences);
 
     let results: BillboardSearchResult[] = [];
 
     // Strategy: Prioritize exact matches, supplement with semantic search
     if (locationInfo.confidence === 'high' || locationInfo.confidence === 'medium') {
       // Try exact match first
-      console.log('Using exact match search');
+      console.log('🎯 Using exact match search');
       const exactResults = await exactLocationSearch(locationInfo);
+      console.log(`✅ Found ${exactResults.length} exact matches`);
       
       if (exactResults.length > 0) {
         // Found exact matches - use them first
@@ -632,7 +650,7 @@ async function getBillboardContextFromTranscript(transcript: string): Promise<st
         
         // If we have fewer than 5 results, supplement with semantic search
         if (results.length < 5) {
-          console.log('Supplementing with semantic search');
+          console.log('🔍 Supplementing with semantic search');
           const semanticResults = await semanticSearch(transcript, 5 - results.length);
           
           // Add semantic results that aren't duplicates
@@ -642,27 +660,36 @@ async function getBillboardContextFromTranscript(transcript: string): Promise<st
           );
           
           results = [...results, ...uniqueSemanticResults];
+          console.log(`📊 Total results: ${results.length}`);
         }
       } else {
         // No exact matches, fall back to semantic search
-        console.log('No exact matches, using semantic search');
+        console.log('⚠️ No exact matches, using semantic search');
         results = await semanticSearch(transcript, 5);
         results = results.filter(r => r.similarity && r.similarity > 0.5);
+        console.log(`✅ Found ${results.length} semantic matches`);
       }
     } else {
       // Low confidence - use semantic search only
-      console.log('Using semantic search only (low confidence)');
+      console.log('🔍 Using semantic search only (low confidence)');
       results = await semanticSearch(transcript, 5);
       results = results.filter(r => r.similarity && r.similarity > 0.5);
+      console.log(`✅ Found ${results.length} semantic matches`);
     }
 
     if (results.length === 0) {
+      console.log('❌ No results found');
       return '';
     }
 
+    console.log(`🎉 Returning ${results.length} billboard locations`);
     return formatBillboardContext(results, preferences);
   } catch (error) {
-    console.error('Error getting billboard context:', error);
+    console.error('❌ Error getting billboard context:', error);
+    if (error instanceof Error) {
+      console.error('Error details:', error.message);
+      console.error('Stack trace:', error.stack);
+    }
     return '';
   }
 }
@@ -673,27 +700,46 @@ async function getBillboardContextFromTranscript(transcript: string): Promise<st
 
 export async function POST(req: NextRequest) {
   try {
+    console.log('📨 Billboard pricing request received');
     const { transcript } = await req.json();
 
     if (!transcript || typeof transcript !== 'string') {
+      console.error('❌ Invalid transcript provided');
       return NextResponse.json(
         { error: 'Invalid transcript provided' },
         { status: 400 }
       );
     }
 
+    console.log('📝 Transcript length:', transcript.length);
+
     // Only process if transcript is long enough
     if (transcript.length < 100) {
+      console.log('⚠️ Transcript too short, returning empty context');
       return NextResponse.json({ context: '' });
     }
 
-    const context = await getBillboardContextFromTranscript(transcript);
+    // Use the AI SDK billboard pricing function
+    const context = await getBillboardPricing(transcript);
 
+    if (!context) {
+      console.log('⚠️ No pricing data found');
+      return NextResponse.json({ context: '' });
+    }
+
+    console.log('✅ Billboard pricing lookup complete');
     return NextResponse.json({ context });
   } catch (error) {
-    console.error('Error fetching billboard context:', error);
+    console.error('❌ Error in API route:', error);
+    if (error instanceof Error) {
+      console.error('Error message:', error.message);
+      console.error('Error stack:', error.stack);
+    }
     return NextResponse.json(
-      { error: 'Failed to fetch billboard pricing data' },
+      { 
+        error: 'Failed to fetch billboard pricing data',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      },
       { status: 500 }
     );
   }
