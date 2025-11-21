@@ -1,9 +1,9 @@
 'use client';
 
 // components/admin/BillboardDataUploader.tsx
+// Direct upload version (no Vercel Blob needed)
 import { useState } from 'react';
 import { Upload, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
-import { upload } from '@vercel/blob/client';
 
 export function BillboardDataUploader() {
   const [uploading, setUploading] = useState(false);
@@ -36,34 +36,31 @@ export function BillboardDataUploader() {
       return;
     }
 
-    // Check file size (optional - max 500MB for blob storage)
-    if (file.size > 500 * 1024 * 1024) {
-      setStatus({ type: 'error', message: 'File is too large (max 500MB)' });
+    // Check file size (max 50MB for direct upload)
+    if (file.size > 50 * 1024 * 1024) {
+      setStatus({ type: 'error', message: 'File is too large (max 50MB)' });
       setUploading(false);
       return;
     }
 
     try {
-      // Step 1: Upload to Vercel Blob Storage
-      setProgress('Uploading file to cloud storage...');
-      setStatus({ type: 'info', message: 'Uploading file to cloud storage...' });
-
-      const blob = await upload(file.name, file, {
-        access: 'public',
-        handleUploadUrl: '/api/billboard-data/upload-blob',
+      setProgress('Uploading and processing CSV (this may take several minutes)...');
+      setStatus({ 
+        type: 'info', 
+        message: 'Processing CSV and generating embeddings. This may take several minutes...' 
       });
 
-      console.log('✅ File uploaded to blob:', blob.url);
+      // Direct upload to API route with longer timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10 * 60 * 1000); // 10 minute timeout
 
-      // Step 2: Process the CSV from blob storage
-      setProgress('File uploaded. Processing and vectorizing data (this may take several minutes)...');
-      setStatus({ type: 'info', message: 'Processing CSV and generating embeddings. This may take several minutes...' });
-
-      const response = await fetch('/api/billboard-data/process', {
+      const response = await fetch('/api/admin/billboard-data/upload', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ blobUrl: blob.url }),
+        body: formData,
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
 
       const result = await response.json();
 
@@ -84,9 +81,20 @@ export function BillboardDataUploader() {
       }
     } catch (error) {
       console.error('Upload failed:', error);
+      
+      let errorMessage = 'Upload failed. Please try again.';
+      
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          errorMessage = 'Upload timed out. File may be too large. Try splitting it into smaller files.';
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
       setStatus({
         type: 'error',
-        message: error instanceof Error ? error.message : 'Upload failed. Please try again.',
+        message: errorMessage,
       });
       setProgress('');
     } finally {
@@ -148,7 +156,7 @@ export function BillboardDataUploader() {
                 </label>
                 <p className="pl-1">or drag and drop</p>
               </div>
-              <p className="text-xs text-gray-500">CSV file up to 500MB</p>
+              <p className="text-xs text-gray-500">CSV file up to 50MB</p>
             </div>
           </div>
         </div>
@@ -207,8 +215,7 @@ export function BillboardDataUploader() {
           How it works:
         </h3>
         <ol className="text-sm text-gray-600 space-y-1 list-decimal list-inside">
-          <li>Upload your billboard pricing CSV file (up to 500MB)</li>
-          <li>File is securely stored in cloud storage</li>
+          <li>Upload your billboard pricing CSV file (up to 50MB)</li>
           <li>System extracts location and pricing data</li>
           <li>Creates vector embeddings for semantic search</li>
           <li>Stores in database for instant RAG queries</li>
