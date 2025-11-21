@@ -313,9 +313,7 @@ export default function SalesCallTranscriber() {
       };
 
       // CRITICAL: Get BOTH audio streams from Twilio call
-      // @ts-expect-error - Twilio Call has these methods but types are incomplete
       const remoteStream = call.getRemoteStream(); // Caller's audio
-      // @ts-expect-error - Twilio Call has these methods but types are incomplete
       const localStream = call.getLocalStream(); // Agent's audio (you speaking)
 
       console.log('Remote stream:', remoteStream ? 'available' : 'not available');
