@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server';
 
 export async function POST(request: Request): Promise<NextResponse> {
   console.log('📤 Upload-blob route hit');
-
+  
   if (!process.env.BLOB_READ_WRITE_TOKEN) {
     console.error('❌ BLOB_READ_WRITE_TOKEN is not set');
     return NextResponse.json(
@@ -13,31 +13,37 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
   }
 
-  const body = (await request.json()) as HandleUploadBody;
-
   try {
+    const body = (await request.json()) as HandleUploadBody;
+    
     const jsonResponse = await handleUpload({
       body,
       request,
-      onBeforeGenerateToken: async (pathname) => {
+      onBeforeGenerateToken: async (pathname, clientPayload) => {
         console.log('📤 Generating upload token for:', pathname);
+        
         return {
-          allowedContentTypes: ['text/csv', 'application/vnd.ms-excel'],
+          allowedContentTypes: ['text/csv', 'application/vnd.ms-excel', 'text/plain'],
+          allowOverwrite: true, // Allow replacing existing files
           tokenPayload: JSON.stringify({
             uploadedAt: new Date().toISOString(),
           }),
         };
       },
-      onUploadCompleted: async ({ blob }) => {
+      onUploadCompleted: async ({ blob, tokenPayload }) => {
         console.log('✅ Blob upload completed:', blob.url);
+        console.log('📦 Blob pathname:', blob.pathname);
       },
     });
 
     return NextResponse.json(jsonResponse);
   } catch (error) {
     console.error('❌ Blob upload error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Error details:', errorMessage);
+    
     return NextResponse.json(
-      { error: (error as Error).message },
+      { error: errorMessage },
       { status: 400 }
     );
   }
