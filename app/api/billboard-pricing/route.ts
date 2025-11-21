@@ -1,697 +1,224 @@
-// app/api/billboard-pricing/route.ts
-// Combined RAG + API Route - All-in-one billboard pricing endpoint
+// app/api/admin/billboard-data/process/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { embed, generateText } from 'ai';
+import { parse } from 'csv-parse/sync';
+import { embedMany } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { db } from '@/db';
 import { billboardLocations } from '@/db/schema';
-import { sql, and, ilike, or } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 
-export const maxDuration = 30;
-
-// ============================================================================
-// AI MODELS
-// ============================================================================
+export const maxDuration = 60; // Requires Vercel Pro plan
+export const dynamic = 'force-dynamic';
 
 const embeddingModel = openai.embedding('text-embedding-3-small');
-const textModel = openai('gpt-4o-mini');
 
 // ============================================================================
 // TYPE DEFINITIONS
 // ============================================================================
 
-interface BillboardSearchResult {
+interface CSVRow {
+  CITY: string;
+  STATE: string;
+  COUNTY: string;
+  'MARKET INTELLIGENCE (GENERAL PLANNING RATES, STREET SPECIFIC RATES, & MISC INFO)': string;
+  'ARE THERE STATIC BULLETIN BILLBOARDS IN THIS CITY?': string;
+  'ARE THERE STATIC POSTER BILLBOARDS IN THIS CITY?': string;
+  'ARE THERE DIGITAL BILLBOARDS IN THIS CITY?': string;
+  'PERCENTAGE OF INVENTORY IN THIS CITY OWNED BY LAMAR': string;
+  'PERCENTAGE OF INVENTORY IN THIS CITY OWNED BY OUITFRONT': string;
+  'PERCENTAGE OF INVENTORY IN THIS CITY OWNED BY CLEAR CHANNEL': string;
+  'PERCENTAGE OF INVENTORY IN THIS CITY OWNED BY A VENDOR COMPANY THAT IS NOT LAMAR, OUTFRONT, OR CLEAR CHANNEL': string;
+  'AVERAGE 4-WEEK PRICE OF A STATIC BULLETIN AT A 12-WEEK (3 PERIOD) CAMPAIGN': string;
+  'AVERAGE 4-WEEK PRICE OF A STATIC BULLETIN AT A 24-WEEK (6 PERIOD) CAMPAIGN': string;
+  'AVERAGE 4-WEEK PRICE OF A STATIC BULLETIN AT A 52-WEEK ANNUAL (13 PERIOD) CAMPAIGN': string;
+  'AVERAGE WEEKLY IMPRESSIONS (VIEWS) OF A STATIC BULLETIN': string;
+  'AVERAGE 4-WEEK PRICE OF A STATIC POSTER AT A 12-WEEK (3 PERIOD) CAMPAIGN': string;
+  'AVERAGE 4-WEEK PRICE OF A STATIC POSTER AT A 24-WEEK (6 PERIOD) CAMPAIGN': string;
+  'AVERAGE 4-WEEK PRICE OF A STATIC POSTER AT A 52-WEEK ANNUAL (13 PERIOD) CAMPAIGN': string;
+  'AVERAGE WEEKLY IMPRESSIONS (VIEWS) OF A STATIC POSTER': string;
+  'AVERAGE 4-WEEK PRICE OF A DIGITAL BILLBOARD AT A 12-WEEK (3 PERIOD) CAMPAIGN': string;
+  'AVERAGE 4-WEEK PRICE OF A DIGITAL BILLBOARD AT A 24-WEEK (6 PERIOD) CAMPAIGN': string;
+  'AVERAGE 4-WEEK PRICE OF A DIGITAL BILLBOARD AT A 52-WEEK ANNUAL (13 PERIOD) CAMPAIGN': string;
+  'AVERAGE WEEKLY IMPRESSIONS (VIEWS) OF A DIGITAL BILLBOARD': string;
+}
+
+interface ProcessedRecord {
   city: string;
   state: string;
   county: string;
   marketIntelligence: string;
-  hasStaticBulletin: boolean | null;
-  hasStaticPoster: boolean | null;
-  hasDigital: boolean | null;
-  pricing: {
-    staticBulletin?: {
-      week12: number | null;
-      week24: number | null;
-      week52: number | null;
-      impressions: number | null;
-    };
-    staticPoster?: {
-      week12: number | null;
-      week24: number | null;
-      week52: number | null;
-      impressions: number | null;
-    };
-    digital?: {
-      week12: number | null;
-      week24: number | null;
-      week52: number | null;
-      impressions: number | null;
-    };
-  };
-  vendors: {
-    lamar: number | null;
-    outfront: number | null;
-    clearChannel: number | null;
-    other: number | null;
-  };
-  similarity?: number;
-  matchType?: 'exact' | 'semantic';
-}
-
-interface CampaignPreferences {
-  desiredLength: '12-week' | '24-week' | '52-week' | 'all' | null;
-  billboardTypes: ('static-bulletin' | 'static-poster' | 'digital' | 'all')[];
-  confidence: 'high' | 'medium' | 'low';
-}
-
-interface ExtractedLocation {
-  cities: string[];
-  states: string[];
-  counties: string[];
-  confidence: 'high' | 'medium' | 'low';
+  hasStaticBulletin: boolean;
+  hasStaticPoster: boolean;
+  hasDigital: boolean;
+  lamarPercentage: number;
+  outfrontPercentage: number;
+  clearChannelPercentage: number;
+  otherVendorPercentage: number;
+  staticBulletin12Week: number;
+  staticBulletin24Week: number;
+  staticBulletin52Week: number;
+  staticBulletinImpressions: number;
+  staticPoster12Week: number;
+  staticPoster24Week: number;
+  staticPoster52Week: number;
+  staticPosterImpressions: number;
+  digital12Week: number;
+  digital24Week: number;
+  digital52Week: number;
+  digitalImpressions: number;
+  textToEmbed: string;
 }
 
 // ============================================================================
-// EXTRACTION FUNCTIONS (Using AI SDK)
+// HELPER FUNCTIONS
 // ============================================================================
 
-/**
- * Extract location information from transcript using AI SDK
- */
-async function extractLocationFromTranscript(transcript: string): Promise<ExtractedLocation> {
-  try {
-    const { text } = await generateText({
-      model: textModel,
-      messages: [
-        {
-          role: 'system',
-          content: `You are a location extraction assistant. Extract cities, states, and counties mentioned in the conversation.
-          
-You MUST respond with ONLY a valid JSON object. No other text.
+function createEmbeddingText(record: CSVRow): string {
+  const parts = [
+    `City: ${record.CITY}`,
+    `State: ${record.STATE}`,
+    `County: ${record.COUNTY}`,
+  ];
 
-Return a JSON object with this exact structure:
-{
-  "cities": ["array of city names"],
-  "states": ["array of state names or abbreviations"],
-  "counties": ["array of county names"],
-  "confidence": "high" | "medium" | "low"
-}
-
-Rules:
-- Extract only explicitly mentioned locations
-- Normalize state names to abbreviations (e.g., "Alabama" -> "AL", "Texas" -> "TX", "California" -> "CA")
-- Remove "County" suffix from county names
-- Set confidence to "high" if city AND state mentioned, "medium" if only state/county, "low" if ambiguous
-- If no locations found, return empty arrays with "low" confidence
-
-Examples:
-- "Moundville, Alabama" → {"cities": ["Moundville"], "states": ["AL"], "confidence": "high"}
-- "Dallas Texas" → {"cities": ["Dallas"], "states": ["TX"], "confidence": "high"}
-- "somewhere in California" → {"cities": [], "states": ["CA"], "confidence": "medium"}
-- "Austin, TX" → {"cities": ["Austin"], "states": ["TX"], "confidence": "high"}`
-        },
-        {
-          role: 'user',
-          content: transcript
-        }
-      ],
-      temperature: 0.3,
-    });
-
-    // Extract JSON from response (handles cases where model adds markdown)
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    const jsonText = jsonMatch ? jsonMatch[0] : text;
-    const extracted = JSON.parse(jsonText);
-    return {
-      cities: extracted.cities || [],
-      states: extracted.states || [],
-      counties: extracted.counties || [],
-      confidence: extracted.confidence || 'low',
-    };
-  } catch (error) {
-    console.error('Error extracting location info:', error);
-    return { cities: [], states: [], counties: [], confidence: 'low' };
+  const available = [];
+  if (record['ARE THERE STATIC BULLETIN BILLBOARDS IN THIS CITY?']?.toUpperCase() === 'Y') {
+    available.push('static bulletin billboards');
   }
-}
-
-/**
- * Extract campaign preferences using AI SDK
- * IMPORTANT: Prioritizes the MOST RECENT mentions of campaign length
- */
-async function extractCampaignPreferences(transcript: string): Promise<CampaignPreferences> {
-  try {
-    const { text } = await generateText({
-      model: textModel,
-      messages: [
-        {
-          role: 'system',
-          content: `You are a campaign preference extraction assistant. Analyze the conversation to extract billboard campaign preferences.
-
-You MUST respond with ONLY a valid JSON object. No other text.
-
-CRITICAL: If the user changes their mind or mentions multiple campaign lengths, ALWAYS use the MOST RECENT mention. Pay special attention to the END of the conversation.
-
-Return a JSON object with this exact structure:
-{
-  "desiredLength": "12-week" | "24-week" | "52-week" | "all" | null,
-  "billboardTypes": ["static-bulletin" | "static-poster" | "digital" | "all"],
-  "confidence": "high" | "medium" | "low"
-}
-
-Rules for desiredLength (USE ONLY THE MOST RECENT MENTION):
-- "12-week" if user mentions: "1 month", "one month", "4 weeks", "short campaign", "12 weeks", "3 months", "quarterly"
-- "24-week" if user mentions: "2 months", "two months", "6 months", "half year", "24 weeks"
-- "52-week" if user mentions: "year", "12 months", "annual", "52 weeks", "long term", "full year"
-- "all" if user is unsure, exploring options, or says "not sure yet", "depends on price", "show me options"
-- null if no campaign length mentioned at all
-
-Examples of handling changes:
-- "I want 1 month... actually, make that 12 months" → {"desiredLength": "52-week", "billboardTypes": ["all"], "confidence": "high"}
-- "Show me 3 months... or maybe 6 months" → {"desiredLength": "24-week", "billboardTypes": ["all"], "confidence": "high"}
-- "I need a year-long campaign" → {"desiredLength": "52-week", "billboardTypes": ["all"], "confidence": "high"}
-
-Rules for billboardTypes:
-- Include "static-bulletin" if they mention: "bulletin", "large billboard", "big board", "traditional", "static"
-- Include "static-poster" if they mention: "poster", "smaller billboard", "poster board"
-- Include "digital" if they mention: "digital", "LED", "electronic", "rotating ads"
-- Return ["all"] if no specific type mentioned or they want to see all options
-
-Set confidence to "high" if explicit mentions, "medium" if implied, "low" if unclear.`
-        },
-        {
-          role: 'user',
-          content: transcript
-        }
-      ],
-      temperature: 0.2,
-    });
-
-    // Extract JSON from response (handles cases where model adds markdown)
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    const jsonText = jsonMatch ? jsonMatch[0] : text;
-    const extracted = JSON.parse(jsonText);
-    return {
-      desiredLength: extracted.desiredLength || 'all',
-      billboardTypes: extracted.billboardTypes || ['all'],
-      confidence: extracted.confidence || 'low',
-    };
-  } catch (error) {
-    console.error('Error extracting campaign preferences:', error);
-    return { 
-      desiredLength: 'all', 
-      billboardTypes: ['all'], 
-      confidence: 'low' 
-    };
+  if (record['ARE THERE STATIC POSTER BILLBOARDS IN THIS CITY?']?.toUpperCase() === 'Y') {
+    available.push('static poster billboards');
   }
-}
-
-// ============================================================================
-// SEARCH FUNCTIONS
-// ============================================================================
-
-/**
- * Perform exact database match for specific locations
- */
-async function exactLocationSearch(
-  locationInfo: ExtractedLocation
-): Promise<BillboardSearchResult[]> {
-  try {
-    const conditions = [];
-
-    // Build query conditions based on extracted info
-    if (locationInfo.cities.length > 0 && locationInfo.states.length > 0) {
-      // Most specific: city + state combination
-      for (const city of locationInfo.cities) {
-        for (const state of locationInfo.states) {
-          conditions.push(
-            and(
-              ilike(billboardLocations.city, city),
-              or(
-                ilike(billboardLocations.state, state),
-                ilike(billboardLocations.state, `%${state}%`)
-              )
-            )
-          );
-        }
-      }
-    } else if (locationInfo.counties.length > 0 && locationInfo.states.length > 0) {
-      // County + state combination
-      for (const county of locationInfo.counties) {
-        for (const state of locationInfo.states) {
-          conditions.push(
-            and(
-              ilike(billboardLocations.county, `%${county}%`),
-              or(
-                ilike(billboardLocations.state, state),
-                ilike(billboardLocations.state, `%${state}%`)
-              )
-            )
-          );
-        }
-      }
-    } else if (locationInfo.states.length > 0) {
-      // State only
-      conditions.push(
-        or(...locationInfo.states.map(state => 
-          or(
-            ilike(billboardLocations.state, state),
-            ilike(billboardLocations.state, `%${state}%`)
-          )
-        ))
-      );
-    } else if (locationInfo.counties.length > 0) {
-      // County only
-      conditions.push(
-        or(...locationInfo.counties.map(county => 
-          ilike(billboardLocations.county, `%${county}%`)
-        ))
-      );
-    }
-
-    if (conditions.length === 0) {
-      return [];
-    }
-
-    const results = await db
-      .select({
-        city: billboardLocations.city,
-        state: billboardLocations.state,
-        county: billboardLocations.county,
-        marketIntelligence: billboardLocations.marketIntelligence,
-        hasStaticBulletin: billboardLocations.hasStaticBulletin,
-        hasStaticPoster: billboardLocations.hasStaticPoster,
-        hasDigital: billboardLocations.hasDigital,
-        lamarPercentage: billboardLocations.lamarPercentage,
-        outfrontPercentage: billboardLocations.outfrontPercentage,
-        clearChannelPercentage: billboardLocations.clearChannelPercentage,
-        otherVendorPercentage: billboardLocations.otherVendorPercentage,
-        staticBulletin12Week: billboardLocations.staticBulletin12Week,
-        staticBulletin24Week: billboardLocations.staticBulletin24Week,
-        staticBulletin52Week: billboardLocations.staticBulletin52Week,
-        staticBulletinImpressions: billboardLocations.staticBulletinImpressions,
-        staticPoster12Week: billboardLocations.staticPoster12Week,
-        staticPoster24Week: billboardLocations.staticPoster24Week,
-        staticPoster52Week: billboardLocations.staticPoster52Week,
-        staticPosterImpressions: billboardLocations.staticPosterImpressions,
-        digital12Week: billboardLocations.digital12Week,
-        digital24Week: billboardLocations.digital24Week,
-        digital52Week: billboardLocations.digital52Week,
-        digitalImpressions: billboardLocations.digitalImpressions,
-      })
-      .from(billboardLocations)
-      .where(or(...conditions))
-      .limit(10);
-
-    return results.map(row => ({
-      city: row.city,
-      state: row.state,
-      county: row.county,
-      marketIntelligence: row.marketIntelligence || '',
-      hasStaticBulletin: row.hasStaticBulletin,
-      hasStaticPoster: row.hasStaticPoster,
-      hasDigital: row.hasDigital,
-      pricing: {
-        ...(row.hasStaticBulletin && {
-          staticBulletin: {
-            week12: row.staticBulletin12Week,
-            week24: row.staticBulletin24Week,
-            week52: row.staticBulletin52Week,
-            impressions: row.staticBulletinImpressions,
-          }
-        }),
-        ...(row.hasStaticPoster && {
-          staticPoster: {
-            week12: row.staticPoster12Week,
-            week24: row.staticPoster24Week,
-            week52: row.staticPoster52Week,
-            impressions: row.staticPosterImpressions,
-          }
-        }),
-        ...(row.hasDigital && {
-          digital: {
-            week12: row.digital12Week,
-            week24: row.digital24Week,
-            week52: row.digital52Week,
-            impressions: row.digitalImpressions,
-          }
-        }),
-      },
-      vendors: {
-        lamar: row.lamarPercentage,
-        outfront: row.outfrontPercentage,
-        clearChannel: row.clearChannelPercentage,
-        other: row.otherVendorPercentage,
-      },
-      matchType: 'exact' as const,
-      similarity: 1.0,
-    }));
-  } catch (error) {
-    console.error('Error in exact location search:', error);
-    return [];
-  }
-}
-
-/**
- * Query billboard locations using semantic search with AI SDK embeddings
- */
-async function semanticSearch(
-  query: string,
-  topK: number = 5
-): Promise<BillboardSearchResult[]> {
-  try {
-    // Use AI SDK to generate embedding
-    const { embedding: queryEmbedding } = await embed({
-      model: embeddingModel,
-      value: query,
-    });
-
-    const results = await db.execute(sql`
-      SELECT 
-        city,
-        state,
-        county,
-        market_intelligence,
-        has_static_bulletin,
-        has_static_poster,
-        has_digital,
-        lamar_percentage,
-        outfront_percentage,
-        clear_channel_percentage,
-        other_vendor_percentage,
-        static_bulletin_12_week,
-        static_bulletin_24_week,
-        static_bulletin_52_week,
-        static_bulletin_impressions,
-        static_poster_12_week,
-        static_poster_24_week,
-        static_poster_52_week,
-        static_poster_impressions,
-        digital_12_week,
-        digital_24_week,
-        digital_52_week,
-        digital_impressions,
-        1 - (embedding <=> ${JSON.stringify(queryEmbedding)}::vector) as similarity
-      FROM billboard_locations
-      WHERE embedding IS NOT NULL
-      ORDER BY embedding <=> ${JSON.stringify(queryEmbedding)}::vector
-      LIMIT ${topK}
-    `);
-
-    interface SemanticSearchRow {
-      city: string;
-      state: string;
-      county: string;
-      market_intelligence: string | null;
-      has_static_bulletin: boolean | null;
-      has_static_poster: boolean | null;
-      has_digital: boolean | null;
-      lamar_percentage: number | null;
-      outfront_percentage: number | null;
-      clear_channel_percentage: number | null;
-      other_vendor_percentage: number | null;
-      static_bulletin_12_week: number | null;
-      static_bulletin_24_week: number | null;
-      static_bulletin_52_week: number | null;
-      static_bulletin_impressions: number | null;
-      static_poster_12_week: number | null;
-      static_poster_24_week: number | null;
-      static_poster_52_week: number | null;
-      static_poster_impressions: number | null;
-      digital_12_week: number | null;
-      digital_24_week: number | null;
-      digital_52_week: number | null;
-      digital_impressions: number | null;
-      similarity: string;
-    }
-
-    const typedRows = results.rows as unknown as SemanticSearchRow[];
-
-    return typedRows.map((row) => ({
-      city: row.city,
-      state: row.state,
-      county: row.county,
-      marketIntelligence: row.market_intelligence || '',
-      hasStaticBulletin: row.has_static_bulletin,
-      hasStaticPoster: row.has_static_poster,
-      hasDigital: row.has_digital,
-      pricing: {
-        ...(row.has_static_bulletin && {
-          staticBulletin: {
-            week12: row.static_bulletin_12_week,
-            week24: row.static_bulletin_24_week,
-            week52: row.static_bulletin_52_week,
-            impressions: row.static_bulletin_impressions,
-          }
-        }),
-        ...(row.has_static_poster && {
-          staticPoster: {
-            week12: row.static_poster_12_week,
-            week24: row.static_poster_24_week,
-            week52: row.static_poster_52_week,
-            impressions: row.static_poster_impressions,
-          }
-        }),
-        ...(row.has_digital && {
-          digital: {
-            week12: row.digital_12_week,
-            week24: row.digital_24_week,
-            week52: row.digital_52_week,
-            impressions: row.digital_impressions,
-          }
-        }),
-      },
-      vendors: {
-        lamar: row.lamar_percentage || 0,
-        outfront: row.outfront_percentage || 0,
-        clearChannel: row.clear_channel_percentage || 0,
-        other: row.other_vendor_percentage || 0,
-      },
-      similarity: parseFloat(row.similarity),
-      matchType: 'semantic' as const,
-    }));
-  } catch (error) {
-    console.error('Error in semantic search:', error);
-    return [];
-  }
-}
-
-// ============================================================================
-// FORMATTING FUNCTION
-// ============================================================================
-
-/**
- * Format billboard data for LLM context with smart filtering based on preferences
- */
-function formatBillboardContext(
-  locations: BillboardSearchResult[], 
-  preferences?: CampaignPreferences
-): string {
-  if (locations.length === 0) {
-    return 'No billboard pricing data available for the mentioned locations.';
+  if (record['ARE THERE DIGITAL BILLBOARDS IN THIS CITY?']?.toUpperCase() === 'Y') {
+    available.push('digital billboards');
   }
 
-  const formatted = locations.map((loc, index) => {
-    const matchIndicator = loc.matchType === 'exact' ? '✓ Exact Match' : 
-                          loc.similarity && loc.similarity > 0.7 ? '~ High Confidence' : 
-                          '~ Possible Match';
-    
-    const parts = [
-      `\n**Location ${index + 1}: ${loc.city}, ${loc.state}** [${matchIndicator}]`,
-      `County: ${loc.county}`,
-    ];
+  if (available.length > 0) {
+    parts.push(`Available: ${available.join(', ')}`);
+  }
 
-    // Determine which billboard types to show
-    const showStaticBulletin = 
-      !preferences || 
-      preferences.billboardTypes.includes('all') || 
-      preferences.billboardTypes.includes('static-bulletin');
-    
-    const showStaticPoster = 
-      !preferences || 
-      preferences.billboardTypes.includes('all') || 
-      preferences.billboardTypes.includes('static-poster');
-    
-    const showDigital = 
-      !preferences || 
-      preferences.billboardTypes.includes('all') || 
-      preferences.billboardTypes.includes('digital');
+  const marketInfo = record['MARKET INTELLIGENCE (GENERAL PLANNING RATES, STREET SPECIFIC RATES, & MISC INFO)'];
+  if (marketInfo && marketInfo.trim() !== '') {
+    parts.push(`Market Info: ${marketInfo}`);
+  }
 
-    // Add availability based on preferences
-    const available = [];
-    if (loc.hasStaticBulletin && showStaticBulletin) available.push('Static Bulletin');
-    if (loc.hasStaticPoster && showStaticPoster) available.push('Static Poster');
-    if (loc.hasDigital && showDigital) available.push('Digital');
-    
-    if (available.length > 0) {
-      parts.push(`Available Billboard Types: ${available.join(', ')}`);
-    } else {
-      parts.push('No matching billboards available in this city');
-      return parts.join('\n');
-    }
+  const staticBulletin12 = parseInt(record['AVERAGE 4-WEEK PRICE OF A STATIC BULLETIN AT A 12-WEEK (3 PERIOD) CAMPAIGN'] || '0');
+  if (staticBulletin12 > 0) {
+    parts.push(`Static bulletin pricing starts at $${staticBulletin12} for 12-week campaign`);
+  }
 
-    // Add market intelligence
-    if (loc.marketIntelligence) {
-      parts.push(`Market Info: ${loc.marketIntelligence.substring(0, 200)}${loc.marketIntelligence.length > 200 ? '...' : ''}`);
-    }
+  const digital12 = parseInt(record['AVERAGE 4-WEEK PRICE OF A DIGITAL BILLBOARD AT A 12-WEEK (3 PERIOD) CAMPAIGN'] || '0');
+  if (digital12 > 0) {
+    parts.push(`Digital billboard pricing starts at $${digital12} for 12-week campaign`);
+  }
 
-    // Helper function to format pricing based on desired length
-    const formatPricing = (type: 'staticBulletin' | 'staticPoster' | 'digital', label: string) => {
-      const pricing = loc.pricing[type];
-      if (!pricing) return;
+  return parts.join('. ');
+}
 
-      const desiredLength = preferences?.desiredLength;
-      
-      parts.push(`\n${label} Pricing:`);
+function parseAndPrepareRecords(csvContent: string): ProcessedRecord[] {
+  console.log('📝 Parsing CSV...');
 
-      // Show specific length or all lengths
-      if (desiredLength === '12-week') {
-        parts.push(`  - 12-week campaign (3 months): $${(pricing.week12 || 0).toLocaleString()}`);
-        if (pricing.impressions) {
-          parts.push(`  - Avg weekly impressions: ${pricing.impressions.toLocaleString()}`);
-        }
-      } else if (desiredLength === '24-week') {
-        parts.push(`  - 24-week campaign (6 months): $${(pricing.week24 || 0).toLocaleString()}`);
-        if (pricing.impressions) {
-          parts.push(`  - Avg weekly impressions: ${pricing.impressions.toLocaleString()}`);
-        }
-      } else if (desiredLength === '52-week') {
-        parts.push(`  - 52-week campaign (1 year): $${(pricing.week52 || 0).toLocaleString()}`);
-        if (pricing.impressions) {
-          parts.push(`  - Avg weekly impressions: ${pricing.impressions.toLocaleString()}`);
-        }
-      } else {
-        // Show all options
-        parts.push(`  - 12-week campaign (3 months): $${(pricing.week12 || 0).toLocaleString()}`);
-        parts.push(`  - 24-week campaign (6 months): $${(pricing.week24 || 0).toLocaleString()}`);
-        parts.push(`  - 52-week campaign (1 year): $${(pricing.week52 || 0).toLocaleString()}`);
-        if (pricing.impressions) {
-          parts.push(`  - Avg weekly impressions: ${pricing.impressions.toLocaleString()}`);
-        }
-      }
-    };
-
-    // Add pricing for each type based on preferences
-    if (loc.pricing.staticBulletin && showStaticBulletin) {
-      formatPricing('staticBulletin', 'Static Bulletin');
-    }
-
-    if (loc.pricing.digital && showDigital) {
-      formatPricing('digital', 'Digital Billboard');
-    }
-
-    if (loc.pricing.staticPoster && showStaticPoster) {
-      formatPricing('staticPoster', 'Static Poster');
-    }
-
-    // Add vendor info
-    const vendors = [];
-    if (loc.vendors.lamar !== null && loc.vendors.lamar > 0) vendors.push(`Lamar (${loc.vendors.lamar}%)`);
-    if (loc.vendors.outfront !== null && loc.vendors.outfront > 0) vendors.push(`Outfront (${loc.vendors.outfront}%)`);
-    if (loc.vendors.clearChannel !== null && loc.vendors.clearChannel > 0) vendors.push(`Clear Channel (${loc.vendors.clearChannel}%)`);
-    if (loc.vendors.other !== null && loc.vendors.other > 0) vendors.push(`Other (${loc.vendors.other}%)`);
-    
-    if (vendors.length > 0) {
-      parts.push(`\nVendor Distribution: ${vendors.join(', ')}`);
-    }
-
-    return parts.join('\n');
+  const records: CSVRow[] = parse(csvContent, {
+    columns: true,
+    skip_empty_lines: true,
+    trim: true,
   });
 
-  // Add preference summary if provided
-  let contextHeader = '';
-  if (preferences && preferences.confidence !== 'low') {
-    const lengthText = preferences.desiredLength === 'all' 
-      ? 'showing all campaign lengths' 
-      : `focused on ${preferences.desiredLength} campaigns`;
-    
-    const typeText = preferences.billboardTypes.includes('all')
-      ? 'all billboard types'
-      : preferences.billboardTypes.join(', ');
-    
-    contextHeader = `[Pricing filtered: ${lengthText}, ${typeText}]\n\n`;
-  }
+  console.log(`✅ Found ${records.length} locations in CSV`);
 
-  return contextHeader + formatted.join('\n\n---\n');
+  return records.map((record) => ({
+    city: record.CITY || '',
+    state: record.STATE || '',
+    county: record.COUNTY || '',
+    marketIntelligence: record['MARKET INTELLIGENCE (GENERAL PLANNING RATES, STREET SPECIFIC RATES, & MISC INFO)'] || '',
+
+    hasStaticBulletin: record['ARE THERE STATIC BULLETIN BILLBOARDS IN THIS CITY?']?.toUpperCase() === 'Y',
+    hasStaticPoster: record['ARE THERE STATIC POSTER BILLBOARDS IN THIS CITY?']?.toUpperCase() === 'Y',
+    hasDigital: record['ARE THERE DIGITAL BILLBOARDS IN THIS CITY?']?.toUpperCase() === 'Y',
+
+    lamarPercentage: parseInt(record['PERCENTAGE OF INVENTORY IN THIS CITY OWNED BY LAMAR'] || '0'),
+    outfrontPercentage: parseInt(record['PERCENTAGE OF INVENTORY IN THIS CITY OWNED BY OUITFRONT'] || '0'),
+    clearChannelPercentage: parseInt(record['PERCENTAGE OF INVENTORY IN THIS CITY OWNED BY CLEAR CHANNEL'] || '0'),
+    otherVendorPercentage: parseInt(record['PERCENTAGE OF INVENTORY IN THIS CITY OWNED BY A VENDOR COMPANY THAT IS NOT LAMAR, OUTFRONT, OR CLEAR CHANNEL'] || '0'),
+
+    staticBulletin12Week: parseInt(record['AVERAGE 4-WEEK PRICE OF A STATIC BULLETIN AT A 12-WEEK (3 PERIOD) CAMPAIGN'] || '0'),
+    staticBulletin24Week: parseInt(record['AVERAGE 4-WEEK PRICE OF A STATIC BULLETIN AT A 24-WEEK (6 PERIOD) CAMPAIGN'] || '0'),
+    staticBulletin52Week: parseInt(record['AVERAGE 4-WEEK PRICE OF A STATIC BULLETIN AT A 52-WEEK ANNUAL (13 PERIOD) CAMPAIGN'] || '0'),
+    staticBulletinImpressions: parseInt(record['AVERAGE WEEKLY IMPRESSIONS (VIEWS) OF A STATIC BULLETIN'] || '0'),
+
+    staticPoster12Week: parseInt(record['AVERAGE 4-WEEK PRICE OF A STATIC POSTER AT A 12-WEEK (3 PERIOD) CAMPAIGN'] || '0'),
+    staticPoster24Week: parseInt(record['AVERAGE 4-WEEK PRICE OF A STATIC POSTER AT A 24-WEEK (6 PERIOD) CAMPAIGN'] || '0'),
+    staticPoster52Week: parseInt(record['AVERAGE 4-WEEK PRICE OF A STATIC POSTER AT A 52-WEEK ANNUAL (13 PERIOD) CAMPAIGN'] || '0'),
+    staticPosterImpressions: parseInt(record['AVERAGE WEEKLY IMPRESSIONS (VIEWS) OF A STATIC POSTER'] || '0'),
+
+    digital12Week: parseInt(record['AVERAGE 4-WEEK PRICE OF A DIGITAL BILLBOARD AT A 12-WEEK (3 PERIOD) CAMPAIGN'] || '0'),
+    digital24Week: parseInt(record['AVERAGE 4-WEEK PRICE OF A DIGITAL BILLBOARD AT A 24-WEEK (6 PERIOD) CAMPAIGN'] || '0'),
+    digital52Week: parseInt(record['AVERAGE 4-WEEK PRICE OF A DIGITAL BILLBOARD AT A 52-WEEK ANNUAL (13 PERIOD) CAMPAIGN'] || '0'),
+    digitalImpressions: parseInt(record['AVERAGE WEEKLY IMPRESSIONS (VIEWS) OF A DIGITAL BILLBOARD'] || '0'),
+
+    textToEmbed: createEmbeddingText(record),
+  }));
 }
 
-// ============================================================================
-// MAIN HYBRID SEARCH FUNCTION
-// ============================================================================
+async function processBillboardCSV(csvContent: string) {
+  const records = parseAndPrepareRecords(csvContent);
 
-/**
- * Intelligent hybrid search that prioritizes exact matches
- * Main function to get billboard pricing context from transcript
- */
-async function getBillboardPricing(transcript: string): Promise<string> {
-  try {
-    console.log('🚀 Starting billboard pricing lookup');
-    
-    // Extract both location info and campaign preferences in parallel
-    const [locationInfo, preferences] = await Promise.all([
-      extractLocationFromTranscript(transcript),
-      extractCampaignPreferences(transcript)
-    ]);
+  const processedData = [];
+  const batchSize = 50; // Reduced for Vercel
 
-    console.log('📍 Location info:', locationInfo);
-    console.log('🎯 Campaign preferences:', preferences);
+  for (let i = 0; i < records.length; i += batchSize) {
+    const batch = records.slice(i, i + batchSize);
+    console.log(`🔄 Processing batch ${i / batchSize + 1}/${Math.ceil(records.length / batchSize)} (${batch.length} records)...`);
 
-    let results: BillboardSearchResult[] = [];
+    try {
+      const textsToEmbed = batch.map(record => record.textToEmbed);
 
-    // Strategy: Prioritize exact matches, supplement with semantic search
-    if (locationInfo.confidence === 'high' || locationInfo.confidence === 'medium') {
-      // Try exact match first
-      console.log('🎯 Using exact match search');
-      const exactResults = await exactLocationSearch(locationInfo);
-      console.log(`✅ Found ${exactResults.length} exact matches`);
-      
-      if (exactResults.length > 0) {
-        // Found exact matches - use them first
-        results = exactResults.slice(0, 5);
-        
-        // If we have fewer than 5 results, supplement with semantic search
-        if (results.length < 5) {
-          console.log('🔍 Supplementing with semantic search');
-          const semanticResults = await semanticSearch(transcript, 5 - results.length);
-          
-          // Add semantic results that aren't duplicates
-          const existingKeys = new Set(results.map(r => `${r.city}-${r.state}`));
-          const uniqueSemanticResults = semanticResults.filter(r => 
-            !existingKeys.has(`${r.city}-${r.state}`) && r.similarity && r.similarity > 0.6
-          );
-          
-          results = [...results, ...uniqueSemanticResults];
-          console.log(`📊 Total results: ${results.length}`);
-        }
-      } else {
-        // No exact matches, fall back to semantic search
-        console.log('⚠️ No exact matches, using semantic search');
-        results = await semanticSearch(transcript, 5);
-        results = results.filter(r => r.similarity && r.similarity > 0.5);
-        console.log(`✅ Found ${results.length} semantic matches`);
-      }
-    } else {
-      // Low confidence - use semantic search only
-      console.log('🔍 Using semantic search only (low confidence)');
-      results = await semanticSearch(transcript, 5);
-      results = results.filter(r => r.similarity && r.similarity > 0.5);
-      console.log(`✅ Found ${results.length} semantic matches`);
+      console.log(`🤖 Generating ${textsToEmbed.length} embeddings...`);
+      const { embeddings } = await embedMany({
+        model: embeddingModel,
+        values: textsToEmbed,
+      });
+
+      console.log(`✅ Generated ${embeddings.length} embeddings`);
+
+      const batchWithEmbeddings = batch.map((record, index) => ({
+        city: record.city,
+        state: record.state,
+        county: record.county,
+        marketIntelligence: record.marketIntelligence,
+        hasStaticBulletin: record.hasStaticBulletin,
+        hasStaticPoster: record.hasStaticPoster,
+        hasDigital: record.hasDigital,
+        lamarPercentage: record.lamarPercentage,
+        outfrontPercentage: record.outfrontPercentage,
+        clearChannelPercentage: record.clearChannelPercentage,
+        otherVendorPercentage: record.otherVendorPercentage,
+        staticBulletin12Week: record.staticBulletin12Week,
+        staticBulletin24Week: record.staticBulletin24Week,
+        staticBulletin52Week: record.staticBulletin52Week,
+        staticBulletinImpressions: record.staticBulletinImpressions,
+        staticPoster12Week: record.staticPoster12Week,
+        staticPoster24Week: record.staticPoster24Week,
+        staticPoster52Week: record.staticPoster52Week,
+        staticPosterImpressions: record.staticPosterImpressions,
+        digital12Week: record.digital12Week,
+        digital24Week: record.digital24Week,
+        digital52Week: record.digital52Week,
+        digitalImpressions: record.digitalImpressions,
+        embedding: embeddings[index],
+      }));
+
+      processedData.push(...batchWithEmbeddings);
+
+    } catch (error) {
+      console.error(`❌ Error processing batch ${i / batchSize + 1}:`, error);
     }
 
-    if (results.length === 0) {
-      console.log('❌ No results found');
-      return '';
+    if (i + batchSize < records.length) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
-
-    console.log(`🎉 Returning ${results.length} billboard locations`);
-    return formatBillboardContext(results, preferences);
-  } catch (error) {
-    console.error('❌ Error getting billboard context:', error);
-    if (error instanceof Error) {
-      console.error('Error details:', error.message);
-      console.error('Stack trace:', error.stack);
-    }
-    return '';
   }
+
+  console.log(`🎉 Successfully processed ${processedData.length}/${records.length} locations`);
+  return processedData;
 }
 
 // ============================================================================
@@ -700,45 +227,82 @@ async function getBillboardPricing(transcript: string): Promise<string> {
 
 export async function POST(req: NextRequest) {
   try {
-    console.log('📨 Billboard pricing request received');
-    const { transcript } = await req.json();
+    const { blobUrl } = await req.json();
 
-    if (!transcript || typeof transcript !== 'string') {
-      console.error('❌ Invalid transcript provided');
+    if (!blobUrl) {
+      console.error('❌ No blob URL provided');
       return NextResponse.json(
-        { error: 'Invalid transcript provided' },
+        { error: 'No blob URL provided' },
         { status: 400 }
       );
     }
 
-    console.log('📝 Transcript length:', transcript.length);
+    console.log('📥 Fetching CSV from blob storage:', blobUrl);
 
-    // Only process if transcript is long enough
-    if (transcript.length < 100) {
-      console.log('⚠️ Transcript too short, returning empty context');
-      return NextResponse.json({ context: '' });
+    // Fetch the CSV from blob storage
+    const response = await fetch(blobUrl);
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch CSV from blob storage: ${response.statusText}`);
     }
 
-    // Use the AI SDK billboard pricing function
-    const context = await getBillboardPricing(transcript);
+    const csvContent = await response.text();
+    console.log('📝 CSV fetched, size:', csvContent.length, 'bytes');
 
-    if (!context) {
-      console.log('⚠️ No pricing data found');
-      return NextResponse.json({ context: '' });
+    if (!csvContent || csvContent.trim().length === 0) {
+      console.error('❌ CSV file is empty');
+      return NextResponse.json(
+        { error: 'CSV file is empty' },
+        { status: 400 }
+      );
     }
 
-    console.log('✅ Billboard pricing lookup complete');
-    return NextResponse.json({ context });
+    // Clear existing data
+    console.log('🗑️  Clearing existing billboard data...');
+    await db.execute(sql`TRUNCATE TABLE billboard_locations RESTART IDENTITY CASCADE`);
+    console.log('✅ Existing data cleared');
+
+    // Process CSV and generate embeddings
+    const vectors = await processBillboardCSV(csvContent);
+
+    if (vectors.length === 0) {
+      console.error('❌ No valid records found in CSV');
+      return NextResponse.json(
+        { error: 'No valid records found in CSV' },
+        { status: 400 }
+      );
+    }
+
+    console.log(`💾 Inserting ${vectors.length} records into database...`);
+
+    // Insert in batches
+    const batchSize = 500;
+    let inserted = 0;
+
+    for (let i = 0; i < vectors.length; i += batchSize) {
+      const batch = vectors.slice(i, i + batchSize);
+      await db.insert(billboardLocations).values(batch);
+      inserted += batch.length;
+      console.log(`✅ Inserted ${inserted}/${vectors.length} records`);
+    }
+
+    console.log(`🎉 Successfully completed upload!`);
+
+    return NextResponse.json({
+      success: true,
+      message: `Successfully processed and stored ${vectors.length} billboard locations`,
+      count: vectors.length,
+    });
   } catch (error) {
-    console.error('❌ Error in API route:', error);
+    console.error('❌ Billboard CSV processing error:', error);
     if (error instanceof Error) {
-      console.error('Error message:', error.message);
-      console.error('Error stack:', error.stack);
+      console.error('Error details:', error.message);
+      console.error('Stack trace:', error.stack);
     }
     return NextResponse.json(
-      { 
-        error: 'Failed to fetch billboard pricing data',
-        message: error instanceof Error ? error.message : 'Unknown error'
+      {
+        error: 'Failed to process CSV',
+        details: error instanceof Error ? error.message : 'Unknown error'
       },
       { status: 500 }
     );

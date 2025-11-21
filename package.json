@@ -50,6 +50,7 @@
     "@tabler/icons-react": "^3.34.0",
     "@tanstack/react-table": "^8.21.3",
     "@twilio/voice-sdk": "^2.16.0",
+    "@vercel/blob": "^2.0.0",
     "ai": "^5.0.68",
     "bcrypt": "^6.0.0",
     "class-variance-authority": "^0.7.1",

@@ -3,6 +3,7 @@
 // components/admin/BillboardDataUploader.tsx
 import { useState } from 'react';
 import { Upload, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
+import { upload } from '@vercel/blob/client';
 
 export function BillboardDataUploader() {
   const [uploading, setUploading] = useState(false);
@@ -15,7 +16,7 @@ export function BillboardDataUploader() {
   async function handleUpload(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setUploading(true);
-    setStatus({ type: 'info', message: 'Processing CSV file...' });
+    setStatus({ type: 'info', message: 'Starting upload...' });
     setProgress('');
 
     const formData = new FormData(e.currentTarget);
@@ -35,22 +36,33 @@ export function BillboardDataUploader() {
       return;
     }
 
-    // Check file size (optional - max 100MB)
-    if (file.size > 100 * 1024 * 1024) {
-      setStatus({ type: 'error', message: 'File is too large (max 100MB)' });
+    // Check file size (optional - max 500MB for blob storage)
+    if (file.size > 500 * 1024 * 1024) {
+      setStatus({ type: 'error', message: 'File is too large (max 500MB)' });
       setUploading(false);
       return;
     }
 
     try {
-      setProgress('Uploading and processing (this may take several minutes)...');
-      
-      const uploadFormData = new FormData();
-      uploadFormData.append('file', file);
-      
-      const response = await fetch('/api/billboard-data/upload', {
+      // Step 1: Upload to Vercel Blob Storage
+      setProgress('Uploading file to cloud storage...');
+      setStatus({ type: 'info', message: 'Uploading file to cloud storage...' });
+
+      const blob = await upload(file.name, file, {
+        access: 'public',
+        handleUploadUrl: '/api/admin/billboard-data/upload-blob',
+      });
+
+      console.log('✅ File uploaded to blob:', blob.url);
+
+      // Step 2: Process the CSV from blob storage
+      setProgress('File uploaded. Processing and vectorizing data (this may take several minutes)...');
+      setStatus({ type: 'info', message: 'Processing CSV and generating embeddings. This may take several minutes...' });
+
+      const response = await fetch('/api/admin/billboard-data/process', {
         method: 'POST',
-        body: uploadFormData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ blobUrl: blob.url }),
       });
 
       const result = await response.json();
@@ -60,23 +72,25 @@ export function BillboardDataUploader() {
           type: 'success',
           message: `Success! ${result.count} locations processed and vectorized.`,
         });
+        setProgress('');
         // Reset form
         (e.target as HTMLFormElement).reset();
       } else {
         setStatus({
           type: 'error',
-          message: result.error || 'Failed to process CSV',
+          message: result.error || result.details || 'Failed to process CSV',
         });
+        setProgress('');
       }
     } catch (error) {
       console.error('Upload failed:', error);
       setStatus({
         type: 'error',
-        message: 'Upload failed. Please try again.',
+        message: error instanceof Error ? error.message : 'Upload failed. Please try again.',
       });
+      setProgress('');
     } finally {
       setUploading(false);
-      setProgress('');
     }
   }
 
@@ -118,28 +132,30 @@ export function BillboardDataUploader() {
                     disabled={uploading}
                     required
                     onChange={(e) => {
-                      // Validate file on change
                       const file = e.target.files?.[0];
-                      if (file && !file.name.endsWith('.csv')) {
+                      if (file && !file.name.toLowerCase().endsWith('.csv')) {
                         e.target.value = '';
                         setStatus({
                           type: 'error',
                           message: 'Please select a CSV file'
                         });
+                      } else {
+                        // Clear any previous errors when valid file is selected
+                        setStatus({ type: null, message: '' });
                       }
                     }}
                   />
                 </label>
                 <p className="pl-1">or drag and drop</p>
               </div>
-              <p className="text-xs text-gray-500">CSV file only</p>
+              <p className="text-xs text-gray-500">CSV file up to 500MB</p>
             </div>
           </div>
         </div>
 
         {progress && (
-          <div className="flex items-center gap-2 text-sm text-blue-600">
-            <Loader2 className="h-4 w-4 animate-spin" />
+          <div className="flex items-center gap-2 text-sm text-blue-600 bg-blue-50 p-3 rounded-lg">
+            <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
             <span>{progress}</span>
           </div>
         )}
@@ -148,10 +164,10 @@ export function BillboardDataUploader() {
           <div
             className={`p-4 rounded-lg flex items-start gap-3 ${
               status.type === 'success'
-                ? 'bg-green-50 text-green-800'
+                ? 'bg-green-50 text-green-800 border border-green-200'
                 : status.type === 'error'
-                ? 'bg-red-50 text-red-800'
-                : 'bg-blue-50 text-blue-800'
+                ? 'bg-red-50 text-red-800 border border-red-200'
+                : 'bg-blue-50 text-blue-800 border border-blue-200'
             }`}
           >
             {status.type === 'success' && (
@@ -186,17 +202,26 @@ export function BillboardDataUploader() {
         </button>
       </form>
 
-      <div className="mt-8 p-4 bg-gray-50 rounded-lg">
+      <div className="mt-8 p-4 bg-gray-50 rounded-lg border border-gray-200">
         <h3 className="text-sm font-semibold text-gray-900 mb-2">
           How it works:
         </h3>
         <ol className="text-sm text-gray-600 space-y-1 list-decimal list-inside">
-          <li>Upload your billboard pricing CSV file</li>
+          <li>Upload your billboard pricing CSV file (up to 500MB)</li>
+          <li>File is securely stored in cloud storage</li>
           <li>System extracts location and pricing data</li>
           <li>Creates vector embeddings for semantic search</li>
           <li>Stores in database for instant RAG queries</li>
           <li>AI automatically retrieves pricing during transcriptions</li>
         </ol>
+
+        <div className="mt-4 pt-4 border-t border-gray-200">
+          <h4 className="text-xs font-semibold text-gray-900 mb-1">Note:</h4>
+          <p className="text-xs text-gray-600">
+            Processing time depends on file size. Large files (10,000+ rows) may take 5-10 minutes.
+            The page will update automatically when complete.
+          </p>
+        </div>
       </div>
     </div>
   );

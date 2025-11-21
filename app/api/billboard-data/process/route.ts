@@ -1,4 +1,4 @@
-// app/api/admin/billboard-data/upload/route.ts
+// app/api/admin/billboard-data/process/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { parse } from 'csv-parse/sync';
 import { embedMany } from 'ai';
@@ -7,7 +7,9 @@ import { db } from '@/db';
 import { billboardLocations } from '@/db/schema';
 import { sql } from 'drizzle-orm';
 
-// AI SDK embedding model
+export const maxDuration = 60; // Requires Vercel Pro plan
+export const dynamic = 'force-dynamic';
+
 const embeddingModel = openai.embedding('text-embedding-3-small');
 
 // ============================================================================
@@ -92,7 +94,7 @@ function createEmbeddingText(record: CSVRow): string {
   if (record['ARE THERE DIGITAL BILLBOARDS IN THIS CITY?']?.toUpperCase() === 'Y') {
     available.push('digital billboards');
   }
-  
+
   if (available.length > 0) {
     parts.push(`Available: ${available.join(', ')}`);
   }
@@ -122,7 +124,7 @@ function createEmbeddingText(record: CSVRow): string {
  */
 function parseAndPrepareRecords(csvContent: string): ProcessedRecord[] {
   console.log('📝 Parsing CSV...');
-  
+
   const records: CSVRow[] = parse(csvContent, {
     columns: true,
     skip_empty_lines: true,
@@ -130,37 +132,37 @@ function parseAndPrepareRecords(csvContent: string): ProcessedRecord[] {
   });
 
   console.log(`✅ Found ${records.length} locations in CSV`);
-  
+
   return records.map((record) => ({
     city: record.CITY || '',
     state: record.STATE || '',
     county: record.COUNTY || '',
     marketIntelligence: record['MARKET INTELLIGENCE (GENERAL PLANNING RATES, STREET SPECIFIC RATES, & MISC INFO)'] || '',
-    
+
     hasStaticBulletin: record['ARE THERE STATIC BULLETIN BILLBOARDS IN THIS CITY?']?.toUpperCase() === 'Y',
     hasStaticPoster: record['ARE THERE STATIC POSTER BILLBOARDS IN THIS CITY?']?.toUpperCase() === 'Y',
     hasDigital: record['ARE THERE DIGITAL BILLBOARDS IN THIS CITY?']?.toUpperCase() === 'Y',
-    
+
     lamarPercentage: parseInt(record['PERCENTAGE OF INVENTORY IN THIS CITY OWNED BY LAMAR'] || '0'),
     outfrontPercentage: parseInt(record['PERCENTAGE OF INVENTORY IN THIS CITY OWNED BY OUITFRONT'] || '0'),
     clearChannelPercentage: parseInt(record['PERCENTAGE OF INVENTORY IN THIS CITY OWNED BY CLEAR CHANNEL'] || '0'),
     otherVendorPercentage: parseInt(record['PERCENTAGE OF INVENTORY IN THIS CITY OWNED BY A VENDOR COMPANY THAT IS NOT LAMAR, OUTFRONT, OR CLEAR CHANNEL'] || '0'),
-    
+
     staticBulletin12Week: parseInt(record['AVERAGE 4-WEEK PRICE OF A STATIC BULLETIN AT A 12-WEEK (3 PERIOD) CAMPAIGN'] || '0'),
     staticBulletin24Week: parseInt(record['AVERAGE 4-WEEK PRICE OF A STATIC BULLETIN AT A 24-WEEK (6 PERIOD) CAMPAIGN'] || '0'),
     staticBulletin52Week: parseInt(record['AVERAGE 4-WEEK PRICE OF A STATIC BULLETIN AT A 52-WEEK ANNUAL (13 PERIOD) CAMPAIGN'] || '0'),
     staticBulletinImpressions: parseInt(record['AVERAGE WEEKLY IMPRESSIONS (VIEWS) OF A STATIC BULLETIN'] || '0'),
-    
+
     staticPoster12Week: parseInt(record['AVERAGE 4-WEEK PRICE OF A STATIC POSTER AT A 12-WEEK (3 PERIOD) CAMPAIGN'] || '0'),
     staticPoster24Week: parseInt(record['AVERAGE 4-WEEK PRICE OF A STATIC POSTER AT A 24-WEEK (6 PERIOD) CAMPAIGN'] || '0'),
     staticPoster52Week: parseInt(record['AVERAGE 4-WEEK PRICE OF A STATIC POSTER AT A 52-WEEK ANNUAL (13 PERIOD) CAMPAIGN'] || '0'),
     staticPosterImpressions: parseInt(record['AVERAGE WEEKLY IMPRESSIONS (VIEWS) OF A STATIC POSTER'] || '0'),
-    
+
     digital12Week: parseInt(record['AVERAGE 4-WEEK PRICE OF A DIGITAL BILLBOARD AT A 12-WEEK (3 PERIOD) CAMPAIGN'] || '0'),
     digital24Week: parseInt(record['AVERAGE 4-WEEK PRICE OF A DIGITAL BILLBOARD AT A 24-WEEK (6 PERIOD) CAMPAIGN'] || '0'),
     digital52Week: parseInt(record['AVERAGE 4-WEEK PRICE OF A DIGITAL BILLBOARD AT A 52-WEEK ANNUAL (13 PERIOD) CAMPAIGN'] || '0'),
     digitalImpressions: parseInt(record['AVERAGE WEEKLY IMPRESSIONS (VIEWS) OF A DIGITAL BILLBOARD'] || '0'),
-    
+
     textToEmbed: createEmbeddingText(record),
   }));
 }
@@ -171,27 +173,27 @@ function parseAndPrepareRecords(csvContent: string): ProcessedRecord[] {
 async function processBillboardCSV(csvContent: string) {
   // Parse and prepare all records
   const records = parseAndPrepareRecords(csvContent);
-  
+
   const processedData = [];
-  const batchSize = 100; // Process in batches to avoid rate limits
-  
+  const batchSize = 50; // Reduced batch size for Vercel
+
   for (let i = 0; i < records.length; i += batchSize) {
     const batch = records.slice(i, i + batchSize);
     console.log(`🔄 Processing batch ${i / batchSize + 1}/${Math.ceil(records.length / batchSize)} (${batch.length} records)...`);
-    
+
     try {
       // Extract all texts to embed for this batch
       const textsToEmbed = batch.map(record => record.textToEmbed);
-      
+
       // Use AI SDK's embedMany to generate all embeddings at once
       console.log(`🤖 Generating ${textsToEmbed.length} embeddings with AI SDK...`);
       const { embeddings } = await embedMany({
         model: embeddingModel,
         values: textsToEmbed,
       });
-      
+
       console.log(`✅ Generated ${embeddings.length} embeddings`);
-      
+
       // Combine the embeddings with the records
       const batchWithEmbeddings = batch.map((record, index) => ({
         city: record.city,
@@ -219,14 +221,14 @@ async function processBillboardCSV(csvContent: string) {
         digitalImpressions: record.digitalImpressions,
         embedding: embeddings[index],
       }));
-      
+
       processedData.push(...batchWithEmbeddings);
-      
+
     } catch (error) {
       console.error(`❌ Error processing batch ${i / batchSize + 1}:`, error);
       // Continue with next batch instead of failing completely
     }
-    
+
     // Rate limit protection: wait 1 second between batches
     if (i + batchSize < records.length) {
       console.log('⏳ Waiting 1 second before next batch...');
@@ -239,41 +241,37 @@ async function processBillboardCSV(csvContent: string) {
 }
 
 // ============================================================================
-// API ROUTE HANDLERS
+// API ROUTE HANDLER
 // ============================================================================
 
 /**
- * POST - Upload and process billboard CSV data
+ * POST - Process CSV from Blob storage and insert into database
  */
 export async function POST(req: NextRequest) {
   try {
-    console.log('📨 Billboard CSV upload request received');
-    
-    // TODO: Add authentication check here
-    // For now, anyone can upload (add auth later)
+    console.log('📨 Billboard CSV processing request received');
 
-    const formData = await req.formData();
-    const file = formData.get('file') as File;
+    const { blobUrl } = await req.json();
 
-    if (!file) {
-      console.error('❌ No file provided');
+    if (!blobUrl) {
+      console.error('❌ No blob URL provided');
       return NextResponse.json(
-        { error: 'No file provided' },
+        { error: 'No blob URL provided' },
         { status: 400 }
       );
     }
 
-    if (!file.name || !file.name.endsWith('.csv')) {
-      console.error('❌ File is not a CSV');
-      return NextResponse.json(
-        { error: 'File must be a CSV' },
-        { status: 400 }
-      );
+    console.log('📥 Fetching CSV from blob storage:', blobUrl);
+
+    // Fetch the CSV from blob storage
+    const response = await fetch(blobUrl);
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch CSV from blob storage: ${response.statusText}`);
     }
 
-    console.log(`📄 Processing CSV file: ${file.name}, size: ${file.size} bytes`);
-
-    const csvContent = await file.text();
+    const csvContent = await response.text();
+    console.log('📝 CSV fetched successfully, size:', csvContent.length, 'bytes');
 
     if (!csvContent || csvContent.trim().length === 0) {
       console.error('❌ CSV file is empty');
@@ -312,55 +310,24 @@ export async function POST(req: NextRequest) {
       console.log(`✅ Inserted ${inserted}/${vectors.length} records`);
     }
 
-    console.log(`🎉 Successfully completed upload!`);
-    
+    console.log(`🎉 Successfully completed processing!`);
+
     return NextResponse.json({
       success: true,
       message: `Successfully processed and stored ${vectors.length} billboard locations`,
       count: vectors.length,
     });
   } catch (error) {
-    console.error('❌ Billboard CSV upload error:', error);
+    console.error('❌ Billboard CSV processing error:', error);
     if (error instanceof Error) {
       console.error('Error details:', error.message);
       console.error('Stack trace:', error.stack);
     }
     return NextResponse.json(
-      { 
+      {
         error: 'Failed to process CSV',
         details: error instanceof Error ? error.message : 'Unknown error'
       },
-      { status: 500 }
-    );
-  }
-}
-
-/**
- * GET - Check billboard data status
- */
-export async function GET() {
-  try {
-    console.log('📊 Checking billboard data status...');
-    
-    // TODO: Add authentication check here
-
-    // Count total locations in database
-    const result = await db.execute(sql`
-      SELECT COUNT(*) as count FROM billboard_locations
-    `);
-
-    const count = Number(result.rows[0]?.count) || 0;
-
-    console.log(`✅ Found ${count} locations in database`);
-
-    return NextResponse.json({
-      totalLocations: count,
-      status: count > 0 ? 'ready' : 'no data',
-    });
-  } catch (error) {
-    console.error('❌ Error checking billboard data status:', error);
-    return NextResponse.json(
-      { error: 'Failed to check status' },
       { status: 500 }
     );
   }
