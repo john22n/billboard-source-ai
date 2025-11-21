@@ -50,7 +50,7 @@ export function BillboardDataUploader() {
 
       const blob = await upload(file.name, file, {
         access: 'public',
-        handleUploadUrl: '/api/admin/billboard-data/upload-blob',
+        handleUploadUrl: '/api/billboard-data/upload-blob',
       });
 
       console.log('✅ File uploaded to blob:', blob.url);
@@ -59,7 +59,7 @@ export function BillboardDataUploader() {
       setProgress('File uploaded. Processing and vectorizing data (this may take several minutes)...');
       setStatus({ type: 'info', message: 'Processing CSV and generating embeddings. This may take several minutes...' });
 
-      const response = await fetch('/api/admin/billboard-data/process', {
+      const response = await fetch('/api/billboard-data/process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ blobUrl: blob.url }),
