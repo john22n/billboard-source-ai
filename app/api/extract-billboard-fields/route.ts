@@ -1,9 +1,10 @@
 // app/api/extract-billboard-fields/route.ts
-export const runtime = "edge";
+// Note: Using Node.js runtime (not edge) for database access in getSession()
 
 import { openai } from "@ai-sdk/openai";
 import { streamObject } from "ai";
 import { z } from "zod";
+import { getSession } from "@/lib/auth";
 
 const billboardLeadSchema = z.object({
   leadType: z
@@ -66,6 +67,15 @@ EXTRACTION RULES:
 
 export async function POST(req: Request) {
   try {
+    // ✅ SECURITY: Require authentication
+    const session = await getSession();
+    if (!session?.userId) {
+      return new Response(
+        JSON.stringify({ error: "Unauthorized - Please log in" }),
+        { status: 401, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
     const { transcript, previousContext = [] } = await req.json();
 
     if (!transcript || transcript.trim().length === 0) {

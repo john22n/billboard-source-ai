@@ -4,6 +4,7 @@ import OpenAI from "openai";
 import { generateText, generateObject } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
+import { getSession } from "@/lib/auth";
 
 const openaiClient = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
@@ -55,6 +56,15 @@ const sentimentSchema = z.object({
 
 export async function POST(req: NextRequest) {
   try {
+    // ✅ SECURITY: Require authentication
+    const session = await getSession();
+    if (!session?.userId) {
+      return NextResponse.json(
+        { error: "Unauthorized - Please log in" },
+        { status: 401 }
+      );
+    }
+
     const formData = await req.formData();
     const file = formData.get("file") as File;
 

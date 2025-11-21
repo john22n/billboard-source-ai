@@ -90,10 +90,10 @@ export async function shouldRefreshToken(token: string): Promise<boolean> {
 }
 
 // create a session using jwt
-export async function createSession(userId: string) {
+export async function createSession(userId: string, email: string) {
   try {
     //create jwt with user data
-    const token = await generateJWT({ userId })
+    const token = await generateJWT({ userId, email })
 
     //store jwt in a cookie
     const cookieStore = await cookies()
@@ -121,7 +121,7 @@ export const getSession = cache(async () => {
 
     if (!token) return null
     const payload = await verifyJWT(token)
-    return payload ? { userId: payload.userId } : null
+    return payload ? { userId: payload.userId, email: payload.email as string } : null
   } catch (error) {
     if (
       error instanceof Error &&

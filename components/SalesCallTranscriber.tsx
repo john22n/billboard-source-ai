@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useEffect, useMemo } from "react";
+import { useRef, useState, useEffect, useMemo, useCallback } from "react";
 import { DollarSign } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useBillboardFormExtraction, type BillboardFormData } from "@/hooks/useBillboardFormExtraction";
+import { Device, Call } from '@twilio/voice-sdk';
 
 interface TranscriptItem {
   id: string;
@@ -26,7 +27,10 @@ export default function SalesCallTranscriber() {
   const logId = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const [isActive, setIsActive] = useState(false);
+  // Twilio refs
+  const twilioDevice = useRef<Device | null>(null);
+  const activeCall = useRef<Call | null>(null);
+
   const [status, setStatus] = useState("Idle");
   const [transcripts, setTranscripts] = useState<TranscriptItem[]>([]);
   const [interimTranscript, setInterimTranscript] = useState("");
@@ -36,6 +40,12 @@ export default function SalesCallTranscriber() {
   const [billboardContext, setBillboardContext] = useState<string>("");
   const [isLoadingBillboard, setIsLoadingBillboard] = useState(false);
   const lastFetchedTranscript = useRef<string>("");
+
+  // Twilio state
+  const [twilioReady, setTwilioReady] = useState(false);
+  const [incomingCall, setIncomingCall] = useState<Call | null>(null);
+  const [callActive, setCallActive] = useState(false);
+  const [userEmail, setUserEmail] = useState<string>('');
 
   // Billboard form extraction hook (using AI SDK)
   const {
@@ -103,6 +113,7 @@ export default function SalesCallTranscriber() {
   useEffect(() => {
     return () => {
       cleanup();
+      twilioDevice.current?.destroy();
     };
   }, [cleanup]);
 
@@ -120,54 +131,161 @@ export default function SalesCallTranscriber() {
   }, [fullTranscript, extractFields, isExtracting]);
 
   // Fetch billboard pricing data when transcript updates
-  
   useEffect(() => {
     const fetchBillboardData = async () => {
-      // Key change: Check if transcript has MEANINGFULLY changed (more than 50 characters)
       const transcriptDiff = fullTranscript.length - lastFetchedTranscript.current.length;
-    
-    if (
-      fullTranscript.length > 100 && 
-      !isLoadingBillboard && 
-      (transcriptDiff > 50 || lastFetchedTranscript.current === '') // Re-fetch if significant change
-    ) {
-      setIsLoadingBillboard(true);
-      lastFetchedTranscript.current = fullTranscript;
-      
+
+      if (
+        fullTranscript.length > 100 &&
+        !isLoadingBillboard &&
+        (transcriptDiff > 50 || lastFetchedTranscript.current === '')
+      ) {
+        setIsLoadingBillboard(true);
+        lastFetchedTranscript.current = fullTranscript;
+
+        try {
+          const response = await fetch('/api/billboard-pricing', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ transcript: fullTranscript }),
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            if (data.context) {
+              setBillboardContext(data.context);
+            }
+          } else {
+            console.error('Failed to fetch billboard data:', response.statusText);
+          }
+        } catch (error) {
+          console.error("Error fetching billboard data:", error);
+        } finally {
+          setIsLoadingBillboard(false);
+        }
+      }
+    };
+
+    const timeoutId = setTimeout(fetchBillboardData, 1500);
+    return () => clearTimeout(timeoutId);
+  }, [fullTranscript, isLoadingBillboard]);
+
+  // Initialize Twilio Device on mount
+  useEffect(() => {
+    const initTwilio = async () => {
       try {
-        const response = await fetch('/api/billboard-pricing', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ transcript: fullTranscript }),
+        setStatus("Initializing Twilio...");
+        const response = await fetch('/api/twilio-token');
+        const data = await response.json();
+
+        if (data.error) {
+          setStatus(`Token error: ${data.error}`);
+          return;
+        }
+
+        const email = data.identity;
+        if (!email) {
+          setStatus("Error: No user identity in token");
+          return;
+        }
+
+        setUserEmail(email);
+        console.log(`Initializing Twilio for: ${email}`);
+
+        const device = new Device(data.token, {
+          codecPreferences: [Call.Codec.Opus, Call.Codec.PCMU],
         });
 
-        if (response.ok) {
-          const data = await response.json();
-          if (data.context) {
-            setBillboardContext(data.context);
-          }
-        } else {
-          console.error('Failed to fetch billboard data:', response.statusText);
-        }
+        device.on('registered', () => {
+          console.log(`${email} registered and ready`);
+          setTwilioReady(true);
+          setStatus(`Ready to receive calls`);
+        });
+
+        device.on('incoming', (call) => {
+          console.log('Incoming call from:', call.parameters.From);
+          setIncomingCall(call);
+          setStatus(`Incoming call from ${call.parameters.From}`);
+
+          call.on('disconnect', () => {
+            console.log('Call disconnected');
+            setCallActive(false);
+            setIncomingCall(null);
+            activeCall.current = null;
+            stopTranscription();
+          });
+        });
+
+        device.on('error', (error) => {
+          console.error('Twilio Device error:', error);
+          setStatus(`Twilio error: ${error.message}`);
+        });
+
+        await device.register();
+        twilioDevice.current = device;
+
       } catch (error) {
-        console.error("Error fetching billboard data:", error);
-      } finally {
-        setIsLoadingBillboard(false);
+        console.error('Failed to initialize Twilio:', error);
+        setStatus("Twilio initialization failed");
       }
+    };
+
+    initTwilio();
+    return () => { twilioDevice.current?.destroy(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Accept incoming call
+  const acceptCall = async () => {
+    if (!incomingCall) return;
+
+    try {
+      setStatus("Accepting call...");
+
+      // Set up event listener for when call is fully connected
+      incomingCall.on('accept', () => {
+        console.log('✅ Call accepted and connected');
+        // Give streams a moment to be ready
+        setTimeout(() => {
+          startTranscriptionWithTwilioAudio(incomingCall);
+        }, 500);
+      });
+
+      // Accept the call
+      await incomingCall.accept();
+      activeCall.current = incomingCall;
+      setCallActive(true);
+      setIncomingCall(null);
+
+    } catch (error) {
+      console.error('Error accepting call:', error);
+      setStatus("Failed to accept call");
     }
   };
 
-  // Reduced debounce time for more responsive updates
-  const timeoutId = setTimeout(fetchBillboardData, 1500);
-  
-  return () => clearTimeout(timeoutId);
-}, [fullTranscript, isLoadingBillboard]);
+  // Reject incoming call
+  const rejectCall = () => {
+    if (incomingCall) {
+      incomingCall.reject();
+      setIncomingCall(null);
+      setStatus(twilioReady ? "Ready to receive calls" : "Idle");
+    }
+  };
 
-  const startTranscription = async () => {
+  // Hang up active call
+  const hangupCall = () => {
+    if (activeCall.current) {
+      activeCall.current.disconnect();
+      activeCall.current = null;
+      setCallActive(false);
+      stopTranscription();
+    }
+  };
+
+  // Start transcription with Twilio call audio
+  const startTranscriptionWithTwilioAudio = async (call: Call) => {
     try {
-      setStatus("Fetching token...");
+      setStatus("Fetching OpenAI token...");
       const tokenResponse = await fetch("/api/token");
       const data = await tokenResponse.json();
 
@@ -194,29 +312,61 @@ export default function SalesCallTranscriber() {
         audioElement.current!.srcObject = e.streams[0];
       };
 
-      if (typeof window !== "undefined" && navigator.mediaDevices?.getUserMedia) {
-        try {
-          const ms = await navigator.mediaDevices.getUserMedia({ audio: true });
-          pc.addTrack(ms.getTracks()[0]);
-          console.log("🎤 Microphone track added");
-        } catch (err) {
-          console.error("Error accessing microphone:", err);
-          setStatus("Microphone access denied");
-          return;
-        }
-      } else {
-        console.warn("Media devices not available.");
-        setStatus("Microphone not available");
+      // CRITICAL: Get BOTH audio streams from Twilio call
+      // @ts-expect-error - Twilio Call has these methods but types are incomplete
+      const remoteStream = call.getRemoteStream(); // Caller's audio
+      // @ts-expect-error - Twilio Call has these methods but types are incomplete
+      const localStream = call.getLocalStream(); // Agent's audio (you speaking)
+
+      console.log('Remote stream:', remoteStream ? 'available' : 'not available');
+      console.log('Local stream:', localStream ? 'available' : 'not available');
+
+      // We need to mix both streams together for full conversation transcription
+      if (!remoteStream && !localStream) {
+        console.error("No audio streams available from call");
+        setStatus("Could not access call audio - streams not ready");
         return;
       }
+
+      // Create an audio context to mix both streams
+      const audioContext = new AudioContext();
+      const destination = audioContext.createMediaStreamDestination();
+
+      // Add remote stream (caller) if available
+      if (remoteStream) {
+        const remoteSource = audioContext.createMediaStreamSource(remoteStream);
+        remoteSource.connect(destination);
+        console.log("Remote audio (caller) added");
+      }
+
+      // Add local stream (agent/you) if available
+      if (localStream) {
+        const localSource = audioContext.createMediaStreamSource(localStream);
+        localSource.connect(destination);
+        console.log("Local audio (agent) added");
+      }
+
+      // Use the mixed stream
+      const mixedStream = destination.stream;
+      const audioTrack = mixedStream.getAudioTracks()[0];
+
+      if (audioTrack) {
+        pc.addTrack(audioTrack, mixedStream);
+        console.log("Mixed audio stream added to peer connection");
+      } else {
+        console.error("No audio track in mixed stream");
+        setStatus("Failed to create mixed audio");
+        return;
+      }
+
 
       const dc = pc.createDataChannel("oai-events");
       dataChannel.current = dc;
       console.log("📡 Data channel created, state:", dc.readyState);
 
       dc.onopen = () => {
-        console.log("🟢🟢🟢 DATA CHANNEL OPENED! 🟢🟢🟢");
-        setStatus("Data channel open - speak now!");
+        console.log("🟢 DATA CHANNEL OPENED!");
+        setStatus("Transcribing call...");
 
         const sessionConfig = {
           type: "session.update",
@@ -286,7 +436,7 @@ export default function SalesCallTranscriber() {
       await pc.setLocalDescription(offer);
       console.log("📝 Offer created");
 
-      setStatus("Connecting to OpenAI Realtime API...");
+      setStatus("Connecting to OpenAI...");
       const sdpResponse = await fetch("https://api.openai.com/v1/realtime/calls", {
         method: "POST",
         body: offer.sdp,
@@ -311,15 +461,14 @@ export default function SalesCallTranscriber() {
       await pc.setRemoteDescription(answer);
       console.log("✅ Remote description set");
 
-      setStatus("Connected — transcribing...");
-      setIsActive(true);
+      setStatus("Connected — transcribing call...");
     } catch (error) {
       console.error("Setup failed:", error);
       setStatus("Error during setup");
     }
   };
 
-  const stopTranscription = async () => {
+  const stopTranscription = useCallback(async () => {
     if (sessionStartTime.current && logId.current) {
       const durationSeconds = (Date.now() - sessionStartTime.current) / 1000;
       console.log(`📊 Ended - Duration: ${durationSeconds.toFixed(2)}s`);
@@ -349,11 +498,9 @@ export default function SalesCallTranscriber() {
     dataChannel.current?.close();
     peerConnection.current?.close();
     if (audioElement.current) audioElement.current.srcObject = null;
-
-    setIsActive(false);
-    setStatus("Stopped");
+    setStatus(twilioReady ? "Ready to receive calls" : "Stopped");
     setInterimTranscript("");
-  };
+  }, [twilioReady]);
 
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -417,39 +564,38 @@ export default function SalesCallTranscriber() {
             <div className="flex flex-col gap-2">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div>
-                  <CardTitle className="text-xl font-bold tracking-tight">Billboard Lead Form</CardTitle>
+                  <CardTitle className="text-xl font-bold tracking-tight">
+                    Billboard Lead Form
+                    {userEmail && (
+                      <span className="text-xs font-normal ml-2 opacity-75">
+                        ({userEmail})
+                      </span>
+                    )}
+                  </CardTitle>
                   <p className="text-blue-100 text-xs mt-0.5">Real-time transcription & AI-powered data extraction</p>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <div className={`px-3 py-1.5 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 flex items-center gap-2 text-xs ${
-                    (isUploading || isExtracting || status.includes("Fetching") || status.includes("Connecting") || status.includes("Starting") || status.includes("Uploading"))
+                    (isUploading || isExtracting || status.includes("Fetching") || status.includes("Connecting") || status.includes("Starting") || status.includes("Uploading") || status.includes("Initializing"))
                       ? "animate-pulse"
                       : ""
                   }`}>
-                    {(isUploading || isExtracting || status.includes("Fetching") || status.includes("Connecting") || status.includes("Starting") || status.includes("Uploading")) && (
-                      <span className="flex h-2 w-2">
-                        <span className="animate-ping absolute inline-flex h-2 w-2 rounded-full bg-green-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-                      </span>
+                    {twilioReady && !callActive && (
+                      <span className="inline-block w-2 h-2 bg-green-400 rounded-full"></span>
+                    )}
+                    {callActive && (
+                      <span className="inline-block w-2 h-2 bg-red-400 rounded-full animate-pulse"></span>
                     )}
                     <span className="font-medium">{status}</span>
                   </div>
                   <div className="flex gap-2">
-                    {!isActive ? (
+                    {callActive && (
                       <Button
-                        onClick={startTranscription}
-                        size="sm"
-                        className="bg-green-500 hover:bg-green-600 text-white font-semibold shadow-lg hover:shadow-xl transition-all duration-200 h-8 text-xs"
-                      >
-                        <span className="mr-1.5">🎤</span> Start Live
-                      </Button>
-                    ) : (
-                      <Button
-                        onClick={stopTranscription}
+                        onClick={hangupCall}
                         size="sm"
                         className="bg-red-500 hover:bg-red-600 text-white font-semibold shadow-lg hover:shadow-xl transition-all duration-200 h-8 text-xs"
                       >
-                        <span className="mr-1.5">⏹</span> Stop
+                        Hang Up
                       </Button>
                     )}
                     <Button
@@ -457,6 +603,7 @@ export default function SalesCallTranscriber() {
                       size="sm"
                       variant="secondary"
                       className="bg-white/20 hover:bg-white/30 text-white border border-white/30 font-semibold backdrop-blur-sm h-8 text-xs"
+                      disabled={callActive}
                     >
                       Clear All
                     </Button>
@@ -465,12 +612,12 @@ export default function SalesCallTranscriber() {
                       type="file"
                       accept="audio/*,.mp3,.wav,.m4a,.ogg"
                       onChange={handleFileSelect}
-                      disabled={isUploading || isActive}
+                      disabled={isUploading || callActive}
                       className="hidden"
                     />
                     <Button
                       onClick={handleUploadClick}
-                      disabled={isUploading || isActive}
+                      disabled={isUploading || callActive}
                       size="sm"
                       className="bg-white/20 hover:bg-white/30 text-white border border-white/30 font-semibold backdrop-blur-sm h-8 text-xs"
                     >
@@ -479,6 +626,34 @@ export default function SalesCallTranscriber() {
                   </div>
                 </div>
               </div>
+
+              {/* Incoming Call Alert */}
+              {incomingCall && (
+                <div className="bg-green-500/30 border border-white/30 rounded px-3 py-2 animate-pulse">
+                  <div className="flex items-center justify-between">
+                    <p className="text-white text-sm font-semibold">
+                      📞 Incoming call from {incomingCall.parameters.From}
+                    </p>
+                    <div className="flex gap-2">
+                      <Button
+                        onClick={acceptCall}
+                        size="sm"
+                        className="bg-green-600 hover:bg-green-700 h-7 text-sm"
+                      >
+                        Accept
+                      </Button>
+                      <Button
+                        onClick={rejectCall}
+                        size="sm"
+                        variant="destructive"
+                        className="h-7 text-sm"
+                      >
+                        Reject
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Compact Status Indicators */}
               <div className="flex flex-wrap gap-1.5">
@@ -975,8 +1150,12 @@ export default function SalesCallTranscriber() {
                   {transcripts.length === 0 && !interimTranscript && (
                     <div className="flex flex-col items-center justify-center h-full text-center py-16">
                       <div className="text-5xl mb-3">🎤</div>
-                      <p className="text-slate-400 text-base font-medium">Transcript will appear here...</p>
-                      <p className="text-slate-300 text-sm mt-1">Start recording or upload an audio file</p>
+                      <p className="text-slate-400 text-base font-medium">
+                        {twilioReady ? "Waiting for incoming call..." : "Transcript will appear here..."}
+                      </p>
+                      <p className="text-slate-300 text-sm mt-1">
+                        {twilioReady ? "Accept a call to start transcribing" : "Upload an audio file to transcribe"}
+                      </p>
                     </div>
                   )}
                 </div>

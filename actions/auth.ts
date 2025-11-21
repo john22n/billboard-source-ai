@@ -87,7 +87,7 @@ export async function signIn(formData: FormData): Promise<ActionResponse> {
     }
 
     //create session
-    await createSession(user.id)
+    await createSession(user.id, user.email)
     return {
       success: true,
       message: 'Signed in successfully'
@@ -143,7 +143,7 @@ export async function signUp(prevState: ActionResponse, formData: FormData): Pro
       }
     }
 
-    await createSession(user.id)
+    await createSession(user.id, user.email)
     return {
       success: true,
       message: 'Account created successfully'

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateText, generateObject } from "ai"; // ✅ Vercel AI SDK
 import { openai } from "@ai-sdk/openai"; // ✅ Vercel AI SDK OpenAI Provider
 import { z } from "zod";
+import { getSession } from "@/lib/auth";
 
 // ============================================
 // ZOD SCHEMAS FOR TYPE-SAFE OUTPUTS
@@ -70,6 +71,15 @@ const recommendationsSchema = z.object({
 
 export async function POST(req: NextRequest) {
   try {
+    // ✅ SECURITY: Require authentication
+    const session = await getSession();
+    if (!session?.userId) {
+      return NextResponse.json(
+        { error: "Unauthorized - Please log in" },
+        { status: 401 }
+      );
+    }
+
     const body = await req.json();
     const { transcript, mode = "full" } = body;
 

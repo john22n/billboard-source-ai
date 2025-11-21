@@ -1,13 +1,33 @@
 // app/api/twilio-token/route.ts
 // Generates Twilio access token for Voice SDK
 
-import { NextResponse } from 'next/server';
-import twilio from 'twilio';
+import { NextResponse } from "next/server";
+import { getSession } from "@/lib/auth";
+import twilio from "twilio";
 
 const AccessToken = twilio.jwt.AccessToken;
 const VoiceGrant = AccessToken.VoiceGrant;
 
 export async function GET() {
+  // ✅ SECURITY: Require authentication
+  const session = await getSession();
+  if (!session?.userId) {
+    return NextResponse.json(
+      { error: "Unauthorized - Please log in" },
+      { status: 401 }
+    );
+  }
+
+  // Use authenticated user's email instead of query param
+  const email = session.email;
+
+  if (!email) {
+    return NextResponse.json(
+      { error: "User email not found in session" },
+      { status: 400 }
+    );
+  }
+
   // Validate required environment variables
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const apiKeySid = process.env.TWILIO_API_KEY_SID;
@@ -15,21 +35,16 @@ export async function GET() {
 
   if (!accountSid || !apiKeySid || !apiKeySecret) {
     return NextResponse.json(
-      { error: 'Missing required Twilio credentials' },
+      { error: "Missing required Twilio credentials" },
       { status: 500 }
     );
   }
 
   // Create access token
-  const token = new AccessToken(
-    accountSid,
-    apiKeySid,
-    apiKeySecret,
-    {
-      identity: 'sales-agent', // Must match the <Client> identity in TwiML
-      ttl: 3600 // Token valid for 1 hour
-    }
-  );
+  const token = new AccessToken(accountSid, apiKeySid, apiKeySecret, {
+    identity: email, // Use authenticated user's email
+    ttl: 3600, // Token valid for 1 hour
+  });
 
   // Create a Voice grant
   const voiceGrant = new VoiceGrant({
@@ -38,8 +53,11 @@ export async function GET() {
 
   token.addGrant(voiceGrant);
 
+  console.log(`🔐 Twilio token generated for authenticated user: ${email}`);
+
   return NextResponse.json({
     token: token.toJwt(),
-    identity: 'sales-agent'
+    identity: email,
   });
 }
+
