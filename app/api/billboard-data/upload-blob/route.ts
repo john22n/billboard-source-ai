@@ -19,7 +19,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     const jsonResponse = await handleUpload({
       body,
       request,
-      onBeforeGenerateToken: async (pathname, clientPayload) => {
+      onBeforeGenerateToken: async (pathname) => {
         console.log('📤 Generating upload token for:', pathname);
         
         return {
@@ -30,7 +30,7 @@ export async function POST(request: Request): Promise<NextResponse> {
           }),
         };
       },
-      onUploadCompleted: async ({ blob, tokenPayload }) => {
+      onUploadCompleted: async ({ blob }) => {
         console.log('✅ Blob upload completed:', blob.url);
         console.log('📦 Blob pathname:', blob.pathname);
       },
