@@ -1,6 +1,6 @@
+// components/admin/BillboardDataUploader.tsx
 'use client';
 
-// components/admin/BillboardDataUploader.tsx
 import { useState } from 'react';
 import { Upload, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 import { upload } from '@vercel/blob/client';
@@ -22,21 +22,18 @@ export function BillboardDataUploader() {
     const formData = new FormData(e.currentTarget);
     const file = formData.get('file');
 
-    // Check if file exists
     if (!file || !(file instanceof File)) {
       setStatus({ type: 'error', message: 'Please select a file' });
       setUploading(false);
       return;
     }
 
-    // Check if it's a CSV
     if (!file.name.toLowerCase().endsWith('.csv')) {
       setStatus({ type: 'error', message: 'Please select a CSV file' });
       setUploading(false);
       return;
     }
 
-    // Check file size (optional - max 500MB for blob storage)
     if (file.size > 500 * 1024 * 1024) {
       setStatus({ type: 'error', message: 'File is too large (max 500MB)' });
       setUploading(false);
@@ -44,7 +41,7 @@ export function BillboardDataUploader() {
     }
 
     try {
-      // Step 1: Upload to Vercel Blob Storage
+      // Step 1: Upload to Blob
       setProgress('Uploading file to cloud storage...');
       setStatus({ type: 'info', message: 'Uploading file to cloud storage...' });
 
@@ -55,9 +52,9 @@ export function BillboardDataUploader() {
 
       console.log('✅ File uploaded to blob:', blob.url);
 
-      // Step 2: Process the CSV from blob storage
-      setProgress('File uploaded. Processing and vectorizing data (this may take several minutes)...');
-      setStatus({ type: 'info', message: 'Processing CSV and generating embeddings. This may take several minutes...' });
+      // Step 2: Trigger background processing
+      setProgress('Starting background processing...');
+      setStatus({ type: 'info', message: 'Starting background processing...' });
 
       const response = await fetch('/api/billboard-data/process', {
         method: 'POST',
@@ -70,15 +67,14 @@ export function BillboardDataUploader() {
       if (response.ok && result.success) {
         setStatus({
           type: 'success',
-          message: `Success! ${result.count} locations processed and vectorized.`,
+          message: result.message,
         });
         setProgress('');
-        // Reset form
         (e.target as HTMLFormElement).reset();
       } else {
         setStatus({
           type: 'error',
-          message: result.error || result.details || 'Failed to process CSV',
+          message: result.error || result.details || 'Failed to start processing',
         });
         setProgress('');
       }
@@ -140,7 +136,6 @@ export function BillboardDataUploader() {
                           message: 'Please select a CSV file'
                         });
                       } else {
-                        // Clear any previous errors when valid file is selected
                         setStatus({ type: null, message: '' });
                       }
                     }}
@@ -196,7 +191,7 @@ export function BillboardDataUploader() {
           ) : (
             <>
               <Upload className="h-5 w-5" />
-              Upload & Vectorize
+              Upload & Process
             </>
           )}
         </button>
@@ -209,17 +204,17 @@ export function BillboardDataUploader() {
         <ol className="text-sm text-gray-600 space-y-1 list-decimal list-inside">
           <li>Upload your billboard pricing CSV file (up to 500MB)</li>
           <li>File is securely stored in cloud storage</li>
-          <li>System extracts location and pricing data</li>
-          <li>Creates vector embeddings for semantic search</li>
-          <li>Stores in database for instant RAG queries</li>
-          <li>AI automatically retrieves pricing during transcriptions</li>
+          <li>Background job starts processing immediately</li>
+          <li>System generates embeddings in batches</li>
+          <li>Data is stored in database for instant RAG queries</li>
+          <li>You can close this page - processing continues</li>
         </ol>
 
         <div className="mt-4 pt-4 border-t border-gray-200">
           <h4 className="text-xs font-semibold text-gray-900 mb-1">Note:</h4>
           <p className="text-xs text-gray-600">
-            Processing time depends on file size. Large files (10,000+ rows) may take 5-10 minutes.
-            The page will update automatically when complete.
+            Large files (400,000+ rows) will take 15-30 minutes to process.
+            Check your Vercel deployment logs to monitor progress.
           </p>
         </div>
       </div>
