@@ -12,6 +12,7 @@ export function BillboardDataUploader() {
     message: string;
   }>({ type: null, message: '' });
   const [progress, setProgress] = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   async function handleUpload(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -70,6 +71,7 @@ export function BillboardDataUploader() {
           message: result.message,
         });
         setProgress('');
+        setSelectedFile(null);
         (e.target as HTMLFormElement).reset();
       } else {
         setStatus({
@@ -110,40 +112,66 @@ export function BillboardDataUploader() {
           >
             Select Billboard Pricing CSV
           </label>
-          <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-lg hover:border-gray-400 transition-colors">
+          <div className={`mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-dashed rounded-lg transition-colors ${
+            selectedFile
+              ? 'border-green-400 bg-green-50'
+              : 'border-gray-300 hover:border-gray-400'
+          }`}>
             <div className="space-y-1 text-center">
-              <Upload className="mx-auto h-12 w-12 text-gray-400" />
-              <div className="flex text-sm text-gray-600">
-                <label
-                  htmlFor="file-upload"
-                  className="relative cursor-pointer bg-white rounded-md font-medium text-blue-600 hover:text-blue-500 focus-within:outline-none"
-                >
-                  <span>Upload a file</span>
-                  <input
-                    id="file-upload"
-                    name="file"
-                    type="file"
-                    accept=".csv,text/csv"
-                    className="sr-only"
-                    disabled={uploading}
-                    required
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file && !file.name.toLowerCase().endsWith('.csv')) {
-                        e.target.value = '';
-                        setStatus({
-                          type: 'error',
-                          message: 'Please select a CSV file'
-                        });
-                      } else {
-                        setStatus({ type: null, message: '' });
-                      }
-                    }}
-                  />
-                </label>
-                <p className="pl-1">or drag and drop</p>
-              </div>
-              <p className="text-xs text-gray-500">CSV file up to 500MB</p>
+              {selectedFile ? (
+                <>
+                  <CheckCircle2 className="mx-auto h-12 w-12 text-green-500" />
+                  <p className="text-sm font-medium text-green-700">{selectedFile.name}</p>
+                  <p className="text-xs text-green-600">
+                    {(selectedFile.size / (1024 * 1024)).toFixed(2)} MB
+                  </p>
+                </>
+              ) : (
+                <>
+                  <Upload className="mx-auto h-12 w-12 text-gray-400" />
+                  <div className="flex text-sm text-gray-600">
+                    <label
+                      htmlFor="file-upload"
+                      className="relative cursor-pointer bg-white rounded-md font-medium text-blue-600 hover:text-blue-500 focus-within:outline-none"
+                    >
+                      <span>Upload a file</span>
+                    </label>
+                    <p className="pl-1">or drag and drop</p>
+                  </div>
+                  <p className="text-xs text-gray-500">CSV file up to 500MB</p>
+                </>
+              )}
+              <input
+                id="file-upload"
+                name="file"
+                type="file"
+                accept=".csv,text/csv"
+                className="sr-only"
+                disabled={uploading}
+                required
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file && !file.name.toLowerCase().endsWith('.csv')) {
+                    e.target.value = '';
+                    setSelectedFile(null);
+                    setStatus({
+                      type: 'error',
+                      message: 'Please select a CSV file'
+                    });
+                  } else {
+                    setSelectedFile(file || null);
+                    setStatus({ type: null, message: '' });
+                  }
+                }}
+              />
+              <label
+                htmlFor="file-upload"
+                className={`inline-block mt-2 cursor-pointer text-xs font-medium ${
+                  selectedFile ? 'text-green-600 hover:text-green-700' : 'text-blue-600 hover:text-blue-500'
+                }`}
+              >
+                {selectedFile ? 'Change file' : ''}
+              </label>
             </div>
           </div>
         </div>

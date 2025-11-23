@@ -111,6 +111,10 @@ export async function signUp(prevState: ActionResponse, formData: FormData): Pro
       confirmPassword: formData.get('confirmPassword') as string,
     }
 
+    // get admin checkbox value
+    const isAdmin = formData.get('isAdmin') === 'on'
+    const role = isAdmin ? 'admin' : 'user'
+
     // validate with zod
     const validationResult = SignUpSchema.safeParse(data)
     if (!validationResult.success) {
@@ -133,8 +137,8 @@ export async function signUp(prevState: ActionResponse, formData: FormData): Pro
       }
     }
 
-    // create new user
-    const user = await createUser(data.email, data.password)
+    // create new user with role
+    const user = await createUser(data.email, data.password, role)
     if (!user) {
       return {
         success: false,

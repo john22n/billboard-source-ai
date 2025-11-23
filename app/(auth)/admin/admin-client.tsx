@@ -95,15 +95,15 @@ export default function AdminClient({
   const totalCost = totalCostNumber.toFixed(6)
 
   return (
-    <div className="grid min-h-svh lg:grid-cols-2">
-      <div className="flex flex-col gap-4 p-6 md:p-10">
+    <div className="flex flex-col lg:flex-row min-h-svh">
+      <div className="flex flex-col gap-4 p-6 md:p-10 w-full lg:w-1/2">
         <div className="flex flex-1 items-center justify-center">
           <div className="w-full max-w-xs">
             <SignupForm onSuccess={() => router.refresh()} />
           </div>
         </div>
       </div>
-      <div className="relative hidden lg:flex flex-col justify-center items-center p-10 w-full gap-5 lg:bg-primary-foreground">
+      <div className="flex flex-col justify-center items-center p-6 md:p-10 w-full lg:w-1/2 gap-5 bg-primary-foreground">
         <div className="w-full flex items-center justify-between mb-4">
           <Button 
             size="sm" 
@@ -209,9 +209,7 @@ export default function AdminClient({
 
           {/* NEW: Billboard Data Tab */}
           <TabsContent value="billboard" className="w-full">
-            <div className="max-h-[600px] overflow-y-auto">
-              <BillboardDataUploader />
-            </div>
+            <BillboardDataUploader />
           </TabsContent>
         </Tabs>
       </div>

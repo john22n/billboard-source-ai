@@ -32,7 +32,7 @@ export async function verifyPassword(password: string, hashedPassword: string) {
   return compare(password, hashedPassword)
 }
 // create a new user
-export async function createUser(email: string, password: string) {
+export async function createUser(email: string, password: string, role: string = 'user') {
   const hashedPassword = await hashPassword(password)
   const id = nanoid()
 
@@ -43,6 +43,7 @@ export async function createUser(email: string, password: string) {
       id,
       email,
       password: hashedPassword,
+      role,
     })
     return { id, email }
   } catch (error) {

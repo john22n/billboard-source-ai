@@ -1,53 +1,57 @@
 "use client";
 
 import { useRef, useState, useEffect, useMemo, useCallback } from "react";
-import { DollarSign } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { useBillboardFormExtraction, type BillboardFormData } from "@/hooks/useBillboardFormExtraction";
-import { Device, Call } from '@twilio/voice-sdk';
-
-interface TranscriptItem {
-  id: string;
-  text: string;
-  isFinal: boolean;
-  timestamp: number;
-}
+import { useTwilio } from "@/hooks/useTwilio";
+import { useOpenAITranscription } from "@/hooks/useOpenAITranscription";
+import { LeadForm, PricingPanel, TranscriptView } from "@/components/sales-call";
+import type { TranscriptItem } from "@/types/sales-call";
 
 export default function SalesCallTranscriber() {
-  const audioElement = useRef<HTMLAudioElement | null>(null);
-  const dataChannel = useRef<RTCDataChannel | null>(null);
-  const peerConnection = useRef<RTCPeerConnection | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const sessionStartTime = useRef<number | null>(null);
-  const logId = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-
-  // Twilio refs
-  const twilioDevice = useRef<Device | null>(null);
-  const activeCall = useRef<Call | null>(null);
-
-  const [status, setStatus] = useState("Idle");
-  const [transcripts, setTranscripts] = useState<TranscriptItem[]>([]);
-  const [interimTranscript, setInterimTranscript] = useState("");
-  const [isUploading, setIsUploading] = useState(false);
-
-  // Billboard RAG state
-  const [billboardContext, setBillboardContext] = useState<string>("");
-  const [isLoadingBillboard, setIsLoadingBillboard] = useState(false);
   const lastFetchedTranscript = useRef<string>("");
 
-  // Twilio state
-  const [twilioReady, setTwilioReady] = useState(false);
-  const [incomingCall, setIncomingCall] = useState<Call | null>(null);
-  const [callActive, setCallActive] = useState(false);
-  const [userEmail, setUserEmail] = useState<string>('');
+  const [isUploading, setIsUploading] = useState(false);
+  const [billboardContext, setBillboardContext] = useState<string>("");
+  const [isLoadingBillboard, setIsLoadingBillboard] = useState(false);
 
-  // Billboard form extraction hook (using AI SDK)
+  // Custom hooks for Twilio and transcription
+  const {
+    transcripts,
+    interimTranscript,
+    startTranscription,
+    stopTranscription,
+    clearTranscripts,
+    addTranscript,
+  } = useOpenAITranscription({
+    onStatusChange: (newStatus) => updateStatus(newStatus),
+  });
+
+  const {
+    status,
+    twilioReady,
+    incomingCall,
+    callActive,
+    userEmail,
+    acceptCall,
+    rejectCall,
+    hangupCall,
+    updateStatus,
+    resetStatus,
+    destroy: destroyTwilio,
+  } = useTwilio({
+    onCallAccepted: (call) => startTranscription(call),
+    onCallDisconnected: () => {
+      stopTranscription();
+      resetStatus();
+    },
+  });
+
+  // Billboard form extraction hook
   const {
     formData: aiFormData,
     isExtracting,
@@ -60,10 +64,10 @@ export default function SalesCallTranscriber() {
     canRetry,
   } = useBillboardFormExtraction();
 
-  // Local state for manual user edits (overrides AI suggestions)
+  // Local state for manual user edits
   const [manualEdits, setManualEdits] = useState<Partial<BillboardFormData>>({});
 
-  // Merge AI data with manual edits (manual edits take precedence)
+  // Merge AI data with manual edits
   const formData = {
     leadType: manualEdits.leadType ?? aiFormData?.leadType ?? null,
     name: manualEdits.name ?? aiFormData?.name ?? "",
@@ -84,27 +88,22 @@ export default function SalesCallTranscriber() {
     notes: manualEdits.notes ?? aiFormData?.notes ?? "",
   };
 
-  // Handle manual field updates
   const updateField = (field: string, value: string | boolean | null) => {
     setManualEdits(prev => ({ ...prev, [field]: value }));
   };
 
-  // Clear both AI and manual data
   const clearForm = () => {
     setManualEdits({});
     resetExtraction();
   };
 
-  // Clear everything: transcripts and form
   const clearAll = () => {
-    setTranscripts([]);
-    setInterimTranscript("");
+    clearTranscripts();
     setBillboardContext("");
     lastFetchedTranscript.current = "";
     clearForm();
   };
 
-  // Memoize full transcript to prevent unnecessary re-renders
   const fullTranscript = useMemo(() => {
     return transcripts.map(t => t.text).join(" ");
   }, [transcripts]);
@@ -113,24 +112,25 @@ export default function SalesCallTranscriber() {
   useEffect(() => {
     return () => {
       cleanup();
-      twilioDevice.current?.destroy();
+      destroyTwilio();
     };
-  }, [cleanup]);
+  }, [cleanup, destroyTwilio]);
 
+  // Auto-scroll transcripts
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [transcripts, interimTranscript]);
 
-  // Extract form fields when transcripts are updated
+  // Extract form fields when transcripts update
   useEffect(() => {
     if (fullTranscript.length > 50 && !isExtracting) {
       extractFields(fullTranscript);
     }
   }, [fullTranscript, extractFields, isExtracting]);
 
-  // Fetch billboard pricing data when transcript updates
+  // Fetch billboard pricing data
   useEffect(() => {
     const fetchBillboardData = async () => {
       const transcriptDiff = fullTranscript.length - lastFetchedTranscript.current.length;
@@ -155,8 +155,6 @@ export default function SalesCallTranscriber() {
             if (data.context) {
               setBillboardContext(data.context);
             }
-          } else {
-            console.error('Failed to fetch billboard data:', response.statusText);
           }
         } catch (error) {
           console.error("Error fetching billboard data:", error);
@@ -170,351 +168,21 @@ export default function SalesCallTranscriber() {
     return () => clearTimeout(timeoutId);
   }, [fullTranscript, isLoadingBillboard]);
 
-  // Initialize Twilio Device on mount
-  useEffect(() => {
-    const initTwilio = async () => {
-      try {
-        setStatus("Initializing Twilio...");
-        const response = await fetch('/api/twilio-token');
-        const data = await response.json();
-
-        if (data.error) {
-          setStatus(`Token error: ${data.error}`);
-          return;
-        }
-
-        const email = data.identity;
-        if (!email) {
-          setStatus("Error: No user identity in token");
-          return;
-        }
-
-        setUserEmail(email);
-        console.log(`Initializing Twilio for: ${email}`);
-
-        const device = new Device(data.token, {
-          codecPreferences: [Call.Codec.Opus, Call.Codec.PCMU],
-        });
-
-        device.on('registered', () => {
-          console.log(`${email} registered and ready`);
-          setTwilioReady(true);
-          setStatus(`Ready to receive calls`);
-        });
-
-        device.on('incoming', (call) => {
-          console.log('Incoming call from:', call.parameters.From);
-          setIncomingCall(call);
-          setStatus(`Incoming call from ${call.parameters.From}`);
-
-          call.on('disconnect', () => {
-            console.log('Call disconnected');
-            setCallActive(false);
-            setIncomingCall(null);
-            activeCall.current = null;
-            stopTranscription();
-          });
-        });
-
-        device.on('error', (error) => {
-          console.error('Twilio Device error:', error);
-          setStatus(`Twilio error: ${error.message}`);
-        });
-
-        await device.register();
-        twilioDevice.current = device;
-
-      } catch (error) {
-        console.error('Failed to initialize Twilio:', error);
-        setStatus("Twilio initialization failed");
-      }
-    };
-
-    initTwilio();
-    return () => { twilioDevice.current?.destroy(); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Accept incoming call
-  const acceptCall = async () => {
-    if (!incomingCall) return;
-
-    try {
-      setStatus("Accepting call...");
-
-      // Set up event listener for when call is fully connected
-      incomingCall.on('accept', () => {
-        console.log('✅ Call accepted and connected');
-        // Give streams a moment to be ready
-        setTimeout(() => {
-          startTranscriptionWithTwilioAudio(incomingCall);
-        }, 500);
-      });
-
-      // Accept the call
-      await incomingCall.accept();
-      activeCall.current = incomingCall;
-      setCallActive(true);
-      setIncomingCall(null);
-
-    } catch (error) {
-      console.error('Error accepting call:', error);
-      setStatus("Failed to accept call");
-    }
-  };
-
-  // Reject incoming call
-  const rejectCall = () => {
-    if (incomingCall) {
-      incomingCall.reject();
-      setIncomingCall(null);
-      setStatus(twilioReady ? "Ready to receive calls" : "Idle");
-    }
-  };
-
-  // Hang up active call
-  const hangupCall = () => {
-    if (activeCall.current) {
-      activeCall.current.disconnect();
-      activeCall.current = null;
-      setCallActive(false);
-      stopTranscription();
-    }
-  };
-
-  // Start transcription with Twilio call audio
-  const startTranscriptionWithTwilioAudio = async (call: Call) => {
-    try {
-      setStatus("Fetching OpenAI token...");
-      const tokenResponse = await fetch("/api/token");
-      const data = await tokenResponse.json();
-
-      if (!data || !data.value) {
-        console.error("Token fetch failed:", data);
-        setStatus("Token fetch failed");
-        return;
-      }
-
-      const EPHEMERAL_KEY = data.value;
-      logId.current = data.logId;
-      sessionStartTime.current = Date.now();
-      console.log(`📊 Session started - Log ID: ${logId.current}`);
-
-      setStatus("Starting peer connection...");
-      const pc = new RTCPeerConnection();
-      peerConnection.current = pc;
-
-      audioElement.current = document.createElement("audio");
-      audioElement.current.autoplay = true;
-
-      pc.ontrack = (e) => {
-        console.log("🔊 Remote track received");
-        audioElement.current!.srcObject = e.streams[0];
-      };
-
-      // CRITICAL: Get BOTH audio streams from Twilio call
-      const remoteStream = call.getRemoteStream(); // Caller's audio
-      const localStream = call.getLocalStream(); // Agent's audio (you speaking)
-
-      console.log('Remote stream:', remoteStream ? 'available' : 'not available');
-      console.log('Local stream:', localStream ? 'available' : 'not available');
-
-      // We need to mix both streams together for full conversation transcription
-      if (!remoteStream && !localStream) {
-        console.error("No audio streams available from call");
-        setStatus("Could not access call audio - streams not ready");
-        return;
-      }
-
-      // Create an audio context to mix both streams
-      const audioContext = new AudioContext();
-      const destination = audioContext.createMediaStreamDestination();
-
-      // Add remote stream (caller) if available
-      if (remoteStream) {
-        const remoteSource = audioContext.createMediaStreamSource(remoteStream);
-        remoteSource.connect(destination);
-        console.log("Remote audio (caller) added");
-      }
-
-      // Add local stream (agent/you) if available
-      if (localStream) {
-        const localSource = audioContext.createMediaStreamSource(localStream);
-        localSource.connect(destination);
-        console.log("Local audio (agent) added");
-      }
-
-      // Use the mixed stream
-      const mixedStream = destination.stream;
-      const audioTrack = mixedStream.getAudioTracks()[0];
-
-      if (audioTrack) {
-        pc.addTrack(audioTrack, mixedStream);
-        console.log("Mixed audio stream added to peer connection");
-      } else {
-        console.error("No audio track in mixed stream");
-        setStatus("Failed to create mixed audio");
-        return;
-      }
-
-
-      const dc = pc.createDataChannel("oai-events");
-      dataChannel.current = dc;
-      console.log("📡 Data channel created, state:", dc.readyState);
-
-      dc.onopen = () => {
-        console.log("🟢 DATA CHANNEL OPENED!");
-        setStatus("Transcribing call...");
-
-        const sessionConfig = {
-          type: "session.update",
-          session: {
-            type: "transcription",
-            audio: {
-              input: {
-                format: { type: "audio/pcm", rate: 24000 },
-                transcription: {
-                  model: "whisper-1",
-                  language: "en",
-                },
-                turn_detection: {
-                  type: "server_vad",
-                  threshold: 0.2,
-                  prefix_padding_ms: 500,
-                  silence_duration_ms: 1000,
-                },
-              },
-            },
-          },
-        };
-
-        console.log("📤 Sending config");
-        dc.send(JSON.stringify(sessionConfig));
-        console.log("✅ Config sent!");
-      };
-
-      dc.onclose = () => {
-        console.log("🔴 Data channel CLOSED");
-      };
-
-      dc.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data);
-
-          if (message.type === "conversation.item.input_audio_transcription.delta") {
-            setInterimTranscript((prev) => prev + message.delta);
-          }
-
-          if (message.type === "conversation.item.input_audio_transcription.completed") {
-            const newTranscript: TranscriptItem = {
-              id: message.item_id,
-              text: message.transcript,
-              isFinal: true,
-              timestamp: Date.now(),
-            };
-            setTranscripts((prev) => [...prev, newTranscript]);
-            setInterimTranscript("");
-          }
-
-          if (message.type === "error") {
-            console.error("❌ ERROR:", message);
-            setStatus(`Error: ${message.error?.message || "Unknown error"}`);
-          }
-        } catch (error) {
-          console.error("Parse error:", error);
-        }
-      };
-
-      dc.onerror = (error) => {
-        console.error("❌ DC ERROR:", error);
-        setStatus("Data channel error");
-      };
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      console.log("📝 Offer created");
-
-      setStatus("Connecting to OpenAI...");
-      const sdpResponse = await fetch("https://api.openai.com/v1/realtime/calls", {
-        method: "POST",
-        body: offer.sdp,
-        headers: {
-          Authorization: `Bearer ${EPHEMERAL_KEY}`,
-          "Content-Type": "application/sdp",
-        },
-      });
-
-      if (!sdpResponse.ok) {
-        const err = await sdpResponse.text();
-        console.error("API error:", err);
-        setStatus("API error");
-        return;
-      }
-
-      const answer = {
-        type: "answer" as RTCSdpType,
-        sdp: await sdpResponse.text(),
-      };
-
-      await pc.setRemoteDescription(answer);
-      console.log("✅ Remote description set");
-
-      setStatus("Connected — transcribing call...");
-    } catch (error) {
-      console.error("Setup failed:", error);
-      setStatus("Error during setup");
-    }
-  };
-
-  const stopTranscription = useCallback(async () => {
-    if (sessionStartTime.current && logId.current) {
-      const durationSeconds = (Date.now() - sessionStartTime.current) / 1000;
-      console.log(`📊 Ended - Duration: ${durationSeconds.toFixed(2)}s`);
-
-      try {
-        const costResponse = await fetch('/api/openai/update-cost', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            logId: logId.current,
-            durationSeconds: durationSeconds
-          })
-        });
-
-        if (costResponse.ok) {
-          const costData = await costResponse.json();
-          console.log(`✅ Cost: $${costData.cost}`);
-        }
-      } catch (error) {
-        console.error('Cost error:', error);
-      }
-
-      sessionStartTime.current = null;
-      logId.current = null;
-    }
-
-    dataChannel.current?.close();
-    peerConnection.current?.close();
-    if (audioElement.current) audioElement.current.srcObject = null;
-    setStatus(twilioReady ? "Ready to receive calls" : "Stopped");
-    setInterimTranscript("");
-  }, [twilioReady]);
-
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (!files || files.length === 0) return;
 
     const selectedFile = files[0];
     setIsUploading(true);
-    setStatus("Uploading and transcribing...");
+    updateStatus("Uploading and transcribing...");
 
-    const formData = new FormData();
-    formData.append("file", selectedFile);
+    const formDataUpload = new FormData();
+    formDataUpload.append("file", selectedFile);
 
     try {
       const res = await fetch("/api/transcribe-file", {
         method: "POST",
-        body: formData,
+        body: formDataUpload,
       });
 
       const result = await res.json();
@@ -526,14 +194,14 @@ export default function SalesCallTranscriber() {
           isFinal: true,
           timestamp: Date.now(),
         };
-        setTranscripts((prev) => [...prev, newTranscript]);
-        setStatus("File transcribed successfully");
+        addTranscript(newTranscript);
+        updateStatus("File transcribed successfully");
       } else {
-        setStatus("Transcription failed");
+        updateStatus("Transcription failed");
       }
     } catch (error) {
       console.error("File transcription error:", error);
-      setStatus("Error transcribing file");
+      updateStatus("Error transcribing file");
     } finally {
       setIsUploading(false);
       if (event.target) {
@@ -553,11 +221,16 @@ export default function SalesCallTranscriber() {
     }
   };
 
+  const isProcessing = isUploading || isExtracting ||
+    status.includes("Fetching") || status.includes("Connecting") ||
+    status.includes("Starting") || status.includes("Uploading") ||
+    status.includes("Initializing");
+
   return (
-    <div className="min-h-svh bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 p-3 lg:p-6">
-      <div className="max-w-[1800px] mx-auto">
-        <Card className="shadow-2xl border-0 overflow-hidden">
-          {/* Compact Header */}
+    <div className="h-full bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 p-3 lg:p-4 overflow-hidden">
+      <div className="h-full max-w-[1800px] mx-auto flex flex-col">
+        <Card className="shadow-2xl border-0 overflow-hidden flex flex-col h-full">
+          {/* Header */}
           <CardHeader className="bg-gradient-to-r from-blue-600 via-indigo-600 to-primary text-white py-3 px-4">
             <div className="flex flex-col gap-2">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
@@ -573,11 +246,7 @@ export default function SalesCallTranscriber() {
                   <p className="text-blue-100 text-xs mt-0.5">Real-time transcription & AI-powered data extraction</p>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <div className={`px-3 py-1.5 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 flex items-center gap-2 text-xs ${
-                    (isUploading || isExtracting || status.includes("Fetching") || status.includes("Connecting") || status.includes("Starting") || status.includes("Uploading") || status.includes("Initializing"))
-                      ? "animate-pulse"
-                      : ""
-                  }`}>
+                  <div className={`px-3 py-1.5 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 flex items-center gap-2 text-xs ${isProcessing ? "animate-pulse" : ""}`}>
                     {twilioReady && !callActive && (
                       <span className="inline-block w-2 h-2 bg-green-400 rounded-full"></span>
                     )}
@@ -653,7 +322,7 @@ export default function SalesCallTranscriber() {
                 </div>
               )}
 
-              {/* Compact Status Indicators */}
+              {/* Status Indicators */}
               <div className="flex flex-wrap gap-1.5">
                 {isExtracting && (
                   <div className="px-2 py-1 bg-blue-500/30 backdrop-blur-sm border border-blue-300/30 rounded text-xs">
@@ -706,16 +375,16 @@ export default function SalesCallTranscriber() {
             </div>
           </CardHeader>
 
-          <CardContent className="p-4">
-            <Tabs defaultValue="form" className="w-full">
+          <CardContent className="p-4 flex-1 overflow-hidden flex flex-col">
+            <Tabs defaultValue="form" className="w-full h-full flex flex-col">
               <TabsList className="grid w-full grid-cols-2 mb-4 bg-slate-100 p-1 rounded-lg h-9">
-                <TabsTrigger 
-                  value="form" 
+                <TabsTrigger
+                  value="form"
                   className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-xs"
                 >
                   📋 Lead Form & Pricing
                 </TabsTrigger>
-                <TabsTrigger 
+                <TabsTrigger
                   value="transcript"
                   className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-xs"
                 >
@@ -723,440 +392,26 @@ export default function SalesCallTranscriber() {
                 </TabsTrigger>
               </TabsList>
 
-              {/* Form + Pricing Tab - Side by Side */}
-              <TabsContent value="form" className="mt-0">
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 max-h-[calc(100vh-240px)] overflow-y-auto pr-2">
-                  {/* Lead Form - Left Side (2/3 width) */}
-                  <div className="lg:col-span-2 space-y-2.5">
-                    {/* Lead Type - More Compact */}
-                    <div className="bg-white rounded-lg p-3 shadow-sm border border-slate-200">
-                      <Label className="text-slate-700 font-bold text-xs uppercase tracking-wide mb-2 block">
-                        Lead Classification
-                      </Label>
-                      <div className={`grid grid-cols-3 gap-2 ${formData.leadType === null ? 'opacity-60' : ''}`}>
-                        {[
-                          { value: "tire-kicker", label: "Tire-Kicker", icon: "🔍" },
-                          { value: "panel-requestor", label: "Panel-Requestor", icon: "📋" },
-                          { value: "availer", label: "Availer", icon: "✅" }
-                        ].map((type) => (
-                          <label
-                            key={type.value}
-                            className={`flex items-center gap-2 p-2.5 rounded-lg border-2 cursor-pointer transition-all duration-200 ${
-                              formData.leadType === type.value
-                                ? "border-blue-500 bg-blue-50 shadow-md"
-                                : "border-slate-200 bg-white hover:border-slate-300"
-                            }`}
-                          >
-                            <input
-                              type="radio"
-                              name="leadType"
-                              checked={formData.leadType === type.value}
-                              onChange={() => updateField("leadType", type.value)}
-                              className="w-4 h-4 text-blue-600"
-                            />
-                            <span className="text-lg">{type.icon}</span>
-                            <span className="font-semibold text-slate-700 text-xs">{type.label}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Contact Information - Compact */}
-                    <div className="bg-white rounded-lg p-3 shadow-sm border border-slate-200">
-                      <Label className="text-slate-700 font-bold text-xs uppercase tracking-wide mb-2 block">
-                        Contact Information
-                      </Label>
-                      <div className="grid grid-cols-2 gap-2">
-                        {[
-                          { field: "name", label: "Full Name", placeholder: "John Doe" },
-                          { field: "phone", label: "Phone", placeholder: "(555) 123-4567" },
-                          { field: "email", label: "Email", placeholder: "john@example.com" },
-                          { field: "website", label: "Website", placeholder: "example.com" }
-                        ].map((item) => (
-                          <div key={item.field}>
-                            <Label className="text-slate-600 font-semibold text-xs mb-1 flex items-center gap-1">
-                              {item.label}
-                            </Label>
-                            <Input
-                              value={formData[item.field as keyof typeof formData] as string ?? ""}
-                              onChange={(e) => updateField(item.field, e.target.value)}
-                              placeholder={item.placeholder}
-                              className={`h-9 text-sm transition-all duration-200 ${
-                                !formData[item.field as keyof typeof formData]
-                                  ? 'border-slate-300 bg-slate-50 focus:border-orange-400 focus:ring-orange-400'
-                                  : 'border-green-500 bg-green-50/30 focus:border-green-600 focus:ring-green-600'
-                              }`}
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Business Details - Compact */}
-                    <div className="bg-white rounded-lg p-3 shadow-sm border border-slate-200">
-                      <Label className="text-slate-700 font-bold text-xs uppercase tracking-wide mb-2 block">
-                        Business Details
-                      </Label>
-                      <div className="grid grid-cols-2 gap-2 mb-2">
-                        <div>
-                          <Label className="text-slate-600 font-semibold text-xs mb-1 flex items-center gap-1">
-                            Advertiser
-                          </Label>
-                          <Input
-                            value={formData.advertiser ?? ""}
-                            onChange={(e) => updateField("advertiser", e.target.value)}
-                            placeholder="Company Name"
-                            className={`h-9 text-sm ${
-                              !formData.advertiser
-                                ? 'border-slate-300 bg-slate-50 focus:border-orange-400'
-                                : 'border-green-500 bg-green-50/30 focus:border-green-600'
-                            }`}
-                          />
-                        </div>
-                        <div>
-                          <Label className="text-slate-600 font-semibold text-xs mb-1 flex items-center gap-1">
-                            Years in Business
-                          </Label>
-                          <Input
-                            value={formData.yearsInBusiness ?? ""}
-                            onChange={(e) => updateField("yearsInBusiness", e.target.value)}
-                            placeholder="5 years"
-                            className={`h-9 text-sm ${
-                              !formData.yearsInBusiness
-                                ? 'border-slate-300 bg-slate-50 focus:border-orange-400'
-                                : 'border-green-500 bg-green-50/30 focus:border-green-600'
-                            }`}
-                          />
-                        </div>
-                        <div>
-                          <Label className="text-slate-600 font-semibold text-xs mb-1 block">
-                            Media Experience?
-                          </Label>
-                          <div className={`flex gap-2 h-9 items-center px-3 rounded-lg border-2 text-sm ${
-                            formData.hasMediaExperience === null
-                              ? 'border-slate-300 bg-slate-50'
-                              : 'border-green-500 bg-green-50/30'
-                          }`}>
-                            {[
-                              { value: true, label: "Yes" },
-                              { value: false, label: "No" }
-                            ].map((option) => (
-                              <label key={String(option.value)} className="flex items-center gap-1.5 cursor-pointer">
-                                <input
-                                  type="radio"
-                                  checked={formData.hasMediaExperience === option.value}
-                                  onChange={() => updateField("hasMediaExperience", option.value)}
-                                  className="w-3.5 h-3.5 text-blue-600"
-                                />
-                                <span className="font-semibold text-slate-700 text-xs">{option.label}</span>
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                        <div>
-                          <Label className="text-slate-600 font-semibold text-xs mb-1 block">
-                            Done Billboards?
-                          </Label>
-                          <div className={`flex gap-2 h-9 items-center px-3 rounded-lg border-2 text-sm ${
-                            formData.hasDoneBillboards === null
-                              ? 'border-slate-300 bg-slate-50'
-                              : 'border-green-500 bg-green-50/30'
-                          }`}>
-                            {[
-                              { value: true, label: "Yes" },
-                              { value: false, label: "No" }
-                            ].map((option) => (
-                              <label key={String(option.value)} className="flex items-center gap-1.5 cursor-pointer">
-                                <input
-                                  type="radio"
-                                  checked={formData.hasDoneBillboards === option.value}
-                                  onChange={() => updateField("hasDoneBillboards", option.value)}
-                                  className="w-3.5 h-3.5 text-blue-600"
-                                />
-                                <span className="font-semibold text-slate-700 text-xs">{option.label}</span>
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                      <div>
-                        <Label className="text-slate-600 font-semibold text-xs mb-1 flex items-center gap-1">
-                          Business Description
-                        </Label>
-                        <Input
-                          value={formData.businessDescription ?? ""}
-                          onChange={(e) => updateField("businessDescription", e.target.value)}
-                          placeholder="What does the business do?"
-                          className={`h-9 text-sm ${
-                            !formData.businessDescription
-                              ? 'border-slate-300 bg-slate-50 focus:border-orange-400'
-                              : 'border-green-500 bg-green-50/30 focus:border-green-600'
-                          }`}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Campaign Details - Compact */}
-                    <div className="bg-white rounded-lg p-3 shadow-sm border border-slate-200">
-                      <Label className="text-slate-700 font-bold text-xs uppercase tracking-wide mb-2 block">
-                        Campaign Details
-                      </Label>
-                      <div className="grid grid-cols-1 gap-2 mb-2">
-                        <div>
-                          <Label className="text-slate-600 font-semibold text-xs mb-1 flex items-center gap-1">
-                            <span className="text-sm">🎯</span>Billboard Purpose
-                          </Label>
-                          <Input
-                            value={formData.billboardPurpose ?? ""}
-                            onChange={(e) => updateField("billboardPurpose", e.target.value)}
-                            placeholder="Brand awareness"
-                            className={`h-9 text-sm ${
-                              !formData.billboardPurpose
-                                ? 'border-slate-300 bg-slate-50 focus:border-orange-400'
-                                : 'border-green-500 bg-green-50/30 focus:border-green-600'
-                            }`}
-                          />
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <Label className="text-slate-600 font-semibold text-xs mb-1 flex items-center gap-1">
-                              <span className="text-sm">📍</span>Target City & State
-                            </Label>
-                            <Input
-                              value={formData.targetCityAndState ?? ""}
-                              onChange={(e) => updateField("targetCityAndState", e.target.value)}
-                              placeholder="Austin, TX"
-                              className={`h-9 text-sm ${
-                                !formData.targetCityAndState
-                                  ? 'border-slate-300 bg-slate-50 focus:border-orange-400'
-                                  : 'border-green-500 bg-green-50/30 focus:border-green-600'
-                              }`}
-                            />
-                          </div>
-                          <div>
-                            <Label className="text-slate-600 font-semibold text-xs mb-1 flex items-center gap-1">
-                              <span className="text-sm">🛣</span>Target Area
-                            </Label>
-                            <Input
-                              value={formData.targetArea ?? ""}
-                              onChange={(e) => updateField("targetArea", e.target.value)}
-                              placeholder="I-35 North"
-                              className={`h-9 text-sm ${
-                                !formData.targetArea
-                                  ? 'border-slate-300 bg-slate-50 focus:border-orange-400'
-                                  : 'border-green-500 bg-green-50/30 focus:border-green-600'
-                              }`}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
-                        <div>
-                          <Label className="text-slate-600 font-semibold text-xs mb-1 flex items-center gap-1">
-                            <span className="text-sm">📆</span>Campaign Start
-                          </Label>
-                          <Input
-                            value={formData.startMonth ?? ""}
-                            onChange={(e) => updateField("startMonth", e.target.value)}
-                            placeholder="January 2025"
-                            className={`h-9 text-sm ${
-                              !formData.startMonth
-                                ? 'border-slate-300 bg-slate-50 focus:border-orange-400'
-                                : 'border-green-500 bg-green-50/30 focus:border-green-600'
-                            }`}
-                          />
-                        </div>
-                        <div>
-                          <Label className="text-slate-600 font-semibold text-xs mb-1 flex items-center gap-1">
-                            <span className="text-sm">⏱</span>Campaign Length
-                          </Label>
-                          <div className={`grid grid-cols-6 gap-1.5 p-2 rounded-lg border-2 ${
-                            formData.campaignLength === null
-                              ? 'border-slate-300 bg-slate-50'
-                              : 'border-green-500 bg-green-50/30'
-                          }`}>
-                            {["1 Mo", "2 Mo", "3 Mo", "6 Mo", "12 Mo", "TBD"].map((length) => (
-                              <label
-                                key={length}
-                                className={`flex items-center justify-center px-2 py-1.5 rounded cursor-pointer transition-all ${
-                                  formData.campaignLength === length
-                                    ? "bg-blue-500 text-white shadow-md"
-                                    : "bg-white border border-slate-200 text-slate-700 hover:border-blue-300"
-                                }`}
-                              >
-                                <input
-                                  type="radio"
-                                  name="campaignLength"
-                                  checked={formData.campaignLength === length}
-                                  onChange={() => updateField("campaignLength", length)}
-                                  className="sr-only"
-                                />
-                                <span className="text-xs font-semibold">{length}</span>
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Decision Maker - Compact */}
-                    <div className="bg-white rounded-lg p-3 shadow-sm border border-slate-200">
-                      <Label className="text-slate-700 font-bold text-xs uppercase tracking-wide mb-2 block">
-                        Decision Making Authority
-                      </Label>
-                      <div className={`grid grid-cols-2 gap-2 ${
-                        formData.decisionMaker === null ? 'opacity-60' : ''
-                      }`}>
-                        {[
-                          { value: "alone", label: "You Alone", icon: "👤" },
-                          { value: "partners", label: "Partners", icon: "👥" },
-                          { value: "boss", label: "My Boss", icon: "👔" },
-                          { value: "committee", label: "Committee", icon: "🏛" }
-                        ].map((maker) => (
-                          <label
-                            key={maker.value}
-                            className={`flex items-center gap-2 p-2.5 rounded-lg border-2 cursor-pointer transition-all ${
-                              formData.decisionMaker === maker.value
-                                ? "border-blue-500 bg-blue-50 shadow-md"
-                                : "border-slate-200 bg-white hover:border-slate-300"
-                            }`}
-                          >
-                            <input
-                              type="radio"
-                              name="decisionMaker"
-                              checked={formData.decisionMaker === maker.value}
-                              onChange={() => updateField("decisionMaker", maker.value)}
-                              className="w-4 h-4 text-blue-600"
-                            />
-                            <span className="text-lg">{maker.icon}</span>
-                            <span className="font-semibold text-slate-700 text-xs">{maker.label}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Notes - Compact */}
-                    <div className="bg-gradient-to-br from-orange-50 to-amber-50 rounded-lg p-3 shadow-sm border-2 border-orange-200">
-                      <Label className="text-orange-700 font-bold text-xs uppercase tracking-wide mb-2 flex items-center gap-1">
-                        <span className="text-sm">📝</span>What did I tell the person?
-                      </Label>
-                      <Textarea
-                        value={formData.notes ?? ""}
-                        onChange={(e) => updateField("notes", e.target.value)}
-                        rows={3}
-                        placeholder="Conversation notes, promises made, next steps..."
-                        className={`text-sm resize-none ${
-                          !formData.notes
-                            ? 'border-orange-300 bg-white focus:border-orange-500'
-                            : 'border-green-500 bg-green-50/30 focus:border-green-600'
-                        }`}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Pricing Panel - Right Side (1/3 width) */}
-                  <div className="lg:col-span-1">
-                    <div className="sticky top-0 bg-gradient-to-br from-slate-50 to-slate-100 rounded-xl p-4 border border-slate-200 shadow-inner max-h-[calc(100vh-240px)] flex flex-col">
-                      {/* Header - Fixed at top */}
-                      <div className="flex items-center gap-2 mb-3 pb-3 border-b border-slate-200 flex-shrink-0">
-                        <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-                          <span className="text-white text-lg"><DollarSign /></span>
-                        </div>
-                        <div>
-                          <h3 className="font-bold text-slate-800 text-sm">Billboard Pricing</h3>
-                          <p className="text-xs text-slate-500">Real-time pricing data</p>
-                        </div>
-                      </div>
-
-                      {/* Scrollable Content Area */}
-                      <div className="flex-1 overflow-y-auto pr-2">
-                        {isLoadingBillboard && (
-                          <div className="flex flex-col items-center justify-center py-12">
-                            <div className="relative">
-                              <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
-                            </div>
-                            <p className="text-slate-600 font-medium mt-4 text-xs text-center">Loading pricing data...</p>
-                          </div>
-                        )}
-
-                        {!isLoadingBillboard && billboardContext && (
-                          <div className="bg-white rounded-lg p-3 shadow-sm border border-slate-200">
-                            <div className="prose prose-sm max-w-none">
-                              <pre className="whitespace-pre-wrap font-sans text-slate-700 leading-relaxed text-xs">
-                                {billboardContext}
-                              </pre>
-                            </div>
-                          </div>
-                        )}
-
-                        {!isLoadingBillboard && !billboardContext && transcripts.length > 0 && (
-                          <div className="flex flex-col items-center justify-center py-12 text-center">
-                            <div className="text-4xl mb-2">🔍</div>
-                            <p className="text-slate-500 font-medium text-xs">No pricing data yet</p>
-                            <p className="text-slate-400 text-xs mt-1">
-                              Data will appear when locations are mentioned
-                            </p>
-                          </div>
-                        )}
-
-                        {transcripts.length === 0 && (
-                          <div className="flex flex-col items-center justify-center py-12 text-center">
-                            <div className="text-4xl mb-2">📊</div>
-                            <p className="text-slate-400 text-xs font-medium">Pricing data will appear here</p>
-                            <p className="text-slate-300 text-xs mt-1">Start a conversation</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
+              {/* Form + Pricing Tab */}
+              <TabsContent value="form" className="mt-0 flex-1 overflow-hidden">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 h-full overflow-y-auto pr-2">
+                  <LeadForm formData={formData} updateField={updateField} />
+                  <PricingPanel
+                    isLoading={isLoadingBillboard}
+                    billboardContext={billboardContext}
+                    hasTranscripts={transcripts.length > 0}
+                  />
                 </div>
               </TabsContent>
 
               {/* Transcript Tab */}
-              <TabsContent value="transcript" className="mt-0">
-                <div
+              <TabsContent value="transcript" className="mt-0 flex-1 overflow-hidden">
+                <TranscriptView
                   ref={scrollRef}
-                  className="bg-gradient-to-br from-slate-50 to-slate-100 rounded-xl p-4 min-h-[400px] max-h-[calc(100vh-240px)] overflow-y-auto border border-slate-200 shadow-inner"
-                >
-                  {transcripts.map((t, index) => (
-                    <div key={t.id} className="mb-2 last:mb-0">
-                      <div className="flex items-start gap-2">
-                        <div className="flex-shrink-0 w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold text-xs">
-                          {index + 1}
-                        </div>
-                        <div className="flex-1 bg-white rounded-lg p-3 shadow-sm border border-slate-200">
-                          <p className="text-slate-800 leading-relaxed text-sm">{t.text}</p>
-                          <p className="text-xs text-slate-400 mt-1">
-                            {new Date(t.timestamp).toLocaleTimeString()}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                  {interimTranscript && (
-                    <div className="mb-2">
-                      <div className="flex items-start gap-2">
-                        <div className="flex-shrink-0 w-6 h-6 bg-slate-300 rounded-full flex items-center justify-center">
-                          <span className="animate-pulse text-white text-xs">•••</span>
-                        </div>
-                        <div className="flex-1 bg-slate-100 rounded-lg p-3 border border-dashed border-slate-300">
-                          <p className="text-slate-600 italic leading-relaxed text-sm">{interimTranscript}</p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  {transcripts.length === 0 && !interimTranscript && (
-                    <div className="flex flex-col items-center justify-center h-full text-center py-16">
-                      <div className="text-5xl mb-3">🎤</div>
-                      <p className="text-slate-400 text-base font-medium">
-                        {twilioReady ? "Waiting for incoming call..." : "Transcript will appear here..."}
-                      </p>
-                      <p className="text-slate-300 text-sm mt-1">
-                        {twilioReady ? "Accept a call to start transcribing" : "Upload an audio file to transcribe"}
-                      </p>
-                    </div>
-                  )}
-                </div>
+                  transcripts={transcripts}
+                  interimTranscript={interimTranscript}
+                  twilioReady={twilioReady}
+                />
               </TabsContent>
             </Tabs>
           </CardContent>

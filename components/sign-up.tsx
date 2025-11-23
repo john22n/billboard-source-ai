@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Checkbox } from "@/components/ui/checkbox"
 import { signUp, type ActionResponse } from "@/actions/auth"
 
 const initalState: ActionResponse = {
@@ -91,6 +92,19 @@ export function SignupForm({
               {state.errors.confirmPassword[0]}
             </p>
           )}
+        </div>
+        <div className="flex items-center space-x-2">
+          <Checkbox
+            id="isAdmin"
+            name="isAdmin"
+            disabled={isPending}
+          />
+          <Label
+            htmlFor="isAdmin"
+            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+          >
+            Admin Role
+          </Label>
         </div>
         <Button type="submit" className="w-full" disabled={isPending}>
           {isPending ? 'Loading user...' : 'Create User'}

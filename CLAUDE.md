@@ -160,10 +160,8 @@ Authentication is JWT-based with RBAC, implemented in `lib/auth.ts`:
 
 | Route | Description |
 |-------|-------------|
-| `/api/analyze-transcript` | AI analysis (incremental & full modes) |
 | `/api/token` | OpenAI realtime token generation |
 | `/api/transcribe-file` | File upload transcription |
-| `/api/transcribe` | Alternative transcription endpoint |
 | `/api/extract-billboard-fields` | Streaming form field extraction |
 | `/api/billboard-pricing` | Market intelligence lookup (RAG) |
 | `/api/billboard-data/upload-blob` | File upload to Vercel Blob |
