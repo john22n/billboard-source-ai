@@ -24,18 +24,16 @@ export async function POST(request: Request): Promise<NextResponse> {
         
         return {
           allowedContentTypes: ['text/csv', 'application/vnd.ms-excel', 'text/plain'],
-          allowOverwrite: true, // Allow replacing existing files
+          allowOverwrite: true,
           tokenPayload: JSON.stringify({
             uploadedAt: new Date().toISOString(),
           }),
         };
       },
-      onUploadCompleted: async ({ blob }) => {
-        console.log('✅ Blob upload completed:', blob.url);
-        console.log('📦 Blob pathname:', blob.pathname);
-      },
+      // REMOVED onUploadCompleted - this was causing the 401
     });
 
+    console.log('✅ Upload successful:', jsonResponse);
     return NextResponse.json(jsonResponse);
   } catch (error) {
     console.error('❌ Blob upload error:', error);
