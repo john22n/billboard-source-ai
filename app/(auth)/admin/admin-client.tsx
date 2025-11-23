@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from "react"
+import { useState, useTransition, useEffect } from "react"
 import { SignupForm } from "@/components/sign-up"
 import {
   Table,
@@ -20,11 +20,33 @@ import {
 } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Trash2 } from "lucide-react"
+import { Trash2, Loader2 } from "lucide-react"
 import { deleteUsers } from "@/actions/user-actions"
 import { useRouter } from "next/navigation"
 import type { User } from "@/db/schema"
 import { BillboardDataUploader } from "@/components/BillboardDataUploader"
+
+interface OpenAIUsage {
+  totalCost: number;
+  totalCostFormatted: string;
+  startDate: string;
+  endDate: string;
+}
+
+interface TwilioUsage {
+  currentMonth: {
+    name: string;
+    cost: number;
+    costFormatted: string;
+  };
+  lastMonth: {
+    name: string;
+    cost: number;
+    costFormatted: string;
+  };
+  totalCost: number;
+  totalCostFormatted: string;
+}
 
 // Define a type for the cost parameter
 type CostValue = string | number | { toNumber?: () => number; toFixed?: () => string } | null | undefined
@@ -58,13 +80,61 @@ interface AdminClientProps {
   initialCosts: UserCost[]
 }
 
-export default function AdminClient({ 
-  initialUsers = [], 
-  initialCosts = [] 
+export default function AdminClient({
+  initialUsers = [],
+  initialCosts = []
 }: AdminClientProps) {
   const [selectedUsers, setSelectedUsers] = useState<string[]>([])
   const [isPending, startTransition] = useTransition()
   const router = useRouter()
+
+  // OpenAI usage state
+  const [openaiUsage, setOpenaiUsage] = useState<OpenAIUsage | null>(null)
+  const [usageLoading, setUsageLoading] = useState(true)
+  const [usageError, setUsageError] = useState<string | null>(null)
+
+  // Twilio usage state
+  const [twilioUsage, setTwilioUsage] = useState<TwilioUsage | null>(null)
+  const [twilioLoading, setTwilioLoading] = useState(true)
+  const [twilioError, setTwilioError] = useState<string | null>(null)
+
+  // Fetch OpenAI and Twilio usage on mount
+  useEffect(() => {
+    async function fetchOpenAIUsage() {
+      try {
+        const response = await fetch('/api/openai/usage')
+        if (!response.ok) {
+          throw new Error('Failed to fetch usage data')
+        }
+        const data = await response.json()
+        setOpenaiUsage(data)
+      } catch (error) {
+        console.error('Error fetching OpenAI usage:', error)
+        setUsageError('Failed to load OpenAI usage data')
+      } finally {
+        setUsageLoading(false)
+      }
+    }
+
+    async function fetchTwilioUsage() {
+      try {
+        const response = await fetch('/api/twilio/usage')
+        if (!response.ok) {
+          throw new Error('Failed to fetch Twilio usage data')
+        }
+        const data = await response.json()
+        setTwilioUsage(data)
+      } catch (error) {
+        console.error('Error fetching Twilio usage:', error)
+        setTwilioError('Failed to load Twilio usage data')
+      } finally {
+        setTwilioLoading(false)
+      }
+    }
+
+    fetchOpenAIUsage()
+    fetchTwilioUsage()
+  }, [])
 
   const toggleSelect = (id: string) => {
     setSelectedUsers((prev: string[]) =>
@@ -205,6 +275,57 @@ export default function AdminClient({
                 </TableRow>
               </TableFooter>
             </Table>
+
+            {/* OpenAI API Usage (Last 30 Days) */}
+            <div className="mt-6 p-4 bg-muted rounded-lg border">
+              <h3 className="text-sm font-semibold mb-2">OpenAI API Usage (Last 30 Days)</h3>
+              {usageLoading ? (
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Loading usage data...</span>
+                </div>
+              ) : usageError ? (
+                <p className="text-sm text-red-500">{usageError}</p>
+              ) : openaiUsage ? (
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">Total API Cost</span>
+                    <span className="text-xl font-bold">{openaiUsage.totalCostFormatted}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {openaiUsage.startDate} to {openaiUsage.endDate}
+                  </p>
+                </div>
+              ) : null}
+            </div>
+
+            {/* Twilio Usage (Current & Last Month) */}
+            <div className="mt-4 p-4 bg-muted rounded-lg border">
+              <h3 className="text-sm font-semibold mb-2">Twilio Usage</h3>
+              {twilioLoading ? (
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Loading Twilio data...</span>
+                </div>
+              ) : twilioError ? (
+                <p className="text-sm text-red-500">{twilioError}</p>
+              ) : twilioUsage ? (
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">{twilioUsage.currentMonth.name} (Current)</span>
+                    <span className="text-lg font-semibold">{twilioUsage.currentMonth.costFormatted}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">{twilioUsage.lastMonth.name} (Last)</span>
+                    <span className="text-lg font-semibold">{twilioUsage.lastMonth.costFormatted}</span>
+                  </div>
+                  <div className="pt-2 border-t flex justify-between items-center">
+                    <span className="text-sm font-medium">Total</span>
+                    <span className="text-xl font-bold">{twilioUsage.totalCostFormatted}</span>
+                  </div>
+                </div>
+              ) : null}
+            </div>
           </TabsContent>
 
           {/* NEW: Billboard Data Tab */}
