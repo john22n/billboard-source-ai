@@ -12,11 +12,9 @@ export function useTwilio(options: UseTwilioOptions = {}) {
   const twilioDevice = useRef<Device | null>(null);
   const activeCall = useRef<Call | null>(null);
 
-  // Store callbacks in refs to avoid re-running effects
   const onCallAcceptedRef = useRef(options.onCallAccepted);
   const onCallDisconnectedRef = useRef(options.onCallDisconnected);
 
-  // Update refs when callbacks change
   useEffect(() => {
     onCallAcceptedRef.current = options.onCallAccepted;
     onCallDisconnectedRef.current = options.onCallDisconnected;
@@ -32,91 +30,184 @@ export function useTwilio(options: UseTwilioOptions = {}) {
   useEffect(() => {
     const initTwilio = async () => {
       try {
+        console.log('═══════════════════════════════════════════');
+        console.log('🚀 TWILIO INITIALIZATION STARTING');
+        console.log('═══════════════════════════════════════════');
+
         setStatus("Initializing Twilio...");
+
+        console.log('1️⃣ Fetching token from /api/twilio-token...');
         const response = await fetch('/api/twilio-token');
+        console.log('2️⃣ Token response status:', response.status);
+
         const data = await response.json();
+        console.log('3️⃣ Token data received:', {
+          hasToken: !!data.token,
+          identity: data.identity,
+          error: data.error
+        });
 
         if (data.error) {
+          console.error('❌ Token error:', data.error);
           setStatus(`Token error: ${data.error}`);
           return;
         }
 
         const email = data.identity;
         if (!email) {
+          console.error('❌ No identity in token');
           setStatus("Error: No user identity in token");
           return;
         }
 
         setUserEmail(email);
-        console.log(`Initializing Twilio for: ${email}`);
+        console.log('4️⃣ User identity:', email);
 
+        console.log('5️⃣ Creating Device with token...');
         const device = new Device(data.token, {
           codecPreferences: [Call.Codec.Opus, Call.Codec.PCMU],
-          enableRingingState: true,
+          enableRingingState: true, // Added this back
         });
 
-        device.on('registered', () => {
-          console.log(`${email} registered and ready`);
-          setTwilioReady(true);
-          setStatus(`Ready to receive calls`);
-        });
+        console.log('6️⃣ Device created, setting up event listeners...');
 
+        // CRITICAL: Set up incoming BEFORE registering
         device.on('incoming', (call) => {
-          console.log('Incoming call from:', call.parameters.From);
+          console.log('═══════════════════════════════════════════');
+          console.log('📞 INCOMING CALL EVENT FIRED!');
+          console.log('═══════════════════════════════════════════');
+          console.log('Call parameters:', {
+            from: call.parameters.From,
+            to: call.parameters.To,
+            callSid: call.parameters.CallSid,
+          });
+          console.log('Call object:', call);
+
           setIncomingCall(call);
           setStatus(`Incoming call from ${call.parameters.From}`);
 
           call.on('disconnect', () => {
-            console.log('Call disconnected');
+            console.log('📴 Call disconnected');
             setCallActive(false);
             setIncomingCall(null);
             activeCall.current = null;
             onCallDisconnectedRef.current?.();
           });
+
+          call.on('accept', () => {
+            console.log('✅ Call accepted event fired');
+          });
+
+          call.on('reject', () => {
+            console.log('🚫 Call rejected');
+          });
+
+          call.on('error', (error) => {
+            console.error('❌ Call error:', error);
+          });
+        });
+
+        device.on('registered', () => {
+          console.log('═══════════════════════════════════════════');
+          console.log('✅ DEVICE REGISTERED SUCCESSFULLY');
+          console.log('═══════════════════════════════════════════');
+          console.log('Identity:', email);
+          console.log('Device state:', device.state);
+          console.log('Device token:', device.token ? 'Present' : 'Missing');
+          console.log('═══════════════════════════════════════════');
+
+          setTwilioReady(true);
+          setStatus(`Ready to receive calls`);
+        });
+
+        device.on('unregistered', () => {
+          console.warn('⚠️ Device unregistered');
+          setTwilioReady(false);
         });
 
         device.on('error', (error) => {
-          console.error('Twilio Device error:', error);
+          console.error('═══════════════════════════════════════════');
+          console.error('❌ DEVICE ERROR:', error);
+          console.error('Error name:', error.name);
+          console.error('Error message:', error.message);
+          console.error('Error code:', (error as any).code);
+          console.error('═══════════════════════════════════════════');
           setStatus(`Twilio error: ${error.message}`);
         });
 
+        device.on('tokenWillExpire', () => {
+          console.warn('⚠️ Token will expire soon');
+        });
+
+        console.log('7️⃣ Event listeners set up, registering device...');
         await device.register();
+        console.log('8️⃣ Device.register() called successfully');
+
         twilioDevice.current = device;
 
+        // Make device accessible for debugging
+        if (typeof window !== 'undefined') {
+          (window as any).twilioDevice = { current: device };
+        }
+
+        console.log('9️⃣ Device stored in ref and window');
+        console.log('═══════════════════════════════════════════');
+        console.log('✅ INITIALIZATION COMPLETE');
+        console.log('Device state:', device.state);
+        console.log('Waiting for incoming calls...');
+        console.log('═══════════════════════════════════════════');
+
       } catch (error) {
-        console.error('Failed to initialize Twilio:', error);
+        console.error('═══════════════════════════════════════════');
+        console.error('❌ INITIALIZATION FAILED');
+        console.error('Error:', error);
+        console.error('═══════════════════════════════════════════');
         setStatus("Twilio initialization failed");
       }
     };
 
     initTwilio();
-    return () => { twilioDevice.current?.destroy(); };
+
+    return () => {
+      console.log('🧹 Cleaning up Twilio device');
+      twilioDevice.current?.destroy();
+    };
   }, []); // Empty deps - only run once on mount
 
   // Accept incoming call
   const acceptCall = useCallback(async () => {
-    if (!incomingCall) return;
+    if (!incomingCall) {
+      console.error('❌ acceptCall called but no incoming call');
+      return;
+    }
 
     try {
+      console.log('═══════════════════════════════════════════');
+      console.log('📞 ACCEPTING CALL');
+      console.log('═══════════════════════════════════════════');
+
       setStatus("Accepting call...");
 
-      // Set up event listener for when call is fully connected
       incomingCall.on('accept', () => {
-        console.log('Call accepted and connected');
-        // Give streams a moment to be ready
+        console.log('✅ Call accept event - call is connected');
         setTimeout(() => {
+          console.log('🎤 Triggering onCallAccepted callback');
           onCallAcceptedRef.current?.(incomingCall);
         }, 500);
       });
 
-      // Accept the call
+      console.log('Calling incomingCall.accept()...');
       await incomingCall.accept();
+      console.log('✅ accept() completed');
+
       activeCall.current = incomingCall;
       setCallActive(true);
       setIncomingCall(null);
 
+      console.log('Call active, state updated');
+
     } catch (error) {
-      console.error('Error accepting call:', error);
+      console.error('❌ Error accepting call:', error);
       setStatus("Failed to accept call");
     }
   }, [incomingCall]);
@@ -124,6 +215,7 @@ export function useTwilio(options: UseTwilioOptions = {}) {
   // Reject incoming call
   const rejectCall = useCallback(() => {
     if (incomingCall) {
+      console.log('🚫 Rejecting call');
       incomingCall.reject();
       setIncomingCall(null);
       setStatus(twilioReady ? "Ready to receive calls" : "Idle");
@@ -133,6 +225,7 @@ export function useTwilio(options: UseTwilioOptions = {}) {
   // Hang up active call
   const hangupCall = useCallback(() => {
     if (activeCall.current) {
+      console.log('📴 Hanging up call');
       activeCall.current.disconnect();
       activeCall.current = null;
       setCallActive(false);
@@ -140,12 +233,10 @@ export function useTwilio(options: UseTwilioOptions = {}) {
     }
   }, []);
 
-  // Update status externally
   const updateStatus = useCallback((newStatus: string) => {
     setStatus(newStatus);
   }, []);
 
-  // Reset status to default
   const resetStatus = useCallback(() => {
     setStatus(twilioReady ? "Ready to receive calls" : "Idle");
   }, [twilioReady]);
