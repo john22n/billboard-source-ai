@@ -112,9 +112,8 @@ export default function SalesCallTranscriber() {
   useEffect(() => {
     return () => {
       cleanup();
-      destroyTwilio();
     };
-  }, [cleanup, destroyTwilio]);
+  }, [cleanup]);
 
   // Auto-scroll transcripts
   useEffect(() => {

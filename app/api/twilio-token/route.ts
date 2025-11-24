@@ -1,5 +1,8 @@
 // app/api/twilio-token/route.ts
 // Generates Twilio access token for Voice SDK
+//
+export const dynamic = 'force-dymanic'
+export const revalidate = 0
 
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
