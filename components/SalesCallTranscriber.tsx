@@ -42,7 +42,6 @@ export default function SalesCallTranscriber() {
     hangupCall,
     updateStatus,
     resetStatus,
-    destroy: destroyTwilio,
   } = useTwilio({
     onCallAccepted: (call) => startTranscription(call),
     onCallDisconnected: () => {
