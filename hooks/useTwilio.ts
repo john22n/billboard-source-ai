@@ -66,7 +66,6 @@ export function useTwilio(options: UseTwilioOptions = {}) {
         console.log('5️⃣ Creating Device with token...');
         const device = new Device(data.token, {
           codecPreferences: [Call.Codec.Opus, Call.Codec.PCMU],
-          enableRingingState: true, // Added this back
         });
 
         console.log('6️⃣ Device created, setting up event listeners...');
@@ -102,7 +101,7 @@ export function useTwilio(options: UseTwilioOptions = {}) {
             console.log('🚫 Call rejected');
           });
 
-          call.on('error', (error) => {
+          call.on('error', (error: Error) => {
             console.error('❌ Call error:', error);
           });
         });
@@ -125,7 +124,7 @@ export function useTwilio(options: UseTwilioOptions = {}) {
           setTwilioReady(false);
         });
 
-        device.on('error', (error) => {
+        device.on('error', (error: Error) => {
           console.error('═══════════════════════════════════════════');
           console.error('❌ DEVICE ERROR:', error);
           console.error('Error name:', error.name);
@@ -147,7 +146,7 @@ export function useTwilio(options: UseTwilioOptions = {}) {
 
         // Make device accessible for debugging
         if (typeof window !== 'undefined') {
-          (window as any).twilioDevice = { current: device };
+          (window as any).twilioDevice = twilioDevice;
         }
 
         console.log('9️⃣ Device stored in ref and window');
