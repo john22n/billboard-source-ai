@@ -41,8 +41,10 @@ export async function GET() {
   }
 
   // Create access token
+  // Use email prefix as identity (@ symbol can cause routing issues)
+  const identity = email.split('@')[0];
   const token = new AccessToken(accountSid, apiKeySid, apiKeySecret, {
-    identity: email, // Use authenticated user's email
+    identity: identity,
     ttl: 3600, // Token valid for 1 hour
   });
 
@@ -53,11 +55,11 @@ export async function GET() {
 
   token.addGrant(voiceGrant);
 
-  console.log(`🔐 Twilio token generated for authenticated user: ${email}`);
+  console.log(`🔐 Twilio token generated for authenticated user: ${identity}`);
 
   return NextResponse.json({
     token: token.toJwt(),
-    identity: email,
+    identity: identity,
   });
 }
 
