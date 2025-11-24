@@ -2,12 +2,13 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   /* config options here */
+  reactStrictMode: false,
   experimental: {
     serverActions: {
       bodySizeLimit: '50mb'
     }
   },
-  
+
   // Exclude server-side packages from client bundle
   webpack: (config, { isServer }) => {
     if (!isServer) {
