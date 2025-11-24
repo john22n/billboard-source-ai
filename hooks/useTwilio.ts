@@ -52,6 +52,7 @@ export function useTwilio(options: UseTwilioOptions = {}) {
 
         const device = new Device(data.token, {
           codecPreferences: [Call.Codec.Opus, Call.Codec.PCMU],
+          enableRingingState: true,
         });
 
         device.on('registered', () => {
