@@ -10,6 +10,20 @@ export const user = pgTable('User', {
 })
 export type User = InferSelectModel<typeof user>;
 
+// Passkey credentials for WebAuthn authentication
+export const passkey = pgTable('Passkey', {
+  id: varchar('id', { length: 36 }).primaryKey().notNull(), // UUID
+  userId: varchar('user_id', { length: 21 }).notNull().references(() => user.id, { onDelete: 'cascade' }),
+  credentialId: text('credential_id').notNull().unique(), // Base64 encoded credential ID
+  publicKey: text('public_key').notNull(), // Base64 encoded public key
+  counter: integer('counter').notNull().default(0), // Signature counter for replay prevention
+  deviceType: varchar('device_type', { length: 32 }), // 'platform' or 'cross-platform'
+  transports: text('transports'), // JSON array: ['internal', 'usb', 'ble', 'nfc']
+  name: varchar('name', { length: 64 }).default('Passkey'), // User-friendly name
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+})
+export type Passkey = InferSelectModel<typeof passkey>;
+
 export const openaiLogs = pgTable("openai_logs", {
   id: serial("id").primaryKey(),
   userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),

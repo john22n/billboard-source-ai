@@ -1,5 +1,6 @@
-import { useActionState } from 'react'
+import { useActionState, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { startAuthentication, browserSupportsWebAuthn } from '@simplewebauthn/browser'
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -18,6 +19,59 @@ export function LoginForm({
   ...props
 }: React.ComponentProps<"form">) {
   const router = useRouter()
+  const [isPasskeyLoading, setIsPasskeyLoading] = useState(false)
+
+  // Handle passkey authentication
+  const handlePasskeyLogin = async () => {
+    if (!browserSupportsWebAuthn()) {
+      toast.error('Your browser does not support passkeys')
+      return
+    }
+
+    setIsPasskeyLoading(true)
+
+    try {
+      // Get authentication options from server
+      const optionsRes = await fetch('/api/passkey/auth-options', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+
+      if (!optionsRes.ok) {
+        throw new Error('Failed to get authentication options')
+      }
+
+      const options = await optionsRes.json()
+
+      // Prompt user for passkey
+      const authResponse = await startAuthentication({ optionsJSON: options })
+
+      // Verify with server
+      const verifyRes = await fetch('/api/passkey/auth-verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ response: authResponse }),
+      })
+
+      const verifyData = await verifyRes.json()
+
+      if (!verifyRes.ok) {
+        throw new Error(verifyData.error || 'Authentication failed')
+      }
+
+      toast.success('Signed in with passkey')
+      router.push('/dashboard')
+      router.refresh()
+    } catch (error) {
+      // User cancelled or error occurred
+      const message = error instanceof Error ? error.message : 'Passkey authentication failed'
+      if (!message.includes('cancelled') && !message.includes('abort')) {
+        toast.error(message)
+      }
+    } finally {
+      setIsPasskeyLoading(false)
+    }
+  }
 
   //use actionState hook for the form submission action
   const [state, formAction, isPending] = useActionState<
@@ -80,8 +134,47 @@ export function LoginForm({
             </p>
           )}
         </div>
-        <Button type="submit" className="w-full">
+        <Button type="submit" className="w-full" disabled={isPending || isPasskeyLoading}>
           {isPending ? 'loading...' : 'Login'}
+        </Button>
+
+        <div className="relative">
+          <div className="absolute inset-0 flex items-center">
+            <span className="w-full border-t" />
+          </div>
+          <div className="relative flex justify-center text-xs uppercase">
+            <span className="bg-background px-2 text-muted-foreground">
+              Or continue with
+            </span>
+          </div>
+        </div>
+
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full"
+          onClick={handlePasskeyLogin}
+          disabled={isPending || isPasskeyLoading}
+        >
+          {isPasskeyLoading ? (
+            'Authenticating...'
+          ) : (
+            <>
+              <svg
+                className="mr-2 h-4 w-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12 2a5 5 0 0 1 5 5v2a5 5 0 0 1-10 0V7a5 5 0 0 1 5-5Z" />
+                <path d="M12 14a7 7 0 0 0-7 7h14a7 7 0 0 0-7-7Z" />
+              </svg>
+              Sign in with Passkey
+            </>
+          )}
         </Button>
       </div>
     </form>

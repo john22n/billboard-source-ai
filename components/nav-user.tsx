@@ -3,6 +3,7 @@
 import {
   IconDotsVertical,
   IconLogout,
+  IconKey,
 } from "@tabler/icons-react"
 import { ShieldUser } from 'lucide-react';
 import {
@@ -24,9 +25,16 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { signOut } from "@/actions/auth"
-import { useTransition } from "react"
+import { useTransition, useState } from "react"
 import { useRouter } from "next/navigation"
+import { PasskeyManager } from "@/components/passkey-manager"
 
 export function NavUser({
   user,
@@ -40,6 +48,7 @@ export function NavUser({
 }) {
   const { isMobile } = useSidebar()
   const [isPending, startTransition] = useTransition()
+  const [passkeyDialogOpen, setPasskeyDialogOpen] = useState(false)
   const router = useRouter()
 
   const handleLogout = () => {
@@ -107,13 +116,29 @@ export function NavUser({
                 <DropdownMenuSeparator />
               </>
             )}
-            
+
+            <DropdownMenuItem onClick={() => setPasskeyDialogOpen(true)}>
+              <IconKey />
+              Manage Passkeys
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+
             <DropdownMenuItem onClick={handleLogout} disabled={isPending}>
               <IconLogout />
               {isPending ? "Logging out..." : "Log out"}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {/* Passkey Management Dialog */}
+        <Dialog open={passkeyDialogOpen} onOpenChange={setPasskeyDialogOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Security Settings</DialogTitle>
+            </DialogHeader>
+            <PasskeyManager />
+          </DialogContent>
+        </Dialog>
       </SidebarMenuItem>
     </SidebarMenu>
   )
