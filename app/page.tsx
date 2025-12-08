@@ -1,25 +1,21 @@
-import { HeaderNav } from '@/components/header-nav'
-import { Footer } from '@/components/Footer'
-import { Welcome } from "@/components/WelcomeSection";
-import { About } from "@/components/AboutSection";
-import { Product } from "@/components/ProductSection";
-import { Contact } from "@/components/ContactSection";
+'use client'
 
+import { LoginForm } from "@/components/login-form"
+import Spline from "@splinetool/react-spline"
 
 export default function Home() {
   return (
-    <>
-      <main className="min-h-screen bg-primary-foreground lg:bg-primary-foreground text-black">
-    
-      <HeaderNav/>
-      <Welcome />
-      <About />
-      <Product />
-      <Contact />
-      <Footer />
-
-    </main>
-    </>
-  );
+    <div className="grid min-h-svh lg:grid-cols-2 bg-primary-foreground">
+      <div className="flex flex-col gap-4 p-6 md:p-10">
+        <div className="flex flex-1 items-center justify-center">
+          <div className="w-full max-w-xs">
+            <LoginForm />
+          </div>
+        </div>
+      </div>
+      <div className="bg-muted relative hidden lg:block">
+        <Spline scene="https://prod.spline.design/1eapv4LnOygEqB66/scene.splinecode" />
+      </div>
+    </div>
+  )
 }
-

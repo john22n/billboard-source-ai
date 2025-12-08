@@ -18,6 +18,9 @@ export default function SalesCallTranscriber() {
   const [isUploading, setIsUploading] = useState(false);
   const [billboardContext, setBillboardContext] = useState<string>("");
   const [isLoadingBillboard, setIsLoadingBillboard] = useState(false);
+  const [isSubmittingNutshell, setIsSubmittingNutshell] = useState(false);
+  const [nutshellStatus, setNutshellStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [nutshellMessage, setNutshellMessage] = useState('');
 
   // Custom hooks for Twilio and transcription
   const {
@@ -219,6 +222,54 @@ export default function SalesCallTranscriber() {
     }
   };
 
+  const handleNutshellSubmit = async () => {
+    setIsSubmittingNutshell(true);
+    setNutshellStatus('idle');
+    setNutshellMessage('');
+
+    try {
+      const response = await fetch('/api/nutshell/create-lead', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: formData.name || '',
+          phone: formData.phone || '',
+          email: formData.email || '',
+          website: formData.website || '',
+          advertiser: formData.advertiser || '',
+          businessDescription: formData.businessDescription || '',
+          yearsInBusiness: formData.yearsInBusiness || '',
+          billboardPurpose: formData.billboardPurpose || '',
+          targetCityAndState: formData.targetCityAndState || '',
+          targetArea: formData.targetArea || '',
+          startMonth: formData.startMonth || '',
+          campaignLength: formData.campaignLength || '',
+          notes: formData.notes || '',
+          leadType: formData.leadType || '',
+          hasMediaExperience: formData.hasMediaExperience,
+          hasDoneBillboards: formData.hasDoneBillboards,
+          decisionMaker: formData.decisionMaker || '',
+        }),
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        setNutshellStatus('success');
+        setNutshellMessage('Lead created');
+      } else {
+        setNutshellStatus('error');
+        setNutshellMessage(result.error || 'Failed');
+      }
+    } catch (error) {
+      console.error('Error submitting to Nutshell:', error);
+      setNutshellStatus('error');
+      setNutshellMessage('Connection failed');
+    } finally {
+      setIsSubmittingNutshell(false);
+    }
+  };
+
   const isProcessing = isUploading || isExtracting ||
     status.includes("Fetching") || status.includes("Connecting") ||
     status.includes("Starting") || status.includes("Uploading") ||
@@ -391,14 +442,28 @@ export default function SalesCallTranscriber() {
               </TabsList>
 
               {/* Form + Pricing Tab */}
-              <TabsContent value="form" className="mt-0 flex-1 overflow-hidden">
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 h-full overflow-y-auto pr-2">
+              <TabsContent value="form" className="mt-0 flex-1 overflow-hidden flex flex-col">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 flex-1 overflow-y-auto pr-2">
                   <LeadForm formData={formData} updateField={updateField} />
                   <PricingPanel
                     isLoading={isLoadingBillboard}
                     billboardContext={billboardContext}
                     hasTranscripts={transcripts.length > 0}
                   />
+                </div>
+                <div className="flex justify-end items-center gap-2 pt-3 border-t border-slate-200 mt-3">
+                  {nutshellStatus !== 'idle' && (
+                    <span className={`text-xs font-medium ${nutshellStatus === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+                      {nutshellMessage}
+                    </span>
+                  )}
+                  <Button
+                    onClick={handleNutshellSubmit}
+                    disabled={isSubmittingNutshell}
+                    className="bg-orange-500 hover:bg-orange-600 text-white font-semibold shadow-lg hover:shadow-xl transition-all duration-200 h-9 px-4"
+                  >
+                    {isSubmittingNutshell ? 'Submitting...' : 'Nutshell'}
+                  </Button>
                 </div>
               </TabsContent>
 
