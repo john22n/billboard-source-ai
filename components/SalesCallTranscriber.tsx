@@ -431,19 +431,19 @@ export default function SalesCallTranscriber() {
                   value="form"
                   className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-xs"
                 >
-                  📋 Lead Form & Pricing
+                  Lead Form & Pricing
                 </TabsTrigger>
                 <TabsTrigger
                   value="map"
                   className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-xs"
                 >
-                  🗺️ Map
+                  Google Map
                 </TabsTrigger>
                 <TabsTrigger
                   value="transcript"
                   className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-xs"
                 >
-                  💬 Transcript
+                  Transcript
                 </TabsTrigger>
               </TabsList>
 
