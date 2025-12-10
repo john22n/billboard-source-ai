@@ -50,32 +50,53 @@ export async function POST(req: NextRequest) {
       'Accept': 'application/json',
     };
 
-    // First, get the current user's Nutshell ID
-    const getUserPayload = {
+    // Find the Nutshell user by email address
+    const findUsersPayload = {
       jsonrpc: '2.0',
-      method: 'getUser',
-      params: {},
-      id: 'getUser',
+      method: 'findUsers',
+      params: {
+        query: {
+          email: userEmail,
+        },
+      },
+      id: 'findUsers',
     };
+
+    console.log('Searching for Nutshell user with email:', userEmail);
 
     const userResponse = await fetch('https://app.nutshell.com/api/v1/json', {
       method: 'POST',
       headers,
-      body: JSON.stringify(getUserPayload),
+      body: JSON.stringify(findUsersPayload),
     });
 
     const userResult = await userResponse.json();
+    console.log('Nutshell findUsers response:', JSON.stringify(userResult, null, 2));
 
     if (userResult.error) {
-      console.error('Nutshell getUser error:', userResult.error);
+      console.error('Nutshell findUsers error:', userResult.error);
       return NextResponse.json(
-        { error: userResult.error.message || 'Failed to get user from Nutshell' },
+        { error: userResult.error.message || 'Failed to find user in Nutshell' },
         { status: 400 }
       );
     }
 
-    const nutshellUserId = userResult.result?.id;
-    console.log('Nutshell user ID:', nutshellUserId);
+    // findUsers returns an array of users - find the one matching our email
+    const users = userResult.result || [];
+    const matchingUser = users.find((user: { emails?: string[] }) =>
+      user.emails?.some((email: string) => email.toLowerCase() === userEmail.toLowerCase())
+    );
+
+    const nutshellUserId = matchingUser?.id;
+    console.log('Found Nutshell user:', matchingUser?.name, 'ID:', nutshellUserId);
+
+    if (!nutshellUserId) {
+      console.error(`No Nutshell user found for email: ${userEmail}`);
+      return NextResponse.json(
+        { error: `No Nutshell user found for email: ${userEmail}` },
+        { status: 400 }
+      );
+    }
 
     // Build note with all lead details
     const noteParts = [
@@ -97,6 +118,9 @@ export async function POST(req: NextRequest) {
       data.notes && `Notes: ${data.notes}`,
     ].filter(Boolean).join('\n');
 
+    // Ensure user ID is a number (Nutshell API expects numeric ID)
+    const assigneeId = nutshellUserId ? Number(nutshellUserId) : null;
+
     // Create the JSON-RPC payload for Nutshell API with assignee
     const jsonRpcPayload = {
       jsonrpc: '2.0',
@@ -105,14 +129,16 @@ export async function POST(req: NextRequest) {
         lead: {
           description: data.businessDescription || `Billboard Lead - ${data.advertiser || data.name || 'Unknown'}`,
           note: noteParts || undefined,
-          assignee: nutshellUserId ? {
+          assignee: assigneeId ? {
             entityType: 'Users',
-            id: nutshellUserId,
+            id: assigneeId,
           } : undefined,
         },
       },
       id: Date.now().toString(),
     };
+
+    console.log('Nutshell newLead request payload:', JSON.stringify(jsonRpcPayload, null, 2));
 
     const response = await fetch('https://app.nutshell.com/api/v1/json', {
       method: 'POST',
@@ -121,6 +147,7 @@ export async function POST(req: NextRequest) {
     });
 
     const result = await response.json();
+    console.log('Nutshell newLead response:', JSON.stringify(result, null, 2));
 
     // JSON-RPC returns errors in the response body, not via HTTP status
     if (result.error) {

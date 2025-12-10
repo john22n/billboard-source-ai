@@ -7,7 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useBillboardFormExtraction, type BillboardFormData } from "@/hooks/useBillboardFormExtraction";
 import { useTwilio } from "@/hooks/useTwilio";
 import { useOpenAITranscription } from "@/hooks/useOpenAITranscription";
-import { LeadForm, PricingPanel, TranscriptView } from "@/components/sales-call";
+import { LeadForm, PricingPanel, TranscriptView, GoogleMapPanel } from "@/components/sales-call";
 import type { TranscriptItem } from "@/types/sales-call";
 
 export default function SalesCallTranscriber() {
@@ -426,12 +426,18 @@ export default function SalesCallTranscriber() {
 
           <CardContent className="p-4 flex-1 overflow-hidden flex flex-col">
             <Tabs defaultValue="form" className="w-full h-full flex flex-col">
-              <TabsList className="grid w-full grid-cols-2 mb-4 bg-slate-100 p-1 rounded-lg h-9">
+              <TabsList className="grid w-full grid-cols-3 mb-4 bg-slate-100 p-1 rounded-lg h-9">
                 <TabsTrigger
                   value="form"
                   className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-xs"
                 >
                   📋 Lead Form & Pricing
+                </TabsTrigger>
+                <TabsTrigger
+                  value="map"
+                  className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-xs"
+                >
+                  🗺️ Map
                 </TabsTrigger>
                 <TabsTrigger
                   value="transcript"
@@ -465,6 +471,13 @@ export default function SalesCallTranscriber() {
                     {isSubmittingNutshell ? 'Submitting...' : 'Nutshell'}
                   </Button>
                 </div>
+              </TabsContent>
+
+              {/* Map Tab */}
+              <TabsContent value="map" className="mt-0 flex-1 overflow-hidden">
+                <GoogleMapPanel
+                  initialLocation={formData.targetCityAndState || formData.targetArea || ""}
+                />
               </TabsContent>
 
               {/* Transcript Tab */}
