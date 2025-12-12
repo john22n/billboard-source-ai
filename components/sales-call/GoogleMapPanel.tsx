@@ -10,7 +10,8 @@ interface GoogleMapPanelProps {
 
 declare global {
   interface Window {
-    google: typeof google;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    google: any;
   }
 }
 
@@ -18,9 +19,12 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const streetViewRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const mapInstanceRef = useRef<google.maps.Map | null>(null);
-  const markerRef = useRef<google.maps.marker.AdvancedMarkerElement | null>(null);
-  const streetViewPanoramaRef = useRef<google.maps.StreetViewPanorama | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mapInstanceRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const markerRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const streetViewPanoramaRef = useRef<any>(null);
   const initCalledRef = useRef(false);
 
   const [isLoaded, setIsLoaded] = useState(false);
@@ -34,8 +38,9 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
     if (!searchQuery.trim() || !window.google?.maps || !isLoaded) return;
 
     setIsSearching(true);
-    const geocoder = new google.maps.Geocoder();
-    geocoder.geocode({ address: searchQuery }, (results, status) => {
+    const geocoder = new window.google.maps.Geocoder();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    geocoder.geocode({ address: searchQuery }, (results: any, status: any) => {
       setIsSearching(false);
       if (status === "OK" && results?.[0]?.geometry?.location) {
         const location = results[0].geometry.location;
@@ -46,7 +51,7 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
           if (markerRef.current) {
             markerRef.current.position = location;
           } else {
-            markerRef.current = new google.maps.marker.AdvancedMarkerElement({
+            markerRef.current = new window.google.maps.marker.AdvancedMarkerElement({
               map: mapInstanceRef.current,
               position: location,
             });
@@ -58,11 +63,12 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
         setCurrentAddress(address);
 
         // Check Street View availability
-        const streetViewService = new google.maps.StreetViewService();
+        const streetViewService = new window.google.maps.StreetViewService();
         streetViewService.getPanorama(
           { location, radius: 50 },
-          (data, svStatus) => {
-            const available = svStatus === google.maps.StreetViewStatus.OK;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (data: any, svStatus: any) => {
+            const available = svStatus === window.google.maps.StreetViewStatus.OK;
             setStreetViewAvailable(available);
 
             if (available && streetViewPanoramaRef.current) {
@@ -82,14 +88,15 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
   }, [handleSearch]);
 
   const updateMarkerAndStreetView = useCallback(
-    (location: google.maps.LatLng, address?: string) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (location: any, address?: string) => {
       if (!mapInstanceRef.current || !window.google?.maps) return;
 
       // Update or create marker
       if (markerRef.current) {
         markerRef.current.position = location;
       } else {
-        markerRef.current = new google.maps.marker.AdvancedMarkerElement({
+        markerRef.current = new window.google.maps.marker.AdvancedMarkerElement({
           map: mapInstanceRef.current,
           position: location,
         });
@@ -104,11 +111,12 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
       }
 
       // Check Street View availability
-      const streetViewService = new google.maps.StreetViewService();
+      const streetViewService = new window.google.maps.StreetViewService();
       streetViewService.getPanorama(
         { location, radius: 50 },
-        (data, status) => {
-          const available = status === google.maps.StreetViewStatus.OK;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (data: any, status: any) => {
+          const available = status === window.google.maps.StreetViewStatus.OK;
           setStreetViewAvailable(available);
 
           if (available && streetViewPanoramaRef.current) {
@@ -133,7 +141,7 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
     const defaultZoom = 4;
 
     // Create map
-    const map = new google.maps.Map(mapRef.current, {
+    const map = new window.google.maps.Map(mapRef.current, {
       center: defaultCenter,
       zoom: defaultZoom,
       mapId: "billboard-source-map",
@@ -145,7 +153,7 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
 
     // Create Street View panorama
     if (streetViewRef.current) {
-      streetViewPanoramaRef.current = new google.maps.StreetViewPanorama(
+      streetViewPanoramaRef.current = new window.google.maps.StreetViewPanorama(
         streetViewRef.current,
         {
           pov: { heading: 0, pitch: 0 },
@@ -160,10 +168,12 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
 
 
     // Allow clicking on map to place marker
-    map.addListener("click", (event: google.maps.MapMouseEvent) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    map.addListener("click", (event: any) => {
       if (event.latLng) {
-        const geocoder = new google.maps.Geocoder();
-        geocoder.geocode({ location: event.latLng }, (results, status) => {
+        const geocoder = new window.google.maps.Geocoder();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        geocoder.geocode({ location: event.latLng }, (results: any, status: any) => {
           if (status === "OK" && results?.[0]) {
             updateMarkerAndStreetView(
               event.latLng!,
@@ -178,8 +188,9 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
 
     // If initial location provided, geocode and show it
     if (initialLocation) {
-      const geocoder = new google.maps.Geocoder();
-      geocoder.geocode({ address: initialLocation }, (results, status) => {
+      const geocoder = new window.google.maps.Geocoder();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      geocoder.geocode({ address: initialLocation }, (results: any, status: any) => {
         if (status === "OK" && results?.[0]?.geometry?.location) {
           updateMarkerAndStreetView(
             results[0].geometry.location,
@@ -220,9 +231,11 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
 
     // Load the script with callback
     const callbackName = `initGoogleMaps_${Date.now()}`;
-    (window as Record<string, unknown>)[callbackName] = () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any)[callbackName] = () => {
       initializeMap();
-      delete (window as Record<string, unknown>)[callbackName];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      delete (window as any)[callbackName];
     };
 
     const script = document.createElement("script");
@@ -231,7 +244,8 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
     document.head.appendChild(script);
 
     return () => {
-      delete (window as Record<string, unknown>)[callbackName];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      delete (window as any)[callbackName];
     };
   }, [initializeMap]);
 
@@ -240,8 +254,9 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
     if (!isLoaded || !initialLocation || !window.google?.maps) return;
 
     setSearchQuery(initialLocation);
-    const geocoder = new google.maps.Geocoder();
-    geocoder.geocode({ address: initialLocation }, (results, status) => {
+    const geocoder = new window.google.maps.Geocoder();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    geocoder.geocode({ address: initialLocation }, (results: any, status: any) => {
       if (status === "OK" && results?.[0]?.geometry?.location) {
         updateMarkerAndStreetView(
           results[0].geometry.location,
@@ -254,10 +269,10 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
   // Trigger resize when Street View visibility changes
   useEffect(() => {
     if (showStreetView && streetViewPanoramaRef.current && window.google?.maps) {
-      google.maps.event.trigger(streetViewPanoramaRef.current, "resize");
+      window.google.maps.event.trigger(streetViewPanoramaRef.current, "resize");
     }
     if (mapInstanceRef.current && window.google?.maps) {
-      google.maps.event.trigger(mapInstanceRef.current, "resize");
+      window.google.maps.event.trigger(mapInstanceRef.current, "resize");
     }
   }, [showStreetView]);
 
