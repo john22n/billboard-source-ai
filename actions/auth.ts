@@ -3,6 +3,7 @@
 import { z } from 'zod'
 import { verifyPassword, createSession, createUser, deleteSession } from '@/lib/auth'
 import { getUserByEmail } from '@/lib/dal'
+import { getPasskeysByUserId } from '@/lib/passkey'
 import { redirect } from 'next/navigation'
 
 // define zod schema for signin validation
@@ -36,6 +37,9 @@ export type ActionResponse = {
   message: string
   errors?: Record<string, string[]>
   error?: string
+  requiresPasskeySetup?: boolean
+  userId?: string
+  userEmail?: string
 }
 
 export async function signIn(formData: FormData): Promise<ActionResponse> {
@@ -88,9 +92,17 @@ export async function signIn(formData: FormData): Promise<ActionResponse> {
 
     //create session
     await createSession(user.id, user.email)
+
+    // Check if user has passkeys - if not, they need to set one up
+    const userPasskeys = await getPasskeysByUserId(user.id)
+    const requiresPasskeySetup = userPasskeys.length === 0
+
     return {
       success: true,
-      message: 'Signed in successfully'
+      message: 'Signed in successfully',
+      requiresPasskeySetup,
+      userId: user.id,
+      userEmail: user.email
     }
   } catch (error) {
     console.error('sign in error:', error)
@@ -170,5 +182,29 @@ export async function signOut(): Promise<void> {
     throw new Error('failed to sign out')
   } finally {
     redirect('/login')
+  }
+}
+
+/**
+ * Check if a user has passkeys set up (used to determine login flow)
+ */
+export async function checkUserHasPasskeys(email: string): Promise<{ exists: boolean; hasPasskeys: boolean }> {
+  try {
+    // Validate email format
+    const emailValidation = z.string().email().safeParse(email)
+    if (!emailValidation.success) {
+      return { exists: false, hasPasskeys: false }
+    }
+
+    const user = await getUserByEmail(email)
+    if (!user) {
+      return { exists: false, hasPasskeys: false }
+    }
+
+    const passkeys = await getPasskeysByUserId(user.id)
+    return { exists: true, hasPasskeys: passkeys.length > 0 }
+  } catch (error) {
+    console.error('check passkeys error:', error)
+    return { exists: false, hasPasskeys: false }
   }
 }
