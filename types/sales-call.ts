@@ -13,3 +13,10 @@ export interface TwilioState {
   callActive: boolean;
   userEmail: string;
 }
+
+// Lead sentiment classification enum
+export enum LeadSentiment {
+  AVAILER = "Availer",
+  PANEL_REQUESTER = "Panel Requester",
+  TIRE_KICKER = "Tire Kicker"
+}

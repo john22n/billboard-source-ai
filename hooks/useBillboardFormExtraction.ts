@@ -1,34 +1,55 @@
 // hooks/useBillboardFormExtraction.ts
 "use client";
 
-export interface BillboardFormData {
-  leadType: "tire-kicker" | "panel-requestor" | "availer" | null;
-  name: string | null;
-  phone: string | null;
-  email: string | null;
-  website: string | null;
-  advertiser: string | null;
-  hasMediaExperience: boolean | null;
-  hasDoneBillboards: boolean | null;
-  businessDescription: string | null;
-  yearsInBusiness: string | null;
-  billboardPurpose: string | null;
-  targetCityAndState: string | null;
-  targetArea: string | null;
-  startMonth: string | null;
-  campaignLength: "4WK" | "8WK" | "12WK" | "24WK" | "ANNUAL" | "TBD" | null;
-  decisionMaker: "alone" | "partners" | "boss" | "committee" | null;
-  notes: string | null;
-  confidence?: {
-    overall: number;
-    fieldsExtracted: number;
-    totalFields: number;
-  };
-}
-
 import { experimental_useObject as useObject } from "@ai-sdk/react";
 import { billboardLeadSchema } from "@/lib/schemas";
 import { useCallback, useRef, useState } from "react";
+import { LeadSentiment } from "@/types/sales-call";
+
+export interface BillboardFormData {
+  // Lead classification - NOW USING ENUM
+  leadType: LeadSentiment | null;
+  
+  // Entity information
+  typeName?: "business" | "political" | "nonprofit" | "personal" | null;
+  businessName?: string | null;
+  entityName?: string | null;
+  
+  // Contact information
+  name: string | null;
+  position?: string | null;
+  phone: string | null;
+  email: string | null;
+  website: string | null;
+  decisionMaker: "alone" | "partners" | "boss" | "committee" | null;
+  sendOver: ("Avails" | "Panel Info" | "Planning Rates" | undefined)[] | null;
+  
+  // Billboard experience
+  billboardsBeforeYN?: string | null;
+  billboardsBeforeDetails?: string | null;
+  
+  // Campaign details
+  billboardPurpose: string | null;
+  accomplishDetails?: string | null;
+  targetAudience?: string | null;
+  
+  // Location (SEPARATED)
+  targetCity?: string | null;
+  state?: string | null;
+  targetArea: string | null;
+  
+  // Timeline & preferences
+  startMonth: string | null;
+  campaignLength: string[] | string | null;
+  boardType?: string | null;
+  
+  // Business context
+  hasMediaExperience: boolean | null;
+  yearsInBusiness: string | null;
+  
+  // Notes
+  notes: string | null;
+}
 
 export function useBillboardFormExtraction() {
   const transcriptContextRef = useRef<string[]>([]);
@@ -55,7 +76,7 @@ export function useBillboardFormExtraction() {
       setExtractionError(null);
       setRetryCount(0);
       isProcessingRef.current = false;
-      setIsCleared(false);
+      setIsCleared(false); // ✅ Reset isCleared when new data arrives
     },
   });
 
@@ -171,7 +192,7 @@ export function useBillboardFormExtraction() {
   }, []);
 
   return {
-    formData: isCleared ? null : object,
+    formData: isCleared ? null : object, // Return null when cleared
     isExtracting: isLoading || isProcessingRef.current,
     extractFields,
     error: extractionError || error?.message,

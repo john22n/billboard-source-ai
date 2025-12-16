@@ -8,6 +8,7 @@ import { useBillboardFormExtraction, type BillboardFormData } from "@/hooks/useB
 import { useTwilio } from "@/hooks/useTwilio";
 import { useOpenAITranscription } from "@/hooks/useOpenAITranscription";
 import { LeadForm, PricingPanel, TranscriptView, GoogleMapPanel, ArcGISMapPanel } from "@/components/sales-call";
+import type { ContactData, MarketData } from "@/components/sales-call/LeadForm";
 import type { TranscriptItem } from "@/types/sales-call";
 
 export default function SalesCallTranscriber() {
@@ -21,6 +22,29 @@ export default function SalesCallTranscriber() {
   const [isSubmittingNutshell, setIsSubmittingNutshell] = useState(false);
   const [nutshellStatus, setNutshellStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [nutshellMessage, setNutshellMessage] = useState('');
+  const [resetTrigger, setResetTrigger] = useState(0);
+
+  // ✅ ADD: State for additional contacts and markets (lifted from LeadForm)
+  const [additionalContacts, setAdditionalContacts] = useState<ContactData[]>([]);
+  const [additionalMarkets, setAdditionalMarkets] = useState<MarketData[]>([]);
+
+  // ✅ ADD: State for active indices (lifted from LeadForm)
+  const [activeContactIndex, setActiveContactIndex] = useState(0);
+  const [activeMarketIndex, setActiveMarketIndex] = useState(0);
+
+  // ✅ ADD: State for ballpark (lifted from LeadForm)
+  const [ballpark, setBallpark] = useState("");
+
+  // ✅ ADD: State for Twilio phone (lifted from LeadForm)
+  const [twilioPhone, setTwilioPhone] = useState("");
+  const [twilioPhonePreFilled, setTwilioPhonePreFilled] = useState(false);  // ✅ NEW: Track if phone was pre-filled
+
+  // ✅ ADD: State for user confirmations (lifted from LeadForm)
+  const [confirmedLeadType, setConfirmedLeadType] = useState<string | null>(null);
+  const [confirmedDecisionMakers, setConfirmedDecisionMakers] = useState<{[contactIndex: number]: string | null}>({});
+  const [confirmedBoardTypes, setConfirmedBoardTypes] = useState<{[marketIndex: number]: string | null}>({});
+  const [confirmedDurations, setConfirmedDurations] = useState<{[marketIndex: number]: string[]}>({});
+  const [confirmedSendOver, setConfirmedSendOver] = useState<{[contactIndex: number]: string[]}>({});
 
   // Custom hooks for Twilio and transcription
   const {
@@ -66,44 +90,100 @@ export default function SalesCallTranscriber() {
     canRetry,
   } = useBillboardFormExtraction();
 
-  // Local state for manual user edits
+  // Local state for manual user edits (tracks which fields user has manually changed)
   const [manualEdits, setManualEdits] = useState<Partial<BillboardFormData>>({});
+  
+  // Track which fields have been manually edited by the user
+  const [userEditedFields, setUserEditedFields] = useState<Set<string>>(new Set());
 
-  // Merge AI data with manual edits
-  const formData = {
-    leadType: manualEdits.leadType ?? aiFormData?.leadType ?? null,
-    name: manualEdits.name ?? aiFormData?.name ?? "",
-    phone: manualEdits.phone ?? aiFormData?.phone ?? "",
-    email: manualEdits.email ?? aiFormData?.email ?? "",
-    website: manualEdits.website ?? aiFormData?.website ?? "",
-    advertiser: manualEdits.advertiser ?? aiFormData?.advertiser ?? "",
-    hasMediaExperience: manualEdits.hasMediaExperience ?? aiFormData?.hasMediaExperience ?? null,
-    hasDoneBillboards: manualEdits.hasDoneBillboards ?? aiFormData?.hasDoneBillboards ?? null,
-    businessDescription: manualEdits.businessDescription ?? aiFormData?.businessDescription ?? "",
-    yearsInBusiness: manualEdits.yearsInBusiness ?? aiFormData?.yearsInBusiness ?? "",
-    billboardPurpose: manualEdits.billboardPurpose ?? aiFormData?.billboardPurpose ?? "",
-    targetCityAndState: manualEdits.targetCityAndState ?? aiFormData?.targetCityAndState ?? "",
-    targetArea: manualEdits.targetArea ?? aiFormData?.targetArea ?? "",
-    startMonth: manualEdits.startMonth ?? aiFormData?.startMonth ?? "",
-    campaignLength: manualEdits.campaignLength ?? aiFormData?.campaignLength ?? null,
-    decisionMaker: manualEdits.decisionMaker ?? aiFormData?.decisionMaker ?? null,
-    notes: manualEdits.notes ?? aiFormData?.notes ?? "",
-  };
+  // Merge AI data with manual edits - manual edits take precedence only for fields user has touched
+  const formData: BillboardFormData = useMemo(() => {
+    const merged: BillboardFormData = {
+      // Lead classification
+      leadType: userEditedFields.has('leadType') ? manualEdits.leadType ?? null : aiFormData?.leadType ?? null,
+      
+      // Entity information
+      typeName: userEditedFields.has('typeName') ? manualEdits.typeName ?? null : aiFormData?.typeName ?? null,
+      businessName: userEditedFields.has('businessName') ? manualEdits.businessName ?? null : aiFormData?.businessName ?? null,
+      entityName: userEditedFields.has('entityName') ? manualEdits.entityName ?? null : aiFormData?.entityName ?? null,
+      
+      // Contact information
+      name: userEditedFields.has('name') ? manualEdits.name ?? null : aiFormData?.name ?? null,
+      position: userEditedFields.has('position') ? manualEdits.position ?? null : aiFormData?.position ?? null,
+      phone: userEditedFields.has('phone') ? manualEdits.phone ?? null : aiFormData?.phone ?? null,
+      email: userEditedFields.has('email') ? manualEdits.email ?? null : aiFormData?.email ?? null,
+      website: userEditedFields.has('website') ? manualEdits.website ?? null : aiFormData?.website ?? null,
+      decisionMaker: userEditedFields.has('decisionMaker') ? manualEdits.decisionMaker ?? null : aiFormData?.decisionMaker ?? null,
+      sendOver: userEditedFields.has('sendOver') ? manualEdits.sendOver ?? null : aiFormData?.sendOver ?? null,
+      
+      // Billboard experience
+      billboardsBeforeYN: userEditedFields.has('billboardsBeforeYN') ? manualEdits.billboardsBeforeYN ?? null : aiFormData?.billboardsBeforeYN ?? null,
+      billboardsBeforeDetails: userEditedFields.has('billboardsBeforeDetails') ? manualEdits.billboardsBeforeDetails ?? null : aiFormData?.billboardsBeforeDetails ?? null,
+      
+      // Campaign details
+      billboardPurpose: userEditedFields.has('billboardPurpose') ? manualEdits.billboardPurpose ?? null : aiFormData?.billboardPurpose ?? null,
+      accomplishDetails: userEditedFields.has('accomplishDetails') ? manualEdits.accomplishDetails ?? null : aiFormData?.accomplishDetails ?? null,
+      targetAudience: userEditedFields.has('targetAudience') ? manualEdits.targetAudience ?? null : aiFormData?.targetAudience ?? null,
+      
+      // Location (SEPARATED)
+      targetCity: userEditedFields.has('targetCity') ? manualEdits.targetCity ?? null : aiFormData?.targetCity ?? null,
+      state: userEditedFields.has('state') ? manualEdits.state ?? null : aiFormData?.state ?? null,
+      targetArea: userEditedFields.has('targetArea') ? manualEdits.targetArea ?? null : aiFormData?.targetArea ?? null,
+      
+      // Timeline & preferences
+      startMonth: userEditedFields.has('startMonth') ? manualEdits.startMonth ?? null : aiFormData?.startMonth ?? null,
+      campaignLength: userEditedFields.has('campaignLength') ? manualEdits.campaignLength ?? null : aiFormData?.campaignLength ?? null,
+      boardType: userEditedFields.has('boardType') ? manualEdits.boardType ?? null : aiFormData?.boardType ?? null,
+      
+      // Business context
+      hasMediaExperience: userEditedFields.has('hasMediaExperience') ? manualEdits.hasMediaExperience ?? null : aiFormData?.hasMediaExperience ?? null,
+      yearsInBusiness: userEditedFields.has('yearsInBusiness') ? manualEdits.yearsInBusiness ?? null : aiFormData?.yearsInBusiness ?? null,
+      
+      // Notes
+      notes: userEditedFields.has('notes') ? manualEdits.notes ?? null : aiFormData?.notes ?? null,
+    };
+    
+    return merged;
+  }, [aiFormData, manualEdits, userEditedFields]);
 
-  const updateField = (field: string, value: string | boolean | null) => {
+  const updateField = (field: string, value: string | boolean | string[] | null) => {
     setManualEdits(prev => ({ ...prev, [field]: value }));
-  };
-
-  const clearForm = () => {
-    setManualEdits({});
-    resetExtraction();
+    setUserEditedFields(prev => new Set(prev).add(field));
   };
 
   const clearAll = () => {
+    // Clear transcripts first
     clearTranscripts();
     setBillboardContext("");
     lastFetchedTranscript.current = "";
-    clearForm();
+    
+    // Clear all form-related state
+    setManualEdits({});
+    setUserEditedFields(new Set());
+    resetExtraction(); // Clear AI extracted data
+    
+    // Clear additional contacts/markets
+    setAdditionalContacts([]);
+    setAdditionalMarkets([]);
+    
+    // Reset active indices
+    setActiveContactIndex(0);
+    setActiveMarketIndex(0);
+    
+    // Clear ballpark and phone
+    setBallpark("");
+    setTwilioPhone("");
+    setTwilioPhonePreFilled(false);  // ✅ RESET pre-fill flag
+    
+    // Clear all confirmations
+    setConfirmedLeadType(null);
+    setConfirmedDecisionMakers({});
+    setConfirmedBoardTypes({});
+    setConfirmedDurations({});
+    setConfirmedSendOver({});
+    
+    // Trigger reset in LeadForm
+    setResetTrigger(prev => prev + 1);
   };
 
   const fullTranscript = useMemo(() => {
@@ -232,23 +312,45 @@ export default function SalesCallTranscriber() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          // Contact information
           name: formData.name || '',
           phone: formData.phone || '',
           email: formData.email || '',
+          position: formData.position || '',
           website: formData.website || '',
-          advertiser: formData.advertiser || '',
-          businessDescription: formData.businessDescription || '',
-          yearsInBusiness: formData.yearsInBusiness || '',
+          decisionMaker: formData.decisionMaker || '',
+          
+          // Entity information
+          typeName: formData.typeName || '',
+          businessName: formData.businessName || '',
+          entityName: formData.entityName || '',
+          
+          // Billboard experience
+          billboardsBeforeYN: formData.billboardsBeforeYN || '',
+          billboardsBeforeDetails: formData.billboardsBeforeDetails || '',
+          
+          // Campaign details
           billboardPurpose: formData.billboardPurpose || '',
-          targetCityAndState: formData.targetCityAndState || '',
+          accomplishDetails: formData.accomplishDetails || '',
+          targetAudience: formData.targetAudience || '',
+          
+          // Location
+          targetCity: formData.targetCity || '',
+          state: formData.state || '',
           targetArea: formData.targetArea || '',
+          
+          // Timeline & preferences
           startMonth: formData.startMonth || '',
           campaignLength: formData.campaignLength || '',
-          notes: formData.notes || '',
-          leadType: formData.leadType || '',
+          boardType: formData.boardType || '',
+          
+          // Business context
           hasMediaExperience: formData.hasMediaExperience,
-          hasDoneBillboards: formData.hasDoneBillboards,
-          decisionMaker: formData.decisionMaker || '',
+          yearsInBusiness: formData.yearsInBusiness || '',
+          
+          // Lead classification & notes
+          leadType: formData.leadType || '',
+          notes: formData.notes || '',
         }),
       });
 
@@ -275,8 +377,25 @@ export default function SalesCallTranscriber() {
     status.includes("Starting") || status.includes("Uploading") ||
     status.includes("Initializing");
 
+  // ✅ Get the currently active market's location for maps
+  const getCurrentMarketLocation = () => {
+    if (activeMarketIndex === 0) {
+      // Primary market - use formData
+      return formData.targetCity && formData.state 
+        ? `${formData.targetCity}, ${formData.state}` 
+        : formData.targetArea || "";
+    } else {
+      // Additional market - use additionalMarkets
+      const market = additionalMarkets[activeMarketIndex - 1];
+      if (!market) return "";
+      return market.targetCity && market.state
+        ? `${market.targetCity}, ${market.state}`
+        : market.targetArea || "";
+    }
+  };
+
   return (
-    <div className="h-full bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 p-3 lg:p-4 overflow-hidden">
+    <div className="h-full bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 p-3 lg:p-1 overflow-hidden">
       <div className="h-full max-w-[1800px] mx-auto flex flex-col">
         <Card className="shadow-2xl border-0 overflow-hidden flex flex-col h-full">
           {/* Header */}
@@ -456,7 +575,37 @@ export default function SalesCallTranscriber() {
               {/* Form + Pricing Tab */}
               <TabsContent value="form" className="mt-0 flex-1 overflow-hidden flex flex-col">
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 flex-1 overflow-y-auto pr-2">
-                  <LeadForm formData={formData} updateField={updateField} />
+                  <LeadForm 
+                    key={resetTrigger}
+                    formData={formData} 
+                    updateField={updateField} 
+                    resetTrigger={resetTrigger}
+                    inboundPhone={incomingCall?.parameters?.From}
+                    additionalContacts={additionalContacts}           
+                    setAdditionalContacts={setAdditionalContacts}     
+                    additionalMarkets={additionalMarkets}             
+                    setAdditionalMarkets={setAdditionalMarkets}
+                    activeContactIndex={activeContactIndex}
+                    setActiveContactIndex={setActiveContactIndex}
+                    activeMarketIndex={activeMarketIndex}
+                    setActiveMarketIndex={setActiveMarketIndex}
+                    ballpark={ballpark}
+                    setBallpark={setBallpark}
+                    twilioPhone={twilioPhone}
+                    setTwilioPhone={setTwilioPhone}
+                    twilioPhonePreFilled={twilioPhonePreFilled}  // ✅ NEW PROP
+                    setTwilioPhonePreFilled={setTwilioPhonePreFilled}  // ✅ NEW PROP
+                    confirmedLeadType={confirmedLeadType}
+                    setConfirmedLeadType={setConfirmedLeadType}
+                    confirmedDecisionMakers={confirmedDecisionMakers}
+                    setConfirmedDecisionMakers={setConfirmedDecisionMakers}
+                    confirmedBoardTypes={confirmedBoardTypes}
+                    setConfirmedBoardTypes={setConfirmedBoardTypes}
+                    confirmedDurations={confirmedDurations}
+                    setConfirmedDurations={setConfirmedDurations}
+                    confirmedSendOver={confirmedSendOver}
+                    setConfirmedSendOver={setConfirmedSendOver}
+                  />
                   <PricingPanel
                     isLoading={isLoadingBillboard}
                     billboardContext={billboardContext}
@@ -482,14 +631,14 @@ export default function SalesCallTranscriber() {
               {/* Map Tab */}
               <TabsContent value="map" className="mt-0 flex-1 overflow-hidden">
                 <GoogleMapPanel
-                  initialLocation={formData.targetCityAndState || formData.targetArea || ""}
+                  initialLocation={getCurrentMarketLocation()}
                 />
               </TabsContent>
 
               {/* ArcGIS Map Tab */}
               <TabsContent value="arcgis" className="mt-0 flex-1 overflow-hidden">
                 <ArcGISMapPanel
-                  initialLocation={formData.targetCityAndState || formData.targetArea || ""}
+                  initialLocation={getCurrentMarketLocation()}
                 />
               </TabsContent>
 
