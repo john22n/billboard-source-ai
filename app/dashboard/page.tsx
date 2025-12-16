@@ -9,13 +9,11 @@ import SalesCallTranscriber from "@/components/SalesCallTranscriber"
 import { getCurrentUser } from '@/lib/dal'
 
 export default async function Page() {
-
   const currentUser = await getCurrentUser()
-
   if (!currentUser) {
     redirect('/')
   }
-
+  
   return (
     <SidebarProvider
       defaultOpen={false}
@@ -38,8 +36,10 @@ export default async function Page() {
       <SidebarInset>
         <SiteHeader />
         <div className="flex flex-1 flex-col overflow-hidden">
-          <div className="@container/main flex flex-1 flex-col overflow-hidden">
-            <SalesCallTranscriber />
+          <div className="@container/main flex flex-1 flex-col overflow-hidden px-2 lg:px-4">
+            <div className="w-full h-full">
+              <SalesCallTranscriber />
+            </div>
           </div>
         </div>
       </SidebarInset>
