@@ -5,6 +5,8 @@ import { embedMany } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { db } from '@/db';
 import { billboardLocations } from '@/db/schema';
+import { getSession } from '@/lib/auth';
+import { getCurrentUser } from '@/lib/dal';
 
 export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
@@ -79,6 +81,17 @@ function createEmbeddingText(record: CSVRow): string {
 
 export async function POST(req: NextRequest) {
   try {
+    // Verify user is authenticated and has admin role
+    const session = await getSession();
+    if (!session?.userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const currentUser = await getCurrentUser();
+    if (!currentUser || currentUser.role !== 'admin') {
+      return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 });
+    }
+
     const { blobUrl, chunkIndex, chunkSize } = await req.json();
 
     console.log(`📥 Processing chunk ${chunkIndex + 1}...`);

@@ -2,12 +2,25 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
 import { sql } from 'drizzle-orm';
 import { parse } from 'csv-parse/sync';
+import { getSession } from '@/lib/auth';
+import { getCurrentUser } from '@/lib/dal';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   try {
+    // Verify user is authenticated and has admin role
+    const session = await getSession();
+    if (!session?.userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const currentUser = await getCurrentUser();
+    if (!currentUser || currentUser.role !== 'admin') {
+      return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 });
+    }
+
     const { blobUrl } = await req.json();
 
     if (!blobUrl) {

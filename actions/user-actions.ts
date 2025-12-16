@@ -1,10 +1,29 @@
 'use server'
 
-import { deleteUsersByIds } from "@/lib/dal";
+import { deleteUsersByIds, getCurrentUser } from "@/lib/dal";
+import { getSession } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 
 export async function deleteUsers(ids: string[]) {
   try {
+    // Verify user is authenticated
+    const session = await getSession();
+    if (!session?.userId) {
+      return {
+        success: false,
+        message: "Unauthorized",
+      };
+    }
+
+    // Verify user has admin role
+    const currentUser = await getCurrentUser();
+    if (!currentUser || currentUser.role !== 'admin') {
+      return {
+        success: false,
+        message: "Forbidden: Admin access required",
+      };
+    }
+
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
       return {
         success: false,
@@ -12,17 +31,25 @@ export async function deleteUsers(ids: string[]) {
       };
     }
 
+    // Prevent admin from deleting themselves
+    if (ids.includes(currentUser.id)) {
+      return {
+        success: false,
+        message: "Cannot delete your own account",
+      };
+    }
+
     await deleteUsersByIds(ids);
-    
+
     // Revalidate the admin page to refresh data
     revalidatePath('/admin');
-    
+
     return { success: true };
   } catch (err) {
     console.error("Delete error:", err);
     return {
       success: false,
-      message: (err as Error).message,
+      message: "An error occurred while deleting users",
     };
   }
 }
