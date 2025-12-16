@@ -1,13 +1,5 @@
 import { LoginForm } from "@/components/login-form"
-import dynamic from "next/dynamic"
-
-// Lazy-load Spline 3D viewer - it's heavy and not needed for initial render
-const Spline = dynamic(() => import("@splinetool/react-spline"), {
-  ssr: false,
-  loading: () => (
-    <div className="h-full w-full bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 animate-pulse" />
-  ),
-})
+import { SplineViewer } from "@/components/spline-viewer"
 
 export default function LoginPage() {
   return (
@@ -20,7 +12,7 @@ export default function LoginPage() {
         </div>
       </div>
       <div className="bg-muted relative hidden lg:block">
-        <Spline scene="https://prod.spline.design/1eapv4LnOygEqB66/scene.splinecode" />
+        <SplineViewer scene="https://prod.spline.design/1eapv4LnOygEqB66/scene.splinecode" />
       </div>
     </div>
   )

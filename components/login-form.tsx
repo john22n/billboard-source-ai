@@ -1,3 +1,5 @@
+'use client'
+
 import { useActionState, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { startAuthentication, startRegistration, browserSupportsWebAuthn } from '@simplewebauthn/browser'
