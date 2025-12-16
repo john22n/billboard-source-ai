@@ -3,22 +3,11 @@
 
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
+import { unstable_cache } from 'next/cache';
 
-export async function GET() {
-  const session = await getSession();
-  if (!session?.userId) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  const adminKey = process.env.OPENAI_ADMIN_KEY;
-  if (!adminKey) {
-    return NextResponse.json(
-      { error: 'OPENAI_ADMIN_KEY not configured' },
-      { status: 500 }
-    );
-  }
-
-  try {
+// Cache the OpenAI usage fetch for 1 hour (usage data doesn't need real-time updates)
+const getCachedOpenAIUsage = unstable_cache(
+  async (adminKey: string) => {
     // Calculate date range (last 30 days) as Unix timestamps
     const endDate = new Date();
     const startDate = new Date();
@@ -52,10 +41,7 @@ export async function GET() {
       if (!response.ok) {
         const error = await response.text();
         console.error('OpenAI Admin API error:', error);
-        return NextResponse.json(
-          { error: 'Failed to fetch OpenAI usage data. Ensure OPENAI_ADMIN_KEY has organization.costs.read permission.' },
-          { status: response.status }
-        );
+        throw new Error('Failed to fetch OpenAI usage data');
       }
 
       const data = await response.json();
@@ -65,24 +51,48 @@ export async function GET() {
         for (const bucket of data.data) {
           if (bucket.results && Array.isArray(bucket.results)) {
             for (const result of bucket.results) {
-              // Amount value is in dollars
               totalCostDollars += result.amount?.value || 0;
             }
           }
         }
       }
 
-      // Check for more pages
       hasMore = data.has_more === true;
       pageToken = data.next_page;
     }
 
-    return NextResponse.json({
+    return {
       totalCost: totalCostDollars,
       totalCostFormatted: `$${totalCostDollars.toFixed(2)}`,
       startDate: formatDate(startDate),
       endDate: formatDate(endDate),
-    });
+    };
+  },
+  ['openai-usage'],
+  { revalidate: 3600, tags: ['openai-usage'] } // Cache for 1 hour
+);
+
+export async function GET() {
+  const session = await getSession();
+  if (!session?.userId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const adminKey = process.env.OPENAI_ADMIN_KEY;
+  if (!adminKey) {
+    return NextResponse.json(
+      { error: 'OPENAI_ADMIN_KEY not configured' },
+      { status: 500 }
+    );
+  }
+
+  try {
+    const usageData = await getCachedOpenAIUsage(adminKey);
+
+    const response = NextResponse.json(usageData);
+    // Add cache headers for CDN/browser caching
+    response.headers.set('Cache-Control', 'private, max-age=3600, stale-while-revalidate=7200');
+    return response;
   } catch (error) {
     console.error('Error fetching OpenAI usage:', error);
     return NextResponse.json(
