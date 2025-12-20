@@ -13,6 +13,12 @@ const config: Config = {
         mono: ['var(--font-geist-mono)'],
       },
       screens: {
+        // Explicitly include defaults + your custom one
+        'sm': '640px',
+        'md': '768px',
+        'lg': '1024px',
+        'xl': '1280px',
+        '2xl': '1536px',
         'toast-mobile': '600px',
       },
       borderRadius: {
@@ -76,4 +82,5 @@ const config: Config = {
   },
   plugins: [require('tw-animate-css')],
 };
+
 export default config;

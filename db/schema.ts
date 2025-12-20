@@ -1,5 +1,5 @@
 import { InferSelectModel, relations } from 'drizzle-orm'
-import { pgTable, serial, text, timestamp, integer, numeric, pgEnum, uuid, varchar, primaryKey, boolean, vector } from 'drizzle-orm/pg-core'
+import { pgTable, serial, text, timestamp, integer, numeric, index, varchar, vector } from 'drizzle-orm/pg-core'
 
 // Your existing tables
 export const user = pgTable('User', {
@@ -38,53 +38,43 @@ export const openaiLogs = pgTable("openai_logs", {
 });
 
 // ADD THIS NEW TABLE FOR BILLBOARD DATA
-export const billboardLocations = pgTable('billboard_locations', {
-  id: serial('id').primaryKey(),
-  
-  // Location data
-  city: text('city').notNull(),
-  state: text('state').notNull(),
-  county: text('county').notNull(),
-  
-  // Market intelligence
-  marketIntelligence: text('market_intelligence'),
-  
-  // Billboard availability
-  hasStaticBulletin: boolean('has_static_bulletin').default(false),
-  hasStaticPoster: boolean('has_static_poster').default(false),
-  hasDigital: boolean('has_digital').default(false),
-  
-  // Vendor percentages
-  lamarPercentage: integer('lamar_percentage').default(0),
-  outfrontPercentage: integer('outfront_percentage').default(0),
-  clearChannelPercentage: integer('clear_channel_percentage').default(0),
-  otherVendorPercentage: integer('other_vendor_percentage').default(0),
-  
-  // Static Bulletin Pricing (4-week periods)
-  staticBulletin12Week: integer('static_bulletin_12_week').default(0),
-  staticBulletin24Week: integer('static_bulletin_24_week').default(0),
-  staticBulletin52Week: integer('static_bulletin_52_week').default(0),
-  staticBulletinImpressions: integer('static_bulletin_impressions').default(0),
-  
-  // Static Poster Pricing
-  staticPoster12Week: integer('static_poster_12_week').default(0),
-  staticPoster24Week: integer('static_poster_24_week').default(0),
-  staticPoster52Week: integer('static_poster_52_week').default(0),
-  staticPosterImpressions: integer('static_poster_impressions').default(0),
-  
-  // Digital Billboard Pricing
-  digital12Week: integer('digital_12_week').default(0),
-  digital24Week: integer('digital_24_week').default(0),
-  digital52Week: integer('digital_52_week').default(0),
-  digitalImpressions: integer('digital_impressions').default(0),
-  
-  // Vector embedding for semantic search
-  embedding: vector('embedding', { dimensions: 1536 }), // OpenAI text-embedding-3-small
-  
-  // Metadata
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
-});
+// db/schema-updated.ts
+export const billboardLocations = pgTable(
+  "billboard_locations",
+  {
+    id: serial("id").primaryKey(),
+    city: text("city").notNull(),
+    state: text("state").notNull(),
+    county: text("county"),
+    
+    // New pricing structure fields
+    avgDailyViews: text("avg_daily_views"), // Can be empty
+    fourWeekRange: text("four_week_range"), // Format: "$X,XXX-$X,XXX"
+    market: text("market"), // Market name (e.g., "Phoenix", "DFW")
+    marketRange: text("market_range"), // Market-specific range
+    generalRange: text("general_range"), // General pricing tiers
+    details: text("details"), // Street-specific rates and misc info
+    
+    // Average prices per month
+    avgBullPricePerMonth: integer("avg_bull_price_per_month").default(0),
+    avgStatBullViewsPerWeek: integer("avg_stat_bull_views_per_week").default(0),
+    avgPosterPricePerMonth: integer("avg_poster_price_per_month").default(0),
+    avgPosterViewsPerWeek: integer("avg_poster_views_per_week").default(0),
+    avgDigitalPricePerMonth: integer("avg_digital_price_per_month").default(0),
+    avgDigitalViewsPerWeek: integer("avg_digital_views_per_week").default(0),
+    avgViewsPerPeriod: text("avg_views_per_period"),
+    
+    // Vector embedding for semantic search
+    embedding: vector("embedding", { dimensions: 1536 }),
+  },
+  (table) => ({
+    embeddingIndex: index("embedding_index").using(
+      "hnsw",
+      table.embedding.op("vector_cosine_ops")
+    ),
+    cityStateIndex: index("city_state_idx").on(table.city, table.state),
+  })
+);
 
 export type BillboardLocation = InferSelectModel<typeof billboardLocations>;
 export type NewBillboardLocation = typeof billboardLocations.$inferInsert;

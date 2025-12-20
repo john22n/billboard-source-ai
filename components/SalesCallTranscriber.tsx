@@ -572,46 +572,47 @@ export default function SalesCallTranscriber() {
                 </TabsTrigger>
               </TabsList>
 
+              
               {/* Form + Pricing Tab */}
-              <TabsContent value="form" className="mt-0 flex-1 overflow-hidden flex flex-col">
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 flex-1 overflow-y-auto pr-2">
-                  <LeadForm 
-                    key={resetTrigger}
-                    formData={formData} 
-                    updateField={updateField} 
-                    resetTrigger={resetTrigger}
-                    inboundPhone={incomingCall?.parameters?.From}
-                    additionalContacts={additionalContacts}           
-                    setAdditionalContacts={setAdditionalContacts}     
-                    additionalMarkets={additionalMarkets}             
-                    setAdditionalMarkets={setAdditionalMarkets}
-                    activeContactIndex={activeContactIndex}
-                    setActiveContactIndex={setActiveContactIndex}
-                    activeMarketIndex={activeMarketIndex}
-                    setActiveMarketIndex={setActiveMarketIndex}
-                    ballpark={ballpark}
-                    setBallpark={setBallpark}
-                    twilioPhone={twilioPhone}
-                    setTwilioPhone={setTwilioPhone}
-                    twilioPhonePreFilled={twilioPhonePreFilled}  // ✅ NEW PROP
-                    setTwilioPhonePreFilled={setTwilioPhonePreFilled}  // ✅ NEW PROP
-                    confirmedLeadType={confirmedLeadType}
-                    setConfirmedLeadType={setConfirmedLeadType}
-                    confirmedDecisionMakers={confirmedDecisionMakers}
-                    setConfirmedDecisionMakers={setConfirmedDecisionMakers}
-                    confirmedBoardTypes={confirmedBoardTypes}
-                    setConfirmedBoardTypes={setConfirmedBoardTypes}
-                    confirmedDurations={confirmedDurations}
-                    setConfirmedDurations={setConfirmedDurations}
-                    confirmedSendOver={confirmedSendOver}
-                    setConfirmedSendOver={setConfirmedSendOver}
-                  />
-                  <PricingPanel
-                    isLoading={isLoadingBillboard}
-                    billboardContext={billboardContext}
-                    hasTranscripts={transcripts.length > 0}
-                  />
-                </div>
+          <TabsContent value="form" className="mt-0 flex-1 overflow-hidden flex flex-col">
+            <div className="flex flex-col lg:flex-row gap-1 flex-1 overflow-hidden">
+              <LeadForm 
+                key={resetTrigger}
+                formData={formData} 
+                updateField={updateField} 
+                resetTrigger={resetTrigger}
+                inboundPhone={incomingCall?.parameters?.From}
+                additionalContacts={additionalContacts}           
+                setAdditionalContacts={setAdditionalContacts}     
+                additionalMarkets={additionalMarkets}             
+                setAdditionalMarkets={setAdditionalMarkets}
+                activeContactIndex={activeContactIndex}
+                setActiveContactIndex={setActiveContactIndex}
+                activeMarketIndex={activeMarketIndex}
+                setActiveMarketIndex={setActiveMarketIndex}
+                ballpark={ballpark}
+                setBallpark={setBallpark}
+                twilioPhone={twilioPhone}
+                setTwilioPhone={setTwilioPhone}
+                twilioPhonePreFilled={twilioPhonePreFilled}
+                setTwilioPhonePreFilled={setTwilioPhonePreFilled}
+                confirmedLeadType={confirmedLeadType}
+                setConfirmedLeadType={setConfirmedLeadType}
+                confirmedDecisionMakers={confirmedDecisionMakers}
+                setConfirmedDecisionMakers={setConfirmedDecisionMakers}
+                confirmedBoardTypes={confirmedBoardTypes}
+                setConfirmedBoardTypes={setConfirmedBoardTypes}
+                confirmedDurations={confirmedDurations}
+                setConfirmedDurations={setConfirmedDurations}
+                confirmedSendOver={confirmedSendOver}
+                setConfirmedSendOver={setConfirmedSendOver}
+              />
+              <PricingPanel
+                isLoading={isLoadingBillboard}
+                billboardContext={billboardContext}
+                hasTranscripts={transcripts.length > 0}
+              />
+            </div>
                 <div className="flex justify-end items-center gap-2 pt-3 border-t border-slate-200 mt-3">
                   {nutshellStatus !== 'idle' && (
                     <span className={`text-xs font-medium ${nutshellStatus === 'success' ? 'text-green-600' : 'text-red-600'}`}>
