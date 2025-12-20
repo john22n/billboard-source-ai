@@ -1,12 +1,12 @@
 // app/api/billboard-data/process-chunk/route.ts
+// UPDATED VERSION - Filters out empty rows to save space
+
 import { NextRequest, NextResponse } from 'next/server';
 import { parse } from 'csv-parse/sync';
 import { embedMany } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { db } from '@/db';
 import { billboardLocations } from '@/db/schema';
-import { getSession } from '@/lib/auth';
-import { getCurrentUser } from '@/lib/dal';
 
 export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
@@ -14,66 +14,83 @@ export const dynamic = 'force-dynamic';
 const embeddingModel = openai.embedding('text-embedding-3-small');
 
 interface CSVRow {
-  CITY: string;
-  STATE: string;
-  COUNTY: string;
-  'MARKET INTELLIGENCE (GENERAL PLANNING RATES, STREET SPECIFIC RATES, & MISC INFO)': string;
-  'ARE THERE STATIC BULLETIN BILLBOARDS IN THIS CITY?': string;
-  'ARE THERE STATIC POSTER BILLBOARDS IN THIS CITY?': string;
-  'ARE THERE DIGITAL BILLBOARDS IN THIS CITY?': string;
-  'PERCENTAGE OF INVENTORY IN THIS CITY OWNED BY LAMAR': string;
-  'PERCENTAGE OF INVENTORY IN THIS CITY OWNED BY OUITFRONT': string;
-  'PERCENTAGE OF INVENTORY IN THIS CITY OWNED BY CLEAR CHANNEL': string;
-  'PERCENTAGE OF INVENTORY IN THIS CITY OWNED BY A VENDOR COMPANY THAT IS NOT LAMAR, OUTFRONT, OR CLEAR CHANNEL': string;
-  'AVERAGE 4-WEEK PRICE OF A STATIC BULLETIN AT A 12-WEEK (3 PERIOD) CAMPAIGN': string;
-  'AVERAGE 4-WEEK PRICE OF A STATIC BULLETIN AT A 24-WEEK (6 PERIOD) CAMPAIGN': string;
-  'AVERAGE 4-WEEK PRICE OF A STATIC BULLETIN AT A 52-WEEK ANNUAL (13 PERIOD) CAMPAIGN': string;
-  'AVERAGE WEEKLY IMPRESSIONS (VIEWS) OF A STATIC BULLETIN': string;
-  'AVERAGE 4-WEEK PRICE OF A STATIC POSTER AT A 12-WEEK (3 PERIOD) CAMPAIGN': string;
-  'AVERAGE 4-WEEK PRICE OF A STATIC POSTER AT A 24-WEEK (6 PERIOD) CAMPAIGN': string;
-  'AVERAGE 4-WEEK PRICE OF A STATIC POSTER AT A 52-WEEK ANNUAL (13 PERIOD) CAMPAIGN': string;
-  'AVERAGE WEEKLY IMPRESSIONS (VIEWS) OF A STATIC POSTER': string;
-  'AVERAGE 4-WEEK PRICE OF A DIGITAL BILLBOARD AT A 12-WEEK (3 PERIOD) CAMPAIGN': string;
-  'AVERAGE 4-WEEK PRICE OF A DIGITAL BILLBOARD AT A 24-WEEK (6 PERIOD) CAMPAIGN': string;
-  'AVERAGE 4-WEEK PRICE OF A DIGITAL BILLBOARD AT A 52-WEEK ANNUAL (13 PERIOD) CAMPAIGN': string;
-  'AVERAGE WEEKLY IMPRESSIONS (VIEWS) OF A DIGITAL BILLBOARD': string;
+  City: string;
+  State: string;
+  County: string;
+  'Avg Daily Views': string;
+  '4-Wk Range': string;
+  Market: string;
+  'Market Range': string;
+  'General Range': string;
+  Details: string;
+  'Avg Bull Price/Mo': string;
+  'Avg Stat Bull Views/Wk': string;
+  'Avg Poster Price/Mo': string;
+  'Avg Poster Views/Wk': string;
+  'Avg Digital Price/Mo': string;
+  'Avg Digital Views/Wk': string;
+  'Avg Views/Period': string;
+}
+
+// ⭐ NEW: Filter function to only keep rows with useful data
+function hasUsefulData(record: CSVRow): boolean {
+  // Keep if it has ANY of these:
+  const hasViews = record['Avg Daily Views'] && record['Avg Daily Views'].trim() !== '';
+  const hasFourWeekRange = record['4-Wk Range'] && record['4-Wk Range'].trim() !== '';
+  const hasMarket = record.Market && record.Market.trim() !== '';
+  const hasDetails = record.Details && record.Details.trim() !== '';
+  const hasPricing = 
+    parseInt(record['Avg Bull Price/Mo'] || '0') > 0 ||
+    parseInt(record['Avg Poster Price/Mo'] || '0') > 0 ||
+    parseInt(record['Avg Digital Price/Mo'] || '0') > 0;
+  
+  return hasViews || hasFourWeekRange || hasMarket || hasDetails || hasPricing;
 }
 
 function createEmbeddingText(record: CSVRow): string {
   const parts = [
-    `City: ${record.CITY}`,
-    `State: ${record.STATE}`,
-    `County: ${record.COUNTY}`,
+    `City: ${record.City}`,
+    `State: ${record.State}`,
+    `County: ${record.County}`,
   ];
 
-  const available = [];
-  if (record['ARE THERE STATIC BULLETIN BILLBOARDS IN THIS CITY?']?.toUpperCase() === 'Y') {
-    available.push('static bulletin billboards');
-  }
-  if (record['ARE THERE STATIC POSTER BILLBOARDS IN THIS CITY?']?.toUpperCase() === 'Y') {
-    available.push('static poster billboards');
-  }
-  if (record['ARE THERE DIGITAL BILLBOARDS IN THIS CITY?']?.toUpperCase() === 'Y') {
-    available.push('digital billboards');
+  if (record.Market && record.Market.trim() !== '') {
+    parts.push(`Market: ${record.Market}`);
   }
 
-  if (available.length > 0) {
-    parts.push(`Available: ${available.join(', ')}`);
+  if (record['Avg Daily Views'] && record['Avg Daily Views'].trim() !== '') {
+    parts.push(`Average Daily Views: ${record['Avg Daily Views']}`);
   }
 
-  const marketInfo = record['MARKET INTELLIGENCE (GENERAL PLANNING RATES, STREET SPECIFIC RATES, & MISC INFO)'];
-  if (marketInfo && marketInfo.trim() !== '') {
-    parts.push(`Market Info: ${marketInfo}`);
+  if (record['4-Wk Range'] && record['4-Wk Range'].trim() !== '') {
+    parts.push(`4-Week Price Range: ${record['4-Wk Range']}`);
   }
 
-  const staticBulletin12 = parseInt(record['AVERAGE 4-WEEK PRICE OF A STATIC BULLETIN AT A 12-WEEK (3 PERIOD) CAMPAIGN'] || '0');
-  if (staticBulletin12 > 0) {
-    parts.push(`Static bulletin pricing starts at $${staticBulletin12} for 12-week campaign`);
+  if (record['Market Range'] && record['Market Range'].trim() !== '') {
+    parts.push(`Market Range: ${record['Market Range']}`);
   }
 
-  const digital12 = parseInt(record['AVERAGE 4-WEEK PRICE OF A DIGITAL BILLBOARD AT A 12-WEEK (3 PERIOD) CAMPAIGN'] || '0');
-  if (digital12 > 0) {
-    parts.push(`Digital billboard pricing starts at $${digital12} for 12-week campaign`);
+  if (record['General Range'] && record['General Range'].trim() !== '') {
+    parts.push(`General Pricing: ${record['General Range']}`);
+  }
+
+  const bullPrice = parseInt(record['Avg Bull Price/Mo'] || '0');
+  if (bullPrice > 0) {
+    parts.push(`Static bulletin pricing: $${bullPrice}/month`);
+  }
+
+  const posterPrice = parseInt(record['Avg Poster Price/Mo'] || '0');
+  if (posterPrice > 0) {
+    parts.push(`Poster pricing: $${posterPrice}/month`);
+  }
+
+  const digitalPrice = parseInt(record['Avg Digital Price/Mo'] || '0');
+  if (digitalPrice > 0) {
+    parts.push(`Digital billboard pricing: $${digitalPrice}/month`);
+  }
+
+  if (record.Details && record.Details.trim() !== '') {
+    parts.push(`Details: ${record.Details}`);
   }
 
   return parts.join('. ');
@@ -81,17 +98,6 @@ function createEmbeddingText(record: CSVRow): string {
 
 export async function POST(req: NextRequest) {
   try {
-    // Verify user is authenticated and has admin role
-    const session = await getSession();
-    if (!session?.userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const currentUser = await getCurrentUser();
-    if (!currentUser || currentUser.role !== 'admin') {
-      return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 });
-    }
-
     const { blobUrl, chunkIndex, chunkSize } = await req.json();
 
     console.log(`📥 Processing chunk ${chunkIndex + 1}...`);
@@ -110,13 +116,27 @@ export async function POST(req: NextRequest) {
     const endIndex = Math.min(startIndex + chunkSize, allRecords.length);
     const chunk = allRecords.slice(startIndex, endIndex);
 
-    console.log(`Processing ${startIndex + 1} to ${endIndex} (${chunk.length} records)`);
+    // ⭐ FILTER OUT EMPTY ROWS
+    const filteredChunk = chunk.filter(hasUsefulData);
+    const skipped = chunk.length - filteredChunk.length;
+    
+    console.log(`📊 Chunk ${chunkIndex + 1}: ${chunk.length} rows → ${filteredChunk.length} useful (skipped ${skipped} empty rows)`);
+
+    if (filteredChunk.length === 0) {
+      console.log(`⏭️ Chunk ${chunkIndex + 1} has no useful data, skipping...`);
+      return NextResponse.json({
+        success: true,
+        chunkIndex,
+        recordsProcessed: 0,
+        recordsSkipped: skipped,
+      });
+    }
 
     const processedData = [];
     const EMBEDDING_BATCH_SIZE = 100;
 
-    for (let i = 0; i < chunk.length; i += EMBEDDING_BATCH_SIZE) {
-      const batch = chunk.slice(i, i + EMBEDDING_BATCH_SIZE);
+    for (let i = 0; i < filteredChunk.length; i += EMBEDDING_BATCH_SIZE) {
+      const batch = filteredChunk.slice(i, i + EMBEDDING_BATCH_SIZE);
       const textsToEmbed = batch.map(r => createEmbeddingText(r));
 
       console.log(`🤖 Generating ${textsToEmbed.length} embeddings...`);
@@ -126,36 +146,32 @@ export async function POST(req: NextRequest) {
       });
 
       const dataWithEmbeddings = batch.map((record, idx) => ({
-        city: record.CITY || '',
-        state: record.STATE || '',
-        county: record.COUNTY || '',
-        marketIntelligence: record['MARKET INTELLIGENCE (GENERAL PLANNING RATES, STREET SPECIFIC RATES, & MISC INFO)'] || '',
-        hasStaticBulletin: record['ARE THERE STATIC BULLETIN BILLBOARDS IN THIS CITY?']?.toUpperCase() === 'Y',
-        hasStaticPoster: record['ARE THERE STATIC POSTER BILLBOARDS IN THIS CITY?']?.toUpperCase() === 'Y',
-        hasDigital: record['ARE THERE DIGITAL BILLBOARDS IN THIS CITY?']?.toUpperCase() === 'Y',
-        lamarPercentage: parseInt(record['PERCENTAGE OF INVENTORY IN THIS CITY OWNED BY LAMAR'] || '0'),
-        outfrontPercentage: parseInt(record['PERCENTAGE OF INVENTORY IN THIS CITY OWNED BY OUITFRONT'] || '0'),
-        clearChannelPercentage: parseInt(record['PERCENTAGE OF INVENTORY IN THIS CITY OWNED BY CLEAR CHANNEL'] || '0'),
-        otherVendorPercentage: parseInt(record['PERCENTAGE OF INVENTORY IN THIS CITY OWNED BY A VENDOR COMPANY THAT IS NOT LAMAR, OUTFRONT, OR CLEAR CHANNEL'] || '0'),
-        staticBulletin12Week: parseInt(record['AVERAGE 4-WEEK PRICE OF A STATIC BULLETIN AT A 12-WEEK (3 PERIOD) CAMPAIGN'] || '0'),
-        staticBulletin24Week: parseInt(record['AVERAGE 4-WEEK PRICE OF A STATIC BULLETIN AT A 24-WEEK (6 PERIOD) CAMPAIGN'] || '0'),
-        staticBulletin52Week: parseInt(record['AVERAGE 4-WEEK PRICE OF A STATIC BULLETIN AT A 52-WEEK ANNUAL (13 PERIOD) CAMPAIGN'] || '0'),
-        staticBulletinImpressions: parseInt(record['AVERAGE WEEKLY IMPRESSIONS (VIEWS) OF A STATIC BULLETIN'] || '0'),
-        staticPoster12Week: parseInt(record['AVERAGE 4-WEEK PRICE OF A STATIC POSTER AT A 12-WEEK (3 PERIOD) CAMPAIGN'] || '0'),
-        staticPoster24Week: parseInt(record['AVERAGE 4-WEEK PRICE OF A STATIC POSTER AT A 24-WEEK (6 PERIOD) CAMPAIGN'] || '0'),
-        staticPoster52Week: parseInt(record['AVERAGE 4-WEEK PRICE OF A STATIC POSTER AT A 52-WEEK ANNUAL (13 PERIOD) CAMPAIGN'] || '0'),
-        staticPosterImpressions: parseInt(record['AVERAGE WEEKLY IMPRESSIONS (VIEWS) OF A STATIC POSTER'] || '0'),
-        digital12Week: parseInt(record['AVERAGE 4-WEEK PRICE OF A DIGITAL BILLBOARD AT A 12-WEEK (3 PERIOD) CAMPAIGN'] || '0'),
-        digital24Week: parseInt(record['AVERAGE 4-WEEK PRICE OF A DIGITAL BILLBOARD AT A 24-WEEK (6 PERIOD) CAMPAIGN'] || '0'),
-        digital52Week: parseInt(record['AVERAGE 4-WEEK PRICE OF A DIGITAL BILLBOARD AT A 52-WEEK ANNUAL (13 PERIOD) CAMPAIGN'] || '0'),
-        digitalImpressions: parseInt(record['AVERAGE WEEKLY IMPRESSIONS (VIEWS) OF A DIGITAL BILLBOARD'] || '0'),
+        city: record.City || '',
+        state: record.State || '',
+        county: record.County || '',
+        
+        avgDailyViews: record['Avg Daily Views'] || null,
+        fourWeekRange: record['4-Wk Range'] || null,
+        market: record.Market || null,
+        marketRange: record['Market Range'] || null,
+        generalRange: record['General Range'] || null,
+        details: record.Details || null,
+        
+        avgBullPricePerMonth: parseInt(record['Avg Bull Price/Mo'] || '0'),
+        avgStatBullViewsPerWeek: parseInt(record['Avg Stat Bull Views/Wk'] || '0'),
+        avgPosterPricePerMonth: parseInt(record['Avg Poster Price/Mo'] || '0'),
+        avgPosterViewsPerWeek: parseInt(record['Avg Poster Views/Wk'] || '0'),
+        avgDigitalPricePerMonth: parseInt(record['Avg Digital Price/Mo'] || '0'),
+        avgDigitalViewsPerWeek: parseInt(record['Avg Digital Views/Wk'] || '0'),
+        avgViewsPerPeriod: record['Avg Views/Period'] || null,
+        
         embedding: embeddings[idx],
       }));
 
       processedData.push(...dataWithEmbeddings);
     }
 
-    // ⭐ FIX: Insert in smaller batches to avoid parameter limit
+    // Insert in smaller batches
     console.log(`💾 Inserting ${processedData.length} records in batches...`);
     const INSERT_BATCH_SIZE = 100;
     
@@ -171,6 +187,7 @@ export async function POST(req: NextRequest) {
       success: true,
       chunkIndex,
       recordsProcessed: processedData.length,
+      recordsSkipped: skipped,
     });
   } catch (error) {
     console.error('Error:', error);

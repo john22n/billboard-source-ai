@@ -8,7 +8,10 @@ const nextConfig: NextConfig = {
       bodySizeLimit: '50mb'
     }
   },
-
+  // ✅ Add empty turbopack config to silence the warning
+  turbopack: {
+    root: process.cwd(),
+  },
   // Exclude server-side packages from client bundle
   webpack: (config, { isServer }) => {
     if (!isServer) {

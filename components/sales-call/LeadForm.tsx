@@ -314,7 +314,7 @@ export function LeadForm({
     : additionalContacts[activeContactIndex - 1];
 
   return (
-    <div className="lg:col-span-2 space-y-0 px-0.75 py-0.75">
+    <div className="lg:flex-[2] space-y-0 px-0.75 py-0.75 overflow-y-auto h-relative">
       {/* INTRO Section */}
       <div className="mb-0">
         <span className="inline-block bg-white border-2 border-b-0 border-black px-3.5 py-1.5 shadow-sm shadow-black text-md font-bold rounded-t-md">
@@ -324,8 +324,8 @@ export function LeadForm({
       <div className="bg-white border-2 border-black rounded-b-lg rounded-tr-lg p-4 shadow-sm shadow-black">
         <div className="space-y-3">
           {/* Name and What do you want to advertise */}
-          <div className="flex flex-col md:flex-row gap-3 md:gap-8">
-            <div className="w-full md:w-60">
+          <div className="flex gap-8">
+            <div className="w-60">
               <Label className="text-blue-600 font-bold text-md mb-1 block">Name</Label>
               <Input
                 value={formData?.name ?? ""}
@@ -342,7 +342,7 @@ export function LeadForm({
               <Label className="text-blue-600 font-bold text-md mb-1 block">
                 What do you want to advertise?
               </Label>
-              <div className="flex flex-col sm:flex-row">
+              <div className="flex">
                 <Input
                   value={formData?.typeName ?? ""}
                   onChange={(e) => {
@@ -350,11 +350,11 @@ export function LeadForm({
                     updateField("typeName", e.target.value);
                   }}
                   placeholder="Type (Business, Political, etc)"
-                  className={`w-full sm:w-50 h-10 text-sm border-2 border-black rounded placeholder:text-gray-400 transition-colors ${
+                  className={`w-50 h-10 text-sm border-2 border-black rounded placeholder:text-gray-400 transition-colors ${
                     getInputClass(formData?.typeName)
                   }`}
                 />
-                <Minus className="mt-2.5 w-2 hidden sm:block" />
+                <Minus className="mt-2.5 w-2" />
                 <Input
                   value={formData?.businessName ?? ""}
                   onChange={(e) => {
@@ -362,11 +362,11 @@ export function LeadForm({
                     updateField("businessName", e.target.value);
                   }}
                   placeholder="Kind (HVAC, Governor, etc)"
-                  className={`w-full sm:w-50 h-10 text-sm border-2 border-black rounded placeholder:text-gray-400 transition-colors ${
+                  className={`w-50 h-10 text-sm border-2 border-black rounded placeholder:text-gray-400 transition-colors ${
                     getInputClass(formData?.businessName)
                   }`}
                 />
-                <Minus className="mt-2.5 w-2 hidden sm:block" />
+                <Minus className="mt-2.5 w-2" />
                 <Input
                   value={formData?.entityName ?? ""}
                   onChange={(e) => {
@@ -374,7 +374,7 @@ export function LeadForm({
                     updateField("entityName", e.target.value);
                   }}
                   placeholder="Entity Name"
-                  className={`w-full sm:flex-1 h-10 text-sm border-2 border-black rounded placeholder:text-gray-400 transition-colors ${
+                  className={`flex-1 h-10 text-sm border-2 border-black rounded placeholder:text-gray-400 transition-colors ${
                     getInputClass(formData?.entityName)
                   }`}
                 />
@@ -383,8 +383,8 @@ export function LeadForm({
           </div>
 
           {/* Ever used billboards / What are you needing */}
-          <div className="flex flex-col lg:flex-row gap-3 lg:gap-5">
-            <div className="flex-1 lg:flex-[0.5]">
+          <div className="flex gap-5">
+            <div className="flex-[0.5]">
               <Label className="text-blue-600 font-bold text-md mb-1 flex items-center gap-1">
                 Ever used billboards before?
                 <CircleQuestionMark className="w-4 h-4 text-gray-400"/>
@@ -416,7 +416,7 @@ export function LeadForm({
               </div>
             </div>
 
-            <div className="flex-1 lg:flex-[1.2]">
+            <div className="flex-[1.2]">
               <Label className="text-blue-600 font-bold text-md mb-1 block">
                 What are you needing to accomplish?
               </Label>
@@ -428,7 +428,7 @@ export function LeadForm({
                     updateField("billboardPurpose", e.target.value);
                   }}
                   placeholder="Goal"
-                  className={`flex-1 lg:flex-[2] h-10 text-sm border-2 border-black rounded placeholder:text-gray-400 transition-colors ${
+                  className={`flex-[2] h-10 text-sm border-2 border-black rounded placeholder:text-gray-400 transition-colors ${
                     getInputClass(formData?.billboardPurpose)
                   }`}
                 />
@@ -440,7 +440,7 @@ export function LeadForm({
                     updateField("accomplishDetails", e.target.value);
                   }}
                   placeholder="Details"
-                  className={`flex-1 lg:flex-[3] h-10 text-sm border-2 border-black rounded placeholder:text-gray-400 transition-colors ${
+                  className={`flex-[3] h-10 text-sm border-2 border-black rounded placeholder:text-gray-400 transition-colors ${
                     getInputClass(formData?.accomplishDetails)
                   }`}
                 />
@@ -467,8 +467,8 @@ export function LeadForm({
           </div>
 
           {/* Bottom 3 fields */}
-          <div className="flex flex-col sm:flex-row gap-3 sm:gap-5">
-            <div className="flex-1 sm:flex-2">
+          <div className="flex gap-5">
+            <div className="flex-2">
               <Label className="text-blue-600 font-bold text-md mb-1 flex items-center gap-1">
                 Are you doing any other advertising?
               <CircleQuestionMark className="w-4 h-4 text-gray-400"/>
@@ -520,15 +520,15 @@ export function LeadForm({
       </div>
 
       {/* Lead Type Bar */}
-      <div className="bg-gray-300 border-2 border-black shadow-sm shadow-black rounded-lg sm:gap-1 lg:p-3.5 lg:my-5 lg:ml-35 lg:-mb-7">
-        <div className="flex flex-col lg:flex-row items-stretch lg:items-center lg:justify-between sm:justify-between">
-          <div className="flex flex-wrap gap-2 lg:gap-10">
+      <div className="bg-gray-300 border-2 border-black shadow-sm shadow-black rounded-lg p-3.5 my-5 ml-35 -mb-7">
+        <div className="flex items-center justify-between">
+          <div className="flex gap-25">
             <button
               onClick={() => {
                 updateField("leadType", "Availer");
                 setConfirmedLeadType("Availer");
               }}
-              className={`px-6 sm:px-8 py-2.5 text-md font-bold border-2 rounded transition-colors ${
+              className={`px-10 py-2.5 text-md font-bold border-2 rounded transition-colors ${
                 getButtonClass("Availer", formData?.leadType, confirmedLeadType)
               }`}
             >
@@ -539,7 +539,7 @@ export function LeadForm({
                 updateField("leadType", "Panel Requester");
                 setConfirmedLeadType("Panel Requester");
               }}
-              className={`px-4 sm:px-6 py-2.5 text-md font-bold border-2 rounded transition-colors ${
+              className={`px-10 py-2.5 text-md font-bold border-2 rounded transition-colors ${
                 getButtonClass("Panel Requester", formData?.leadType, confirmedLeadType)
               }`}
             >
@@ -550,20 +550,20 @@ export function LeadForm({
                 updateField("leadType", "Tire Kicker");
                 setConfirmedLeadType("Tire Kicker");
               }}
-              className={`px-4 sm:px-6 py-2.5 text-md font-bold border-2 rounded transition-colors ${
+              className={`px-10 py-2.5 text-md font-bold border-2 rounded transition-colors ${
                 getButtonClass("Tire Kicker", formData?.leadType, confirmedLeadType)
               }`}
             >
               Tire Kicker
           </button>
           </div>
-          <div className="flex items-center gap-1 justify-between">
+          <div className="flex items-center gap-2">
             <Label className="text-md font-bold whitespace-nowrap">Ballpark:</Label>
             <Input 
               value={ballpark}
               onChange={(e) => setBallpark(e.target.value)}
               placeholder="Manual entry"
-              className={`h-10 w-full lg:w-64 text-sm border-2 border-black rounded transition-colors ${
+              className={`h-10 w-64 text-sm border-2 border-black rounded transition-colors ${
                 getInputClass(ballpark)
               }`}
             />
@@ -578,7 +578,7 @@ export function LeadForm({
         </span>
       </div>
       <div className="bg-white border-2 border-black shadow-black rounded-b-lg rounded-tr-lg p-4 shadow-sm">
-        <div className="flex flex-col lg:flex-row gap-5 h-full">
+        <div className="flex gap-5 h-full">
           {/* Left: Purpose Recap */}
           <div className="flex-1">
             <Label className="text-blue-600 font-bold text-md mb-1 block">
@@ -590,7 +590,7 @@ export function LeadForm({
                 userEditedFieldsRef.current.add('notes');
                 updateField("notes", e.target.value);
               }}
-              className={`w-full h-40 lg:h-[calc(100%-1.75rem)] text-sm resize-none border-2 border-black rounded transition-colors ${
+              className={`w-full h-[calc(100%-1.75rem)] text-sm resize-none border-2 border-black rounded transition-colors ${
                 getInputClass(formData?.notes)
               }`}
             />
@@ -599,9 +599,9 @@ export function LeadForm({
           {/* Right: Location & Duration - Shows Active Market */}
           <div className="flex-1 flex flex-col gap-2.5">
             {/* City, State, Area, and Start in a grid layout */}
-            <div className="flex flex-col md:flex-row gap-3 md:gap-5">
+            <div className="flex gap-5">
               {/* Left column: City, State, and Start stacked */}
-              <div className="flex-1 md:flex-[3] space-y-2.5">
+              <div className="flex-[3] space-y-2.5">
                 {/* City and State row */}
                 <div className="flex gap-1.5">
                   <div className="flex-1">
@@ -619,7 +619,7 @@ export function LeadForm({
                     <Input 
                       value={currentMarket.state}
                       onChange={(e) => updateMarketField(activeMarketIndex, "state", e.target.value)}
-                      className={`h-10 text-sm border-2 border-black rounded transition-colors ${
+                      className={`h-10 text-sm border-2 border-black rounded transition-colors text-center ${
                         getInputClass(currentMarket.state)
                       }`}
                     />
@@ -639,13 +639,13 @@ export function LeadForm({
                 </div>
               </div>
 
-              {/* Right column: Area (spans full height on desktop) */}
-              <div className="flex-1 md:flex-[3]">
+              {/* Right column: Area (spans full height) */}
+              <div className="flex-[3]">
                 <Label className="text-blue-600 font-bold text-md mb-1 block">Area</Label>
                 <Textarea
                   value={currentMarket.targetArea}
                   onChange={(e) => updateMarketField(activeMarketIndex, "targetArea", e.target.value)}
-                  className={`lg:h-[calc(100%-1.75rem)] md:h-[calc(100%-1.25rem)] text-sm resize-none border-2 border-black rounded transition-colors ${
+                  className={`h-[calc(100%-1.75rem)] text-sm resize-none border-2 border-black rounded transition-colors ${
                     getInputClass(currentMarket.targetArea)
                   }`}
                 />
@@ -653,16 +653,16 @@ export function LeadForm({
             </div>
 
             {/* Duration and Are you interested in */}
-            <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 flex-1">
+            <div className="flex gap-4 flex-1">
               {/* Duration - WITH YELLOW AI SUGGESTIONS → GREEN USER CONFIRMATIONS */}
-              <div className="flex-1 sm:flex-2 flex flex-col">
+              <div className="flex-2 flex flex-col">
                 <Label className="text-blue-600 font-bold text-md mb-1 block">Duration</Label>
-                <div className="flex flex-row gap-1.5 sm:gap-1 flex-wrap sm:flex-nowrap">
+                <div className="flex gap-2">
                   {[
                     { value: "1 Mo", label: "1 Mo", sub: "(1p)" },
                     { value: "3 Mo", label: "3 Mo", sub: "(3p)" },
                     { value: "6 Mo", label: "6 Mo", sub: "(6p)" },
-                    { value: "12 Mo", label: "1Yr", sub: "(13p)" },
+                    { value: "12 Mo", label: "1 Yr", sub: "(13p)" },
                     { value: "TBD", label: "TBD", sub: "" }
                   ].map((duration) => {
                     // ✅ Only show AI suggestions for primary market
@@ -677,7 +677,7 @@ export function LeadForm({
                     const confirmedSelections = confirmedDurations[activeMarketIndex] || [];
                     
                     return (
-                      <div key={duration.value} className="flex flex-col items-center gap-1">
+                      <div key={duration.value} className="flex flex-col items-center">
                         <button
                           onClick={() => {
                             setConfirmedDurations(prev => {
@@ -697,7 +697,7 @@ export function LeadForm({
                               updateField("campaignLength", newSelections);
                             }
                           }}
-                          className={`flex items-center justify-center gap-1 px-2 py-1.5 sm:px-1 sm:py-0.5 text-xs font-bold border-2 rounded min-w-[48px] transition-colors ${
+                          className={`flex items-center justify-center px-2.5 py-1.5 text-sm font-bold border-2 rounded min-w-[48px] transition-colors ${
                             getMultiSelectButtonClass(duration.value, aiSuggestions, confirmedSelections)
                           }`}
                         >
@@ -715,7 +715,7 @@ export function LeadForm({
               </div>
 
               {/* Are you interested in */}
-              <div className="flex-1 lg:mr-10 mr-5">
+              <div className="flex-1 mr-11">
                 <Label className="text-blue-600 text-center font-bold text-md mb-1 block">
                   Are you interested in?
                 </Label>
@@ -727,7 +727,7 @@ export function LeadForm({
                         updateMarketField(activeMarketIndex, "boardType", type);
                         setConfirmedBoardTypes(prev => ({...prev, [activeMarketIndex]: type}));
                       }}
-                      className={`flex items-center justify-center px-2.5 py-1.5 sm:px-1.5 sm:py-0.5 text-sm font-bold border-2 rounded flex-1 sm:flex-none transition-colors ${
+                      className={`flex justify-center px-2.5 py-1.5 text-md font-bold border-2 rounded flex-1 transition-colors ${
                         getButtonClass(type, currentMarket.boardType, confirmedBoardTypes[activeMarketIndex])
                       }`}
                     >
@@ -742,12 +742,12 @@ export function LeadForm({
       </div>
 
       {/* Market Tabs */}
-      <div className="flex flex-wrap lg:ml-148 gap-1 mt-0">
+      <div className="flex flex-wrap gap-1 mt-0 ml-172">
         <button
           onClick={() => setActiveMarketIndex(0)}
           className={`inline-block border-2 ${
             activeMarketIndex === 0 ? 'border-t-0 rounded-b-md' : ' bg-gray-300 text-gray-400 border-t-0 rounded-b-md'
-          } border-black shadow-sm shadow-black px-3 sm:px-3.5 py-1.5 text-xs sm:text-sm font-bold`}
+          } border-black shadow-sm shadow-black px-3.5 py-1.5 text-sm font-bold`}
         >
           Mkt #1
         </button>
@@ -757,7 +757,7 @@ export function LeadForm({
             onClick={() => setActiveMarketIndex(index + 1)}
             className={`inline-block border-2 ${
               activeMarketIndex === index + 1 ? 'border-t-0 rounded-b-md' : ' bg-gray-300 text-gray-400 border-t-0 rounded-b-md'
-            } border-black shadow-sm shadow-black px-3 sm:px-3.5 py-1.5 text-xs sm:text-sm font-bold relative group`}
+            } border-black shadow-sm shadow-black px-3.5 py-1.5 text-sm font-bold relative group`}
           >
             <span>Mkt #{index + 2}</span>
             <span
@@ -773,7 +773,7 @@ export function LeadForm({
         ))}
         <button
           onClick={addNewMarket}
-          className="inline-block text-gray-400 hover:text-black px-3 sm:px-3.5 py-1.5 text-xs sm:text-sm font-bold rounded-b-md transition-colors"
+          className="inline-block text-gray-400 hover:text-black px-3.5 py-1.5 text-sm font-bold rounded-b-md transition-colors"
         >
           + Market
         </button>
@@ -785,7 +785,7 @@ export function LeadForm({
           onClick={() => setActiveContactIndex(0)}
           className={`inline-block border-2 ${
             activeContactIndex === 0 ? 'border-b-0 rounded-t-md bg-gray-300' : 'bg-white text-gray-400 border-b-0 rounded-t-md'
-          } border-black shadow-sm shadow-black px-3 sm:px-3.5 py-1.5 text-md sm:text-md font-bold`}
+          } border-black shadow-sm shadow-black px-3.5 py-1.5 text-md font-bold`}
         >
           CONTACT INFO
         </button>
@@ -795,7 +795,7 @@ export function LeadForm({
             onClick={() => setActiveContactIndex(index + 1)}
             className={`inline-block  border-2 ${
               activeContactIndex === index + 1 ? 'border-b-0 rounded-t-md bg-gray-300' : 'bg-white text-gray-400 border-b-0 rounded-t-md'
-            } border-black shadow-sm shadow-black px-3 sm:px-3.5 py-1.5 text-md sm:text-md font-bold relative group`}
+            } border-black shadow-sm shadow-black px-3.5 py-1.5 text-md font-bold relative group`}
           >
             <span>CONTACT #{index + 2}</span>
             <span
@@ -811,7 +811,7 @@ export function LeadForm({
         ))}
         <button
           onClick={addNewContact}
-          className="inline-block text-gray-400 hover:text-black px-3 sm:px-3.5 py-1.5 text-xs sm:text-sm font-bold rounded-t-md transition-colors"
+          className="inline-block text-gray-400 hover:text-black px-3.5 py-1.5 text-sm font-bold rounded-t-md transition-colors"
         >
           + Contact
         </button>
@@ -821,7 +821,7 @@ export function LeadForm({
       <div className="bg-gray-300 border-2 border-black shadow-black rounded-b-lg rounded-tr-lg p-4 shadow-sm">
         <div className="space-y-3">
           {/* Name, Position, Phone, Email */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+          <div className="grid grid-cols-4 gap-2.5">
             <div className="flex-1">
               <Label className="text-blue-600 font-bold text-md mb-1.5 block">Name</Label>
               <Input
@@ -865,13 +865,13 @@ export function LeadForm({
           </div>
 
           {/* Decision making & Thank you */}
-          <div className="flex flex-col lg:flex-row">
+          <div className="flex">
             <div className="flex-[1]">
               <Label className="text-blue-600 font-bold text-md mb-1.5 flex items-center gap-1">
                 What&apos;s your decision-making process look like?
                 <CircleQuestionMark className="w-4 h-4 text-gray-500"/>
               </Label>
-              <div className="flex flex-wrap lg:gap-3 sm:gap-1">
+              <div className="flex gap-3">
                 {[
                   { value: "alone", label: "You Alone" },
                   { value: "boss", label: "My Boss" },
@@ -884,7 +884,7 @@ export function LeadForm({
                       updateContactField(activeContactIndex, "decisionMaker", maker.value);
                       setConfirmedDecisionMakers(prev => ({...prev, [activeContactIndex]: maker.value}));
                     }}
-                    className={`px-3 sm:px-3.5 py-2 text-md font-bold border-2 rounded transition-colors ${
+                    className={`px-3.5 py-2 text-md font-bold border-2 rounded transition-colors ${
                       getButtonClass(maker.value, currentContact.decisionMaker, confirmedDecisionMakers[activeContactIndex])
                     }`}
                   >
@@ -898,7 +898,7 @@ export function LeadForm({
               <Label className="text-blue-600 font-bold text-md mb-1.5 block">
                 Thank you! I&apos;ll send over:
               </Label>
-              <div className="flex flex-wrap lg:gap-3 sm:gap-1">
+              <div className="flex gap-3">
                 {[
                   { value: "Avails", label: "Avails"},
                   { value: "Panel Info", label: "Panel Info"},
@@ -931,7 +931,7 @@ export function LeadForm({
                           updateField("sendOver", newSelections);
                         }
                       }}
-                      className={`px-3 sm:px-3.5 py-2 text-md font-bold border-2 rounded transition-colors ${
+                      className={`px-3.5 py-2 text-md font-bold border-2 rounded transition-colors ${
                         getMultiSelectButtonClass(item.value, aiSuggestions, confirmedSelections)
                       }`}
                     >

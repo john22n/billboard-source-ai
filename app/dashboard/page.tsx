@@ -10,10 +10,11 @@ import { getCurrentUser } from '@/lib/dal'
 
 export default async function Page() {
   const currentUser = await getCurrentUser()
+  
   if (!currentUser) {
     redirect('/')
   }
-  
+
   return (
     <SidebarProvider
       defaultOpen={false}
@@ -33,13 +34,11 @@ export default async function Page() {
           role: currentUser.role ?? undefined
         }}
       />
-      <SidebarInset>
+      <SidebarInset className="flex flex-col h-screen overflow-hidden">
         <SiteHeader />
-        <div className="flex flex-1 flex-col overflow-hidden">
-          <div className="@container/main flex flex-1 flex-col overflow-hidden px-2 lg:px-4">
-            <div className="w-full h-full">
-              <SalesCallTranscriber />
-            </div>
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex-1 flex flex-col overflow-hidden px-2 lg:px-4">
+            <SalesCallTranscriber />
           </div>
         </div>
       </SidebarInset>
