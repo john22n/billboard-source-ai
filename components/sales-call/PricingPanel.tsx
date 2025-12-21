@@ -1,11 +1,16 @@
 "use client";
 
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
 
 interface PricingPanelProps {
   isLoading: boolean;
   billboardContext: string;
   hasTranscripts: boolean;
+  onNutshellSubmit: () => Promise<void>;
+  isSubmittingNutshell: boolean;
+  nutshellStatus: 'idle' | 'success' | 'error';
+  nutshellMessage: string;
 }
 
 interface PricingCard {
@@ -18,7 +23,15 @@ interface PricingCard {
   subtitleData?: string;
 }
 
-export function PricingPanel({ isLoading, billboardContext, hasTranscripts }: PricingPanelProps) {
+export function PricingPanel({ 
+  isLoading, 
+  billboardContext, 
+  hasTranscripts,
+  onNutshellSubmit,
+  isSubmittingNutshell,
+  nutshellStatus,
+  nutshellMessage
+}: PricingPanelProps) {
   const [activeTab, setActiveTab] = useState<'estimate' | 'details'>('estimate');
 
   // Parse pricing data from billboardContext
@@ -272,6 +285,22 @@ export function PricingPanel({ isLoading, billboardContext, hasTranscripts }: Pr
               )}
             </div>
           )}
+        </div>
+
+        {/* Nutshell Button at Bottom */}
+        <div className="flex flex-col items-center gap-2 pt-3 border-t border-slate-200 mt-3 flex-shrink-0">
+          {nutshellStatus !== 'idle' && (
+            <span className={`text-xs font-medium ${nutshellStatus === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+              {nutshellMessage}
+            </span>
+          )}
+          <Button
+            onClick={onNutshellSubmit}
+            disabled={isSubmittingNutshell}
+            className="bg-orange-500 hover:bg-orange-600 text-white font-semibold shadow-lg hover:shadow-xl transition-all duration-200 h-9 px-6"
+          >
+            {isSubmittingNutshell ? 'Submitting...' : 'Nutshell'}
+          </Button>
         </div>
       </div>
     </div>

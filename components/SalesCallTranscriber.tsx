@@ -395,9 +395,9 @@ export default function SalesCallTranscriber() {
   };
 
   return (
-    <div className="h-full bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 p-3 lg:p-1 overflow-hidden">
+    <div className="h-full bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 p-1 overflow-hidden">
       <div className="h-full max-w-[1800px] mx-auto flex flex-col">
-        <Card className="shadow-2xl border-0 overflow-hidden flex flex-col h-full">
+        <Card className="shadow-2xl border-0 overflow-hidden flex flex-col h-full py-1">
           {/* Header */}
           <CardHeader className="bg-gradient-to-r from-blue-600 via-indigo-600 to-primary text-white py-3 px-4">
             <div className="flex flex-col gap-2">
@@ -574,58 +574,48 @@ export default function SalesCallTranscriber() {
 
               
               {/* Form + Pricing Tab */}
-          <TabsContent value="form" className="mt-0 flex-1 overflow-hidden flex flex-col">
-            <div className="flex flex-col lg:flex-row gap-1 flex-1 overflow-hidden">
-              <LeadForm 
-                key={resetTrigger}
-                formData={formData} 
-                updateField={updateField} 
-                resetTrigger={resetTrigger}
-                inboundPhone={incomingCall?.parameters?.From}
-                additionalContacts={additionalContacts}           
-                setAdditionalContacts={setAdditionalContacts}     
-                additionalMarkets={additionalMarkets}             
-                setAdditionalMarkets={setAdditionalMarkets}
-                activeContactIndex={activeContactIndex}
-                setActiveContactIndex={setActiveContactIndex}
-                activeMarketIndex={activeMarketIndex}
-                setActiveMarketIndex={setActiveMarketIndex}
-                ballpark={ballpark}
-                setBallpark={setBallpark}
-                twilioPhone={twilioPhone}
-                setTwilioPhone={setTwilioPhone}
-                twilioPhonePreFilled={twilioPhonePreFilled}
-                setTwilioPhonePreFilled={setTwilioPhonePreFilled}
-                confirmedLeadType={confirmedLeadType}
-                setConfirmedLeadType={setConfirmedLeadType}
-                confirmedDecisionMakers={confirmedDecisionMakers}
-                setConfirmedDecisionMakers={setConfirmedDecisionMakers}
-                confirmedBoardTypes={confirmedBoardTypes}
-                setConfirmedBoardTypes={setConfirmedBoardTypes}
-                confirmedDurations={confirmedDurations}
-                setConfirmedDurations={setConfirmedDurations}
-                confirmedSendOver={confirmedSendOver}
-                setConfirmedSendOver={setConfirmedSendOver}
-              />
-              <PricingPanel
-                isLoading={isLoadingBillboard}
-                billboardContext={billboardContext}
-                hasTranscripts={transcripts.length > 0}
-              />
-            </div>
-                <div className="flex justify-end items-center gap-2 pt-3 border-t border-slate-200 mt-3">
-                  {nutshellStatus !== 'idle' && (
-                    <span className={`text-xs font-medium ${nutshellStatus === 'success' ? 'text-green-600' : 'text-red-600'}`}>
-                      {nutshellMessage}
-                    </span>
-                  )}
-                  <Button
-                    onClick={handleNutshellSubmit}
-                    disabled={isSubmittingNutshell}
-                    className="bg-orange-500 hover:bg-orange-600 text-white font-semibold shadow-lg hover:shadow-xl transition-all duration-200 h-9 px-4"
-                  >
-                    {isSubmittingNutshell ? 'Submitting...' : 'Nutshell'}
-                  </Button>
+              <TabsContent value="form" className="mt-0 flex-1 overflow-hidden flex flex-col">
+                <div className="flex flex-col lg:flex-row gap-1 flex-1 overflow-hidden">
+                  <LeadForm 
+                    key={resetTrigger}
+                    formData={formData} 
+                    updateField={updateField} 
+                    resetTrigger={resetTrigger}
+                    inboundPhone={incomingCall?.parameters?.From}
+                    additionalContacts={additionalContacts}           
+                    setAdditionalContacts={setAdditionalContacts}     
+                    additionalMarkets={additionalMarkets}             
+                    setAdditionalMarkets={setAdditionalMarkets}
+                    activeContactIndex={activeContactIndex}
+                    setActiveContactIndex={setActiveContactIndex}
+                    activeMarketIndex={activeMarketIndex}
+                    setActiveMarketIndex={setActiveMarketIndex}
+                    ballpark={ballpark}
+                    setBallpark={setBallpark}
+                    twilioPhone={twilioPhone}
+                    setTwilioPhone={setTwilioPhone}
+                    twilioPhonePreFilled={twilioPhonePreFilled}
+                    setTwilioPhonePreFilled={setTwilioPhonePreFilled}
+                    confirmedLeadType={confirmedLeadType}
+                    setConfirmedLeadType={setConfirmedLeadType}
+                    confirmedDecisionMakers={confirmedDecisionMakers}
+                    setConfirmedDecisionMakers={setConfirmedDecisionMakers}
+                    confirmedBoardTypes={confirmedBoardTypes}
+                    setConfirmedBoardTypes={setConfirmedBoardTypes}
+                    confirmedDurations={confirmedDurations}
+                    setConfirmedDurations={setConfirmedDurations}
+                    confirmedSendOver={confirmedSendOver}
+                    setConfirmedSendOver={setConfirmedSendOver}
+                  />
+                  <PricingPanel
+                    isLoading={isLoadingBillboard}
+                    billboardContext={billboardContext}
+                    hasTranscripts={transcripts.length > 0}
+                    onNutshellSubmit={handleNutshellSubmit}
+                    isSubmittingNutshell={isSubmittingNutshell}
+                    nutshellStatus={nutshellStatus}
+                    nutshellMessage={nutshellMessage}
+                  />
                 </div>
               </TabsContent>
 
