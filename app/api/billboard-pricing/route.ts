@@ -5,6 +5,7 @@ import { billboardLocations } from '@/db/schema';
 import { sql } from 'drizzle-orm';
 import { embed, generateText } from 'ai';
 import { openai } from '@ai-sdk/openai';
+import { getSession } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,6 +13,11 @@ const embeddingModel = openai.embedding('text-embedding-3-small');
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await getSession();
+    if (!session?.userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { transcript } = await req.json();
 
     if (!transcript || transcript.trim().length === 0) {
