@@ -71,7 +71,6 @@ export function ArcGISMapPanel({ initialLocation }: ArcGISMapPanelProps) {
     const searchWidget = mapRef.current.querySelector("arcgis-search");
     if (searchWidget) {
       // Use the search widget's search method to find and go to the location
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const performSearch = async () => {
         try {
           // Wait for map to be ready

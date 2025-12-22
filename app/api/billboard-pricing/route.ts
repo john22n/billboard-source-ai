@@ -1,7 +1,6 @@
 // app/api/billboard-pricing/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
-import { billboardLocations } from '@/db/schema';
 import { sql } from 'drizzle-orm';
 import { embed, generateText } from 'ai';
 import { openai } from '@ai-sdk/openai';
@@ -100,16 +99,17 @@ Transcript: ${transcript}`,
       return NextResponse.json({ context: '' });
     }
 
+    const topResult = results.rows[0] as unknown as BillboardRow;
     console.log(`✅ Found ${results.rows.length} matching locations`);
-    console.log(`🎯 Top match: ${(results.rows[0] as any).city}, ${(results.rows[0] as any).state}`);
-    console.log(`   - Similarity: ${((results.rows[0] as any).similarity * 100).toFixed(1)}%`);
-    console.log(`   - Text boost: ${(results.rows[0] as any).text_match_boost}`);
+    console.log(`🎯 Top match: ${topResult.city}, ${topResult.state}`);
+    console.log(`   - Similarity: ${(topResult.similarity * 100).toFixed(1)}%`);
+    console.log(`   - Text boost: ${topResult.text_match_boost}`);
 
-    const formattedContext = formatResults(results.rows);
+    const formattedContext = formatResults(results.rows as unknown as BillboardRow[]);
 
-    return NextResponse.json({ 
+    return NextResponse.json({
       context: formattedContext,
-      topResult: results.rows[0],
+      topResult,
       extractedLocation
     });
 
@@ -125,9 +125,29 @@ Transcript: ${transcript}`,
   }
 }
 
-function formatResults(rows: any[]) {
+interface BillboardRow {
+  city: string;
+  state: string;
+  county: string | null;
+  avg_daily_views: string | null;
+  four_week_range: string | null;
+  market: string | null;
+  market_range: string | null;
+  general_range: string | null;
+  details: string | null;
+  avg_bull_price_per_month: number;
+  avg_stat_bull_views_per_week: number;
+  avg_poster_price_per_month: number;
+  avg_poster_views_per_week: number;
+  avg_digital_price_per_month: number;
+  avg_digital_views_per_week: number;
+  similarity: number;
+  text_match_boost: number;
+}
+
+function formatResults(rows: BillboardRow[]) {
   return rows
-    .map((row: any) => {
+    .map((row: BillboardRow) => {
       const parts: string[] = [];
       
       parts.push(`Location: ${row.city}, ${row.state}`);
