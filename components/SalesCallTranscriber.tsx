@@ -92,7 +92,7 @@ export default function SalesCallTranscriber() {
 
   // Local state for manual user edits (tracks which fields user has manually changed)
   const [manualEdits, setManualEdits] = useState<Partial<BillboardFormData>>({});
-  
+
   // Track which fields have been manually edited by the user
   const [userEditedFields, setUserEditedFields] = useState<Set<string>>(new Set());
 
@@ -101,12 +101,12 @@ export default function SalesCallTranscriber() {
     const merged: BillboardFormData = {
       // Lead classification
       leadType: userEditedFields.has('leadType') ? manualEdits.leadType ?? null : aiFormData?.leadType ?? null,
-      
+
       // Entity information
       typeName: userEditedFields.has('typeName') ? manualEdits.typeName ?? null : aiFormData?.typeName ?? null,
       businessName: userEditedFields.has('businessName') ? manualEdits.businessName ?? null : aiFormData?.businessName ?? null,
       entityName: userEditedFields.has('entityName') ? manualEdits.entityName ?? null : aiFormData?.entityName ?? null,
-      
+
       // Contact information
       name: userEditedFields.has('name') ? manualEdits.name ?? null : aiFormData?.name ?? null,
       position: userEditedFields.has('position') ? manualEdits.position ?? null : aiFormData?.position ?? null,
@@ -115,34 +115,34 @@ export default function SalesCallTranscriber() {
       website: userEditedFields.has('website') ? manualEdits.website ?? null : aiFormData?.website ?? null,
       decisionMaker: userEditedFields.has('decisionMaker') ? manualEdits.decisionMaker ?? null : aiFormData?.decisionMaker ?? null,
       sendOver: userEditedFields.has('sendOver') ? manualEdits.sendOver ?? null : aiFormData?.sendOver ?? null,
-      
+
       // Billboard experience
       billboardsBeforeYN: userEditedFields.has('billboardsBeforeYN') ? manualEdits.billboardsBeforeYN ?? null : aiFormData?.billboardsBeforeYN ?? null,
       billboardsBeforeDetails: userEditedFields.has('billboardsBeforeDetails') ? manualEdits.billboardsBeforeDetails ?? null : aiFormData?.billboardsBeforeDetails ?? null,
-      
+
       // Campaign details
       billboardPurpose: userEditedFields.has('billboardPurpose') ? manualEdits.billboardPurpose ?? null : aiFormData?.billboardPurpose ?? null,
       accomplishDetails: userEditedFields.has('accomplishDetails') ? manualEdits.accomplishDetails ?? null : aiFormData?.accomplishDetails ?? null,
       targetAudience: userEditedFields.has('targetAudience') ? manualEdits.targetAudience ?? null : aiFormData?.targetAudience ?? null,
-      
+
       // Location (SEPARATED)
       targetCity: userEditedFields.has('targetCity') ? manualEdits.targetCity ?? null : aiFormData?.targetCity ?? null,
       state: userEditedFields.has('state') ? manualEdits.state ?? null : aiFormData?.state ?? null,
       targetArea: userEditedFields.has('targetArea') ? manualEdits.targetArea ?? null : aiFormData?.targetArea ?? null,
-      
+
       // Timeline & preferences
       startMonth: userEditedFields.has('startMonth') ? manualEdits.startMonth ?? null : aiFormData?.startMonth ?? null,
       campaignLength: userEditedFields.has('campaignLength') ? manualEdits.campaignLength ?? null : aiFormData?.campaignLength ?? null,
       boardType: userEditedFields.has('boardType') ? manualEdits.boardType ?? null : aiFormData?.boardType ?? null,
-      
+
       // Business context
       hasMediaExperience: userEditedFields.has('hasMediaExperience') ? manualEdits.hasMediaExperience ?? null : aiFormData?.hasMediaExperience ?? null,
       yearsInBusiness: userEditedFields.has('yearsInBusiness') ? manualEdits.yearsInBusiness ?? null : aiFormData?.yearsInBusiness ?? null,
-      
+
       // Notes
       notes: userEditedFields.has('notes') ? manualEdits.notes ?? null : aiFormData?.notes ?? null,
     };
-    
+
     return merged;
   }, [aiFormData, manualEdits, userEditedFields]);
 
@@ -156,32 +156,32 @@ export default function SalesCallTranscriber() {
     clearTranscripts();
     setBillboardContext("");
     lastFetchedTranscript.current = "";
-    
+
     // Clear all form-related state
     setManualEdits({});
     setUserEditedFields(new Set());
     resetExtraction(); // Clear AI extracted data
-    
+
     // Clear additional contacts/markets
     setAdditionalContacts([]);
     setAdditionalMarkets([]);
-    
+
     // Reset active indices
     setActiveContactIndex(0);
     setActiveMarketIndex(0);
-    
+
     // Clear ballpark and phone
     setBallpark("");
     setTwilioPhone("");
     setTwilioPhonePreFilled(false);  // ✅ RESET pre-fill flag
-    
+
     // Clear all confirmations
     setConfirmedLeadType(null);
     setConfirmedDecisionMakers({});
     setConfirmedBoardTypes({});
     setConfirmedDurations({});
     setConfirmedSendOver({});
-    
+
     // Trigger reset in LeadForm
     setResetTrigger(prev => prev + 1);
   };
@@ -319,35 +319,35 @@ export default function SalesCallTranscriber() {
           position: formData.position || '',
           website: formData.website || '',
           decisionMaker: formData.decisionMaker || '',
-          
+
           // Entity information
           typeName: formData.typeName || '',
           businessName: formData.businessName || '',
           entityName: formData.entityName || '',
-          
+
           // Billboard experience
           billboardsBeforeYN: formData.billboardsBeforeYN || '',
           billboardsBeforeDetails: formData.billboardsBeforeDetails || '',
-          
+
           // Campaign details
           billboardPurpose: formData.billboardPurpose || '',
           accomplishDetails: formData.accomplishDetails || '',
           targetAudience: formData.targetAudience || '',
-          
+
           // Location
           targetCity: formData.targetCity || '',
           state: formData.state || '',
           targetArea: formData.targetArea || '',
-          
+
           // Timeline & preferences
           startMonth: formData.startMonth || '',
           campaignLength: formData.campaignLength || '',
           boardType: formData.boardType || '',
-          
+
           // Business context
           hasMediaExperience: formData.hasMediaExperience,
           yearsInBusiness: formData.yearsInBusiness || '',
-          
+
           // Lead classification & notes
           leadType: formData.leadType || '',
           notes: formData.notes || '',
@@ -381,8 +381,8 @@ export default function SalesCallTranscriber() {
   const getCurrentMarketLocation = () => {
     if (activeMarketIndex === 0) {
       // Primary market - use formData
-      return formData.targetCity && formData.state 
-        ? `${formData.targetCity}, ${formData.state}` 
+      return formData.targetCity && formData.state
+        ? `${formData.targetCity}, ${formData.state}`
         : formData.targetArea || "";
     } else {
       // Additional market - use additionalMarkets
@@ -562,7 +562,7 @@ export default function SalesCallTranscriber() {
                   value="arcgis"
                   className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-xs"
                 >
-                  ArcGIS Map
+                  BSI Map
                 </TabsTrigger>
                 <TabsTrigger
                   value="transcript"
@@ -572,19 +572,19 @@ export default function SalesCallTranscriber() {
                 </TabsTrigger>
               </TabsList>
 
-              
+
               {/* Form + Pricing Tab */}
               <TabsContent value="form" className="mt-0 flex-1 overflow-hidden flex flex-col">
                 <div className="flex flex-col lg:flex-row gap-1 flex-1 overflow-hidden">
-                  <LeadForm 
+                  <LeadForm
                     key={resetTrigger}
-                    formData={formData} 
-                    updateField={updateField} 
+                    formData={formData}
+                    updateField={updateField}
                     resetTrigger={resetTrigger}
                     inboundPhone={incomingCall?.parameters?.From}
-                    additionalContacts={additionalContacts}           
-                    setAdditionalContacts={setAdditionalContacts}     
-                    additionalMarkets={additionalMarkets}             
+                    additionalContacts={additionalContacts}
+                    setAdditionalContacts={setAdditionalContacts}
+                    additionalMarkets={additionalMarkets}
                     setAdditionalMarkets={setAdditionalMarkets}
                     activeContactIndex={activeContactIndex}
                     setActiveContactIndex={setActiveContactIndex}
