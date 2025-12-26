@@ -2,28 +2,79 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 
 interface NutshellLeadRequest {
+  // Contact info
   name: string;
+  position: string;
   phone: string;
   email: string;
+  
+  // Account/Business info
+  entityName: string;
   website: string;
-  advertiser: string;
-  businessDescription: string;
-  yearsInBusiness: string;
+  
+  // Lead classification
+  typeName: 'business' | 'political' | 'nonprofit' | 'personal' | null;
+  businessName: string;
+  leadType: 'Availer' | 'Panel Requester' | 'Tire Kicker' | null;
+  
+  // Billboard experience
+  billboardsBeforeYN: string;
+  billboardsBeforeDetails: string;
+  
+  // Campaign details
   billboardPurpose: string;
-  targetCityAndState: string;
+  accomplishDetails: string;
+  targetAudience: string;
+  
+  // Location
+  targetCity: string;
+  state: string;
   targetArea: string;
+  
+  // Timeline & preferences
   startMonth: string;
   campaignLength: string;
-  notes: string;
-  leadType: string;
+  boardType: string;
+  
+  // Business context
   hasMediaExperience: boolean | null;
-  hasDoneBillboards: boolean | null;
-  decisionMaker: string;
+  yearsInBusiness: string;
+  
+  // Decision making
+  decisionMaker: 'alone' | 'partners' | 'boss' | 'committee' | null;
+  
+  // Notes
+  notes: string;
+  sendOver: string[];
+  
+  // Budget
+  budget: string;
+}
+
+async function nutshellRequest(
+  method: string,
+  params: Record<string, unknown>,
+  credentials: string
+) {
+  const response = await fetch('https://app.nutshell.com/api/v1/json', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Basic ${credentials}`,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      method,
+      params,
+      id: `${method}-${Date.now()}`,
+    }),
+  });
+  return response.json();
 }
 
 export async function POST(req: NextRequest) {
   try {
-    // Verify authentication and get user email for Nutshell auth
     const session = await getSession();
     if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -32,11 +83,8 @@ export async function POST(req: NextRequest) {
     const userEmail = session.email;
     const data: NutshellLeadRequest = await req.json();
 
-    // Validate required env var - only API key needed, email comes from session
     const nutshellApiKey = process.env.NUTSHELL_API_KEY;
-
     if (!nutshellApiKey) {
-      console.error('Nutshell API key not configured');
       return NextResponse.json(
         { error: 'Nutshell integration not configured' },
         { status: 500 }
@@ -44,131 +92,262 @@ export async function POST(req: NextRequest) {
     }
 
     const credentials = Buffer.from(`${userEmail}:${nutshellApiKey}`).toString('base64');
-    const headers = {
-      'Authorization': `Basic ${credentials}`,
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-    };
 
-    // Find the Nutshell user by email address
-    const findUsersPayload = {
-      jsonrpc: '2.0',
-      method: 'findUsers',
-      params: {
-        query: {
-          email: userEmail,
-        },
-      },
-      id: 'findUsers',
-    };
-
-    console.log('Searching for Nutshell user with email:', userEmail);
-
-    const userResponse = await fetch('https://app.nutshell.com/api/v1/json', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(findUsersPayload),
-    });
-
-    const userResult = await userResponse.json();
-    console.log('Nutshell findUsers response:', JSON.stringify(userResult, null, 2));
+    // 1. Find Nutshell user
+    const userResult = await nutshellRequest('findUsers', {
+      query: { email: userEmail },
+    }, credentials);
 
     if (userResult.error) {
-      console.error('Nutshell findUsers error:', userResult.error);
       return NextResponse.json(
         { error: userResult.error.message || 'Failed to find user in Nutshell' },
         { status: 400 }
       );
     }
 
-    // findUsers returns an array of users - find the one matching our email
     const users = userResult.result || [];
     const matchingUser = users.find((user: { emails?: string[] }) =>
       user.emails?.some((email: string) => email.toLowerCase() === userEmail.toLowerCase())
     );
 
-    const nutshellUserId = matchingUser?.id;
-    console.log('Found Nutshell user:', matchingUser?.name, 'ID:', nutshellUserId);
-
-    if (!nutshellUserId) {
-      console.error(`No Nutshell user found for email: ${userEmail}`);
+    if (!matchingUser?.id) {
       return NextResponse.json(
         { error: `No Nutshell user found for email: ${userEmail}` },
         { status: 400 }
       );
     }
 
-    // Build note with all lead details
-    const noteParts = [
-      data.name && `Contact: ${data.name}`,
-      data.phone && `Phone: ${data.phone}`,
-      data.email && `Email: ${data.email}`,
-      data.website && `Website: ${data.website}`,
-      data.advertiser && `Advertiser: ${data.advertiser}`,
-      data.yearsInBusiness && `Years in Business: ${data.yearsInBusiness}`,
-      data.billboardPurpose && `Billboard Purpose: ${data.billboardPurpose}`,
-      data.targetCityAndState && `Target Location: ${data.targetCityAndState}`,
-      data.targetArea && `Target Area: ${data.targetArea}`,
-      data.startMonth && `Start Month: ${data.startMonth}`,
-      data.campaignLength && `Campaign Length: ${data.campaignLength}`,
-      data.leadType && `Lead Type: ${data.leadType}`,
-      data.hasMediaExperience !== null && `Has Media Experience: ${data.hasMediaExperience ? 'Yes' : 'No'}`,
-      data.hasDoneBillboards !== null && `Has Done Billboards: ${data.hasDoneBillboards ? 'Yes' : 'No'}`,
-      data.decisionMaker && `Decision Maker: ${data.decisionMaker}`,
-      data.notes && `Notes: ${data.notes}`,
-    ].filter(Boolean).join('\n');
+    const nutshellUserId = Number(matchingUser.id);
 
-    // Ensure user ID is a number (Nutshell API expects numeric ID)
-    const assigneeId = nutshellUserId ? Number(nutshellUserId) : null;
-
-    // Create the JSON-RPC payload for Nutshell API with assignee
-    const jsonRpcPayload = {
-      jsonrpc: '2.0',
-      method: 'newLead',
-      params: {
-        lead: {
-          description: data.businessDescription || `Billboard Lead - ${data.advertiser || data.name || 'Unknown'}`,
-          note: noteParts || undefined,
-          assignee: assigneeId ? {
-            entityType: 'Users',
-            id: assigneeId,
-          } : undefined,
+    // 2. Create Contact (Person) if we have contact info
+    let contactId: number | null = null;
+    if (data.name || data.phone || data.email) {
+      const contactResult = await nutshellRequest('newContact', {
+        contact: {
+          name: data.name || undefined,
+          description: data.position || undefined,
+          phone: data.phone ? [data.phone] : undefined,
+          email: data.email ? [data.email] : undefined,
         },
-      },
-      id: Date.now().toString(),
-    };
+      }, credentials);
 
-    console.log('Nutshell newLead request payload:', JSON.stringify(jsonRpcPayload, null, 2));
-
-    const response = await fetch('https://app.nutshell.com/api/v1/json', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(jsonRpcPayload),
-    });
-
-    const result = await response.json();
-    console.log('Nutshell newLead response:', JSON.stringify(result, null, 2));
-
-    // JSON-RPC returns errors in the response body, not via HTTP status
-    if (result.error) {
-      console.error('Nutshell API error:', result.error);
-      return NextResponse.json(
-        { error: result.error.message || 'Failed to create lead in Nutshell' },
-        { status: 400 }
-      );
+      if (contactResult.result?.id) {
+        contactId = Number(contactResult.result.id);
+      }
     }
 
-    if (!response.ok) {
-      console.error('Nutshell API error:', response.status, result);
+    // 3. Create Account (Business) if we have entity info
+    let accountId: number | null = null;
+    if (data.entityName) {
+      const accountResult = await nutshellRequest('newAccount', {
+        account: {
+          name: data.entityName,
+          url: data.website ? [data.website] : undefined,
+        },
+      }, credentials);
+
+      if (accountResult.result?.id) {
+        accountId = Number(accountResult.result.id);
+      }
+    }
+
+    // 4. Build tags based on actual Nutshell tags
+    const tags: string[] = [];
+
+    // Type tags (What do you want to advertise?)
+    if (data.typeName) {
+      const typeTagMap: Record<string, string> = {
+        'business': 'Type: Established Business',
+        'political': 'Type: Political',
+        'nonprofit': 'Type: Non-Profit',
+        'personal': 'Type: Personal',
+      };
+      if (typeTagMap[data.typeName]) {
+        tags.push(typeTagMap[data.typeName]);
+      }
+    }
+
+    // Goal tags (What are you needing to accomplish?)
+    if (data.billboardPurpose) {
+      const goalTagMap: Record<string, string> = {
+        'directional': 'Goal: Directional',
+        'enrollment': 'Goal: Enrollment',
+        'event': 'Goal: Event',
+        'brand awareness': 'Goal: General Brand Awareness',
+        'awareness': 'Goal: General Brand Awareness',
+        'hiring': 'Goal: Hiring',
+        'new location': 'Goal: New Location',
+        'location': 'Goal: New Location',
+        'new product': 'Goal: New Product/Service',
+        'product': 'Goal: New Product/Service',
+        'service': 'Goal: New Product/Service',
+        'political': 'Goal: Political',
+        'calls': 'Goal: Calls',
+      };
+      const purposeLower = data.billboardPurpose.toLowerCase();
+      for (const [key, value] of Object.entries(goalTagMap)) {
+        if (purposeLower.includes(key)) {
+          tags.push(value);
+          break;
+        }
+      }
+    }
+
+    // Request tag based on lead type
+    if (data.leadType) {
+      const requestTagMap: Record<string, string> = {
+        'Availer': 'Request: Availer',
+        'Panel Requester': 'Request: Panel Requestor',
+        'Tire Kicker': 'Request: Tire-Kicker',
+      };
+      if (requestTagMap[data.leadType]) {
+        tags.push(requestTagMap[data.leadType]);
+      }
+    }
+
+    // Decision maker tag
+    if (data.decisionMaker) {
+      const decisionTagMap: Record<string, string> = {
+        'alone': 'Decision: Decision Maker',
+        'boss': 'Decision: Middle Person',
+        'partners': 'Decision: Group (Co-Owners)',
+        'committee': 'Decision: Group (Committee or Team)',
+      };
+      if (decisionTagMap[data.decisionMaker]) {
+        tags.push(decisionTagMap[data.decisionMaker]);
+      }
+    }
+
+    // 5. Determine milestone (stage) based on lead type
+    // Availer/Panel Requester -> "Proposal" stage (id: 115 for stageset 3)
+    // Tire Kicker -> "Qualify" stage (id: 111 for stageset 3)
+    let milestoneId: number | undefined;
+    if (data.leadType === 'Availer' || data.leadType === 'Panel Requester') {
+      milestoneId = 115; // Proposal in stageset 3
+    } else if (data.leadType === 'Tire Kicker') {
+      milestoneId = 111; // Qualify in stageset 3
+    }
+
+    // 6. Build custom fields with actual Nutshell field names
+    const customFields: Record<string, string> = {};
+
+    // OOH Experience (Ever used billboards before?)
+    if (data.billboardsBeforeYN) {
+      const experience = data.billboardsBeforeYN === 'Y' 
+        ? `Yes${data.billboardsBeforeDetails ? ` - ${data.billboardsBeforeDetails}` : ''}`
+        : 'No';
+      customFields['OOH Experience'] = experience;
+    }
+
+    // Target Market(s) - City/State/Area
+    const locationParts = [
+      data.targetCity,
+      data.state,
+      data.targetArea ? `- ${data.targetArea}` : '',
+    ].filter(Boolean);
+    if (locationParts.length > 0) {
+      customFields['Target Market(s) - City/State/Area'] = locationParts.join(', ');
+    }
+
+    // Potential Start Date?
+    if (data.startMonth) {
+      customFields['Potential Start Date?'] = data.startMonth;
+    }
+
+    // Contract Length?
+    if (data.campaignLength) {
+      customFields['Contract Length?'] = data.campaignLength;
+    }
+
+    // OOH Type of Interest (board type)
+    if (data.boardType) {
+      customFields['OOH Type of Interest'] = data.boardType;
+    }
+
+    // Budget
+    if (data.budget) {
+      customFields['Budget'] = data.budget;
+    }
+
+    // 7. Build note for timeline
+    const noteParts: string[] = [];
+
+    if (data.accomplishDetails) {
+      noteParts.push(`Goals: ${data.accomplishDetails}`);
+    }
+    if (data.targetAudience) {
+      noteParts.push(`Target Audience: ${data.targetAudience}`);
+    }
+    if (data.hasMediaExperience !== null) {
+      noteParts.push(`Other Advertising: ${data.hasMediaExperience ? 'Yes' : 'No'}`);
+    }
+    if (data.yearsInBusiness) {
+      noteParts.push(`Years in Business: ${data.yearsInBusiness}`);
+    }
+    if (data.website) {
+      noteParts.push(`Has Website: Yes`);
+    }
+    if (data.sendOver && data.sendOver.length > 0) {
+      noteParts.push(`Sending: ${data.sendOver.join(', ')}`);
+    }
+    if (data.notes) {
+      noteParts.push(`Notes: ${data.notes}`);
+    }
+
+    // 8. Create the lead
+    const leadPayload: Record<string, unknown> = {
+      description: data.businessName 
+        ? `${data.businessName} - ${data.entityName || data.name || 'Lead'}`
+        : data.entityName || data.name || 'Billboard Lead',
+      assignee: {
+        entityType: 'Users',
+        id: nutshellUserId,
+      },
+      stagesetId: 3, // Use stageset 3 as default
+    };
+
+    if (contactId) {
+      leadPayload.contacts = [{ id: contactId }];
+    }
+
+    if (accountId) {
+      leadPayload.accounts = [{ id: accountId }];
+      leadPayload.primaryAccount = { id: accountId };
+    }
+
+    if (tags.length > 0) {
+      leadPayload.tags = tags;
+    }
+
+    if (milestoneId) {
+      leadPayload.milestoneId = milestoneId;
+    }
+
+    if (Object.keys(customFields).length > 0) {
+      leadPayload.customFields = customFields;
+    }
+
+    if (noteParts.length > 0) {
+      leadPayload.note = [noteParts.join('\n')];
+    }
+
+    console.log('Creating Nutshell lead with payload:', JSON.stringify(leadPayload, null, 2));
+
+    const leadResult = await nutshellRequest('newLead', { lead: leadPayload }, credentials);
+
+    if (leadResult.error) {
+      console.error('Nutshell newLead error:', leadResult.error);
       return NextResponse.json(
-        { error: `Failed to create lead in Nutshell: ${response.status}` },
-        { status: response.status }
+        { error: leadResult.error.message || 'Failed to create lead in Nutshell' },
+        { status: 400 }
       );
     }
 
     return NextResponse.json({
       success: true,
-      leadId: result.result?.id,
+      leadId: leadResult.result?.id,
+      contactId,
+      accountId,
       message: 'Lead created successfully in Nutshell',
     });
   } catch (error) {
