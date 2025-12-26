@@ -139,47 +139,87 @@ export async function POST(req: NextRequest) {
       }
     };
 
-    // 2. Create Contact (Person) if we have contact info
+    // 2. Find or Create Contact (Person) if we have contact info
     let contactId: number | null = null;
     const validEmail = data.email?.trim() && isValidEmail(data.email.trim()) ? data.email.trim() : null;
     const hasContactInfo = data.name?.trim() || data.phone?.trim() || validEmail;
     if (hasContactInfo) {
-      const contactPayload: Record<string, unknown> = {};
-      if (data.name?.trim()) contactPayload.name = data.name.trim();
-      if (data.position?.trim()) contactPayload.description = data.position.trim();
-      if (data.phone?.trim()) contactPayload.phone = [data.phone.trim()];
-      if (validEmail) contactPayload.email = [validEmail];
+      // First try to find existing contact by email or name
+      if (validEmail) {
+        const searchResult = await nutshellRequest('searchByEmail', {
+          emailAddressString: validEmail,
+        }, credentials);
+        if (searchResult.result?.contacts?.[0]?.id) {
+          contactId = Number(searchResult.result.contacts[0].id);
+        }
+      }
 
-      const contactResult = await nutshellRequest('newContact', {
-        contact: contactPayload,
-      }, credentials);
+      // If not found by email, search by name
+      if (!contactId && data.name?.trim()) {
+        const searchResult = await nutshellRequest('searchUniversal', {
+          string: data.name.trim(),
+        }, credentials);
+        const foundContact = searchResult.result?.contacts?.find(
+          (c: { name?: string }) => c.name?.toLowerCase() === data.name?.trim().toLowerCase()
+        );
+        if (foundContact?.id) {
+          contactId = Number(foundContact.id);
+        }
+      }
 
-      if (contactResult.result?.id) {
-        contactId = Number(contactResult.result.id);
-      } else if (contactResult.error) {
-        console.error('Failed to create contact:', contactResult.error);
+      // Create new contact only if not found
+      if (!contactId) {
+        const contactPayload: Record<string, unknown> = {};
+        if (data.name?.trim()) contactPayload.name = data.name.trim();
+        if (data.position?.trim()) contactPayload.description = data.position.trim();
+        if (data.phone?.trim()) contactPayload.phone = [data.phone.trim()];
+        if (validEmail) contactPayload.email = [validEmail];
+
+        const contactResult = await nutshellRequest('newContact', {
+          contact: contactPayload,
+        }, credentials);
+
+        if (contactResult.result?.id) {
+          contactId = Number(contactResult.result.id);
+        } else if (contactResult.error) {
+          console.error('Failed to create contact:', contactResult.error);
+        }
       }
     }
 
-    // 3. Create Account (Business) if we have entity info
+    // 3. Find or Create Account (Business) if we have entity info
     let accountId: number | null = null;
     if (data.entityName?.trim()) {
-      const accountPayload: Record<string, unknown> = {
-        name: data.entityName.trim(),
-      };
-      if (data.website?.trim() && isValidUrl(data.website.trim())) {
-        const url = data.website.trim();
-        accountPayload.url = [url.startsWith('http') ? url : `https://${url}`];
+      // First try to find existing account by name
+      const searchResult = await nutshellRequest('searchUniversal', {
+        string: data.entityName.trim(),
+      }, credentials);
+      const foundAccount = searchResult.result?.accounts?.find(
+        (a: { name?: string }) => a.name?.toLowerCase() === data.entityName?.trim().toLowerCase()
+      );
+      if (foundAccount?.id) {
+        accountId = Number(foundAccount.id);
       }
 
-      const accountResult = await nutshellRequest('newAccount', {
-        account: accountPayload,
-      }, credentials);
+      // Create new account only if not found
+      if (!accountId) {
+        const accountPayload: Record<string, unknown> = {
+          name: data.entityName.trim(),
+        };
+        if (data.website?.trim() && isValidUrl(data.website.trim())) {
+          const url = data.website.trim();
+          accountPayload.url = [url.startsWith('http') ? url : `https://${url}`];
+        }
 
-      if (accountResult.result?.id) {
-        accountId = Number(accountResult.result.id);
-      } else if (accountResult.error) {
-        console.error('Failed to create account:', accountResult.error);
+        const accountResult = await nutshellRequest('newAccount', {
+          account: accountPayload,
+        }, credentials);
+
+        if (accountResult.result?.id) {
+          accountId = Number(accountResult.result.id);
+        } else if (accountResult.error) {
+          console.error('Failed to create account:', accountResult.error);
+        }
       }
     }
 
