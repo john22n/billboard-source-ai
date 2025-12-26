@@ -121,33 +121,43 @@ export async function POST(req: NextRequest) {
 
     // 2. Create Contact (Person) if we have contact info
     let contactId: number | null = null;
-    if (data.name || data.phone || data.email) {
+    const hasContactInfo = data.name?.trim() || data.phone?.trim() || data.email?.trim();
+    if (hasContactInfo) {
+      const contactPayload: Record<string, unknown> = {};
+      if (data.name?.trim()) contactPayload.name = data.name.trim();
+      if (data.position?.trim()) contactPayload.description = data.position.trim();
+      if (data.phone?.trim()) contactPayload.phone = [data.phone.trim()];
+      if (data.email?.trim()) contactPayload.email = [data.email.trim()];
+
       const contactResult = await nutshellRequest('newContact', {
-        contact: {
-          name: data.name || undefined,
-          description: data.position || undefined,
-          phone: data.phone ? [data.phone] : undefined,
-          email: data.email ? [data.email] : undefined,
-        },
+        contact: contactPayload,
       }, credentials);
 
       if (contactResult.result?.id) {
         contactId = Number(contactResult.result.id);
+      } else if (contactResult.error) {
+        console.error('Failed to create contact:', contactResult.error);
       }
     }
 
     // 3. Create Account (Business) if we have entity info
     let accountId: number | null = null;
-    if (data.entityName) {
+    if (data.entityName?.trim()) {
+      const accountPayload: Record<string, unknown> = {
+        name: data.entityName.trim(),
+      };
+      if (data.website?.trim()) {
+        accountPayload.url = [data.website.trim()];
+      }
+
       const accountResult = await nutshellRequest('newAccount', {
-        account: {
-          name: data.entityName,
-          url: data.website ? [data.website] : undefined,
-        },
+        account: accountPayload,
       }, credentials);
 
       if (accountResult.result?.id) {
         accountId = Number(accountResult.result.id);
+      } else if (accountResult.error) {
+        console.error('Failed to create account:', accountResult.error);
       }
     }
 
@@ -295,40 +305,48 @@ export async function POST(req: NextRequest) {
     }
 
     // 8. Create the lead
+    const leadDescription = data.businessName?.trim()
+      ? `${data.businessName.trim()} - ${data.entityName?.trim() || data.name?.trim() || 'Lead'}`
+      : data.entityName?.trim() || data.name?.trim() || 'Billboard Lead';
+
     const leadPayload: Record<string, unknown> = {
-      description: data.businessName 
-        ? `${data.businessName} - ${data.entityName || data.name || 'Lead'}`
-        : data.entityName || data.name || 'Billboard Lead',
+      description: leadDescription,
       assignee: {
         entityType: 'Users',
         id: nutshellUserId,
       },
-      stagesetId: 3, // Use stageset 3 as default
     };
 
-    if (contactId) {
+    // Only add contacts if we have a valid contact ID
+    if (contactId && contactId > 0) {
       leadPayload.contacts = [{ id: contactId }];
     }
 
-    if (accountId) {
+    // Only add accounts if we have a valid account ID
+    if (accountId && accountId > 0) {
       leadPayload.accounts = [{ id: accountId }];
       leadPayload.primaryAccount = { id: accountId };
     }
 
+    // Only add tags if we have any
     if (tags.length > 0) {
       leadPayload.tags = tags;
     }
 
-    if (milestoneId) {
+    // Only add milestone if set
+    if (milestoneId && milestoneId > 0) {
       leadPayload.milestoneId = milestoneId;
+      leadPayload.stagesetId = 3;
     }
 
+    // Only add custom fields if we have any
     if (Object.keys(customFields).length > 0) {
       leadPayload.customFields = customFields;
     }
 
+    // Only add note if we have content
     if (noteParts.length > 0) {
-      leadPayload.note = [noteParts.join('\n')];
+      leadPayload.note = noteParts.join('\n');
     }
 
     console.log('Creating Nutshell lead with payload:', JSON.stringify(leadPayload, null, 2));
