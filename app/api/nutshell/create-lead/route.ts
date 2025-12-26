@@ -119,15 +119,36 @@ export async function POST(req: NextRequest) {
 
     const nutshellUserId = Number(matchingUser.id);
 
+    // Helper to validate email
+    const isValidEmail = (email: string) => {
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    };
+
+    // Helper to validate URL
+    const isValidUrl = (url: string) => {
+      const lower = url.toLowerCase();
+      if (lower === 'no' || lower === 'yes' || lower === 'n/a' || lower === 'none') {
+        return false;
+      }
+      try {
+        const urlToTest = url.startsWith('http') ? url : `https://${url}`;
+        new URL(urlToTest);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
     // 2. Create Contact (Person) if we have contact info
     let contactId: number | null = null;
-    const hasContactInfo = data.name?.trim() || data.phone?.trim() || data.email?.trim();
+    const validEmail = data.email?.trim() && isValidEmail(data.email.trim()) ? data.email.trim() : null;
+    const hasContactInfo = data.name?.trim() || data.phone?.trim() || validEmail;
     if (hasContactInfo) {
       const contactPayload: Record<string, unknown> = {};
       if (data.name?.trim()) contactPayload.name = data.name.trim();
       if (data.position?.trim()) contactPayload.description = data.position.trim();
       if (data.phone?.trim()) contactPayload.phone = [data.phone.trim()];
-      if (data.email?.trim()) contactPayload.email = [data.email.trim()];
+      if (validEmail) contactPayload.email = [validEmail];
 
       const contactResult = await nutshellRequest('newContact', {
         contact: contactPayload,
@@ -146,8 +167,9 @@ export async function POST(req: NextRequest) {
       const accountPayload: Record<string, unknown> = {
         name: data.entityName.trim(),
       };
-      if (data.website?.trim()) {
-        accountPayload.url = [data.website.trim()];
+      if (data.website?.trim() && isValidUrl(data.website.trim())) {
+        const url = data.website.trim();
+        accountPayload.url = [url.startsWith('http') ? url : `https://${url}`];
       }
 
       const accountResult = await nutshellRequest('newAccount', {
@@ -264,9 +286,14 @@ export async function POST(req: NextRequest) {
       customFields['Potential Start Date?'] = data.startMonth;
     }
 
-    // Contract Length?
+    // Contract Length? - ensure it's a string, not an array
     if (data.campaignLength) {
-      customFields['Contract Length?'] = data.campaignLength;
+      const length = Array.isArray(data.campaignLength) 
+        ? data.campaignLength[0] 
+        : data.campaignLength;
+      if (length) {
+        customFields['Contract Length?'] = String(length);
+      }
     }
 
     // OOH Type of Interest (board type)
