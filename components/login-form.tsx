@@ -1,40 +1,74 @@
-import { useActionState, useState } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { startAuthentication, browserSupportsWebAuthn } from '@simplewebauthn/browser'
+import { startAuthentication, startRegistration, browserSupportsWebAuthn } from '@simplewebauthn/browser'
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { signIn, type ActionResponse } from '@/actions/auth'
+import { signIn } from '@/actions/auth'
 import toast from 'react-hot-toast'
 
-const initialState: ActionResponse = {
-  success: false,
-  message: '',
-  errors: undefined
-}
+type LoginStep = 'email' | 'passkey' | 'password'
 
 export function LoginForm({
   className,
-  ...props
-}: React.ComponentProps<"form">) {
+}: {
+  className?: string
+}) {
   const router = useRouter()
-  const [isPasskeyLoading, setIsPasskeyLoading] = useState(false)
+  const [step, setStep] = useState<LoginStep>('email')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  // Handle passkey authentication
-  const handlePasskeyLogin = async () => {
-    if (!browserSupportsWebAuthn()) {
-      toast.error('Your browser does not support passkeys')
-      return
-    }
-
-    setIsPasskeyLoading(true)
+  const handleEmailSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError(null)
+    setIsLoading(true)
 
     try {
-      // Get authentication options from server
+      const res = await fetch('/api/auth/check-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      })
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to check user')
+      }
+
+      if (!data.exists) {
+        setError('User not found. Please check your email.')
+        setIsLoading(false)
+        return
+      }
+
+      if (data.hasPasskeys && browserSupportsWebAuthn()) {
+        setStep('passkey')
+        await handlePasskeyAuth()
+      } else {
+        setStep('password')
+        setIsLoading(false)
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'An error occurred'
+      setError(message)
+      toast.error(message)
+      setIsLoading(false)
+    }
+  }
+
+  const handlePasskeyAuth = async () => {
+    setIsLoading(true)
+
+    try {
       const optionsRes = await fetch('/api/passkey/auth-options', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
       })
 
       if (!optionsRes.ok) {
@@ -42,11 +76,8 @@ export function LoginForm({
       }
 
       const options = await optionsRes.json()
-
-      // Prompt user for passkey
       const authResponse = await startAuthentication({ optionsJSON: options })
 
-      // Verify with server
       const verifyRes = await fetch('/api/passkey/auth-verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -56,112 +87,142 @@ export function LoginForm({
       const verifyData = await verifyRes.json()
 
       if (!verifyRes.ok) {
-        throw new Error(verifyData.error || 'Authentication failed')
+        throw new Error(verifyData.error || 'Passkey authentication failed')
       }
 
       toast.success('Signed in with passkey')
       router.push('/dashboard')
       router.refresh()
-    } catch (error) {
-      // User cancelled or error occurred
-      const message = error instanceof Error ? error.message : 'Passkey authentication failed'
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Passkey authentication failed'
       if (!message.includes('cancelled') && !message.includes('abort')) {
         toast.error(message)
       }
-    } finally {
-      setIsPasskeyLoading(false)
+      setStep('password')
+      setIsLoading(false)
     }
   }
 
-  //use actionState hook for the form submission action
-  const [state, formAction, isPending] = useActionState<
-    ActionResponse,
-    FormData
-  >(async (prevState: ActionResponse, formData: FormData) => {
+  const registerPasskey = async () => {
+    if (!browserSupportsWebAuthn()) {
+      return
+    }
+
     try {
+      const optionsRes = await fetch('/api/passkey/register-options', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+
+      if (!optionsRes.ok) {
+        return
+      }
+
+      const options = await optionsRes.json()
+      const regResponse = await startRegistration({ optionsJSON: options })
+
+      const verifyRes = await fetch('/api/passkey/register-verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          response: regResponse,
+          name: 'Auto-registered passkey',
+        }),
+      })
+
+      if (verifyRes.ok) {
+        toast.success('Passkey registered for faster login next time')
+      }
+    } catch {
+      // Silently fail - passkey registration is optional
+    }
+  }
+
+  const handlePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError(null)
+    setIsLoading(true)
+
+    try {
+      const formData = new FormData()
+      formData.append('email', email)
+      formData.append('password', password)
+
       const result = await signIn(formData)
 
-      //handle success
       if (result.success) {
-        toast.success('signed in successfully')
+        toast.success('Signed in successfully')
+        
+        // Auto-register passkey in background
+        registerPasskey()
+        
         router.push('/dashboard')
         router.refresh()
+      } else {
+        setError(result.message || 'Invalid credentials')
+        if (result.errors?.password) {
+          setError(result.errors.password[0])
+        }
+        if (result.errors?.email) {
+          setError(result.errors.email[0])
+        }
+        setIsLoading(false)
       }
-
-      return result
-    } catch (error) {
-      toast.error(`network error`)
-      return {
-        success: false,
-        message: (error as Error).message || 'an error occured',
-        errors: undefined
-      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'An error occurred'
+      setError(message)
+      toast.error(message)
+      setIsLoading(false)
     }
-  }, initialState)
+  }
+
+  const handleBack = () => {
+    setStep('email')
+    setPassword('')
+    setError(null)
+  }
 
   return (
-    <form action={formAction} className={cn("flex flex-col gap-6", className)} {...props}>
+    <div className={cn("flex flex-col gap-6", className)}>
       <div className="flex flex-col items-center gap-2 text-center">
         <h1 className="text-2xl font-bold">Login to your account</h1>
         <p className="text-muted-foreground text-sm text-balance">
-          Enter your email below to login to your account
+          {step === 'email' && 'Enter your email below to login'}
+          {step === 'passkey' && 'Authenticating with passkey...'}
+          {step === 'password' && 'Enter your password to continue'}
         </p>
       </div>
-      <div className="grid gap-6">
-        <div className="grid gap-3">
-          <Label htmlFor="email">Email</Label>
-          <Input id="email" type="email" name="email" placeholder="m@example.com" required disabled={isPending} className='bg-white' />
-          {state?.errors?.email && (
-            <p id="password-error" className="text-sm text-red-500">
-              {state.errors.email[0]}
-            </p>
-          )}
-        </div>
-        <div className="grid gap-3">
-          <div className="flex items-center">
-            <Label htmlFor="password">Password</Label>
-            <a
-              href="#"
-              className="ml-auto text-sm underline-offset-4 hover:underline"
-            >
-              Forgot your password?
-            </a>
-          </div>
-          <Input id="password" type="password" required name="password" disabled={isPending} className='bg-white' />
-          {state?.errors?.password && (
-            <p id="password-error" className="text-sm text-red-500">
-              {state.errors.password[0]}
-            </p>
-          )}
-        </div>
-        <Button type="submit" className="w-full" disabled={isPending || isPasskeyLoading}>
-          {isPending ? 'loading...' : 'Login'}
-        </Button>
 
-        <div className="relative">
-          <div className="absolute inset-0 flex items-center">
-            <span className="w-full border-t" />
+      {step === 'email' && (
+        <form onSubmit={handleEmailSubmit} className="grid gap-6">
+          <div className="grid gap-3">
+            <Label htmlFor="email">Email</Label>
+            <Input
+              id="email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="m@example.com"
+              required
+              disabled={isLoading}
+              className="bg-white"
+            />
+            {error && (
+              <p className="text-sm text-red-500">{error}</p>
+            )}
           </div>
-          <div className="relative flex justify-center text-xs uppercase">
-            <span className="bg-background px-2 text-muted-foreground">
-              Or continue with
-            </span>
-          </div>
-        </div>
+          <Button type="submit" className="w-full" disabled={isLoading}>
+            {isLoading ? 'Checking...' : 'Continue'}
+          </Button>
+        </form>
+      )}
 
-        <Button
-          type="button"
-          variant="outline"
-          className="w-full"
-          onClick={handlePasskeyLogin}
-          disabled={isPending || isPasskeyLoading}
-        >
-          {isPasskeyLoading ? (
-            'Authenticating...'
-          ) : (
-            <>
+      {step === 'passkey' && (
+        <div className="grid gap-6">
+          <div className="flex flex-col items-center gap-4">
+            <div className="animate-pulse">
               <svg
-                className="mr-2 h-4 w-4"
+                className="h-16 w-16 text-primary"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
@@ -172,11 +233,67 @@ export function LoginForm({
                 <path d="M12 2a5 5 0 0 1 5 5v2a5 5 0 0 1-10 0V7a5 5 0 0 1 5-5Z" />
                 <path d="M12 14a7 7 0 0 0-7 7h14a7 7 0 0 0-7-7Z" />
               </svg>
-              Sign in with Passkey
-            </>
-          )}
-        </Button>
-      </div>
-    </form>
+            </div>
+            <p className="text-muted-foreground text-sm">
+              Please verify with your passkey
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleBack}
+            disabled={isLoading}
+          >
+            Cancel
+          </Button>
+        </div>
+      )}
+
+      {step === 'password' && (
+        <form onSubmit={handlePasswordSubmit} className="grid gap-6">
+          <div className="grid gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">{email}</span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleBack}
+                className="h-auto p-1 text-xs"
+              >
+                Change
+              </Button>
+            </div>
+          </div>
+          <div className="grid gap-3">
+            <div className="flex items-center">
+              <Label htmlFor="password">Password</Label>
+              <a
+                href="#"
+                className="ml-auto text-sm underline-offset-4 hover:underline"
+              >
+                Forgot your password?
+              </a>
+            </div>
+            <Input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              disabled={isLoading}
+              className="bg-white"
+              autoFocus
+            />
+            {error && (
+              <p className="text-sm text-red-500">{error}</p>
+            )}
+          </div>
+          <Button type="submit" className="w-full" disabled={isLoading}>
+            {isLoading ? 'Signing in...' : 'Login'}
+          </Button>
+        </form>
+      )}
+    </div>
   )
 }
