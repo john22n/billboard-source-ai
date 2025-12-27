@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { signIn } from '@/actions/auth'
-import toast from 'react-hot-toast'
+import { showErrorToast, showSuccessToast, getErrorMessage } from '@/lib/error-handling'
 
 type LoginStep = 'email' | 'passkey' | 'password'
 
@@ -54,9 +54,9 @@ export function LoginForm({
         setIsLoading(false)
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'An error occurred'
+      const message = getErrorMessage(err)
       setError(message)
-      toast.error(message)
+      showErrorToast(message)
       setIsLoading(false)
     }
   }
@@ -90,13 +90,13 @@ export function LoginForm({
         throw new Error(verifyData.error || 'Passkey authentication failed')
       }
 
-      toast.success('Signed in with passkey')
+      showSuccessToast('Signed in with passkey')
       router.push('/dashboard')
       router.refresh()
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Passkey authentication failed'
+      const message = getErrorMessage(err)
       if (!message.includes('cancelled') && !message.includes('abort')) {
-        toast.error(message)
+        showErrorToast(message)
       }
       setStep('password')
       setIsLoading(false)
@@ -131,7 +131,7 @@ export function LoginForm({
       })
 
       if (verifyRes.ok) {
-        toast.success('Passkey registered for faster login next time')
+        showSuccessToast('Passkey registered for faster login next time')
       }
     } catch {
       // Silently fail - passkey registration is optional
@@ -151,7 +151,7 @@ export function LoginForm({
       const result = await signIn(formData)
 
       if (result.success) {
-        toast.success('Signed in successfully')
+        showSuccessToast('Signed in successfully')
         
         // Auto-register passkey in background
         registerPasskey()
@@ -169,9 +169,9 @@ export function LoginForm({
         setIsLoading(false)
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'An error occurred'
+      const message = getErrorMessage(err)
       setError(message)
-      toast.error(message)
+      showErrorToast(message)
       setIsLoading(false)
     }
   }

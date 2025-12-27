@@ -5,7 +5,7 @@ import { startRegistration, browserSupportsWebAuthn } from '@simplewebauthn/brow
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import toast from 'react-hot-toast'
+import { showErrorToast, showSuccessToast, getErrorMessage } from '@/lib/error-handling'
 
 interface Passkey {
   id: string
@@ -49,7 +49,7 @@ export function PasskeyManager() {
   // Register a new passkey
   const handleRegister = async () => {
     if (!supportsPasskeys) {
-      toast.error('Your browser does not support passkeys')
+      showErrorToast('Your browser does not support passkeys')
       return
     }
 
@@ -86,14 +86,14 @@ export function PasskeyManager() {
         throw new Error(verifyData.error || 'Registration failed')
       }
 
-      toast.success('Passkey registered successfully')
+      showSuccessToast('Passkey registered successfully')
       setNewPasskeyName('')
       setShowNameInput(false)
       fetchPasskeys()
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to register passkey'
+      const message = getErrorMessage(error)
       if (!message.includes('cancelled') && !message.includes('abort')) {
-        toast.error(message)
+        showErrorToast(message)
       }
     } finally {
       setIsRegistering(false)
@@ -117,10 +117,10 @@ export function PasskeyManager() {
         throw new Error('Failed to delete passkey')
       }
 
-      toast.success('Passkey deleted')
+      showSuccessToast('Passkey deleted')
       fetchPasskeys()
-    } catch {
-      toast.error('Failed to delete passkey')
+    } catch (error) {
+      showErrorToast(error, 'Failed to delete passkey')
     }
   }
 

@@ -65,8 +65,16 @@ export async function GET() {
         for (const bucket of data.data) {
           if (bucket.results && Array.isArray(bucket.results)) {
             for (const result of bucket.results) {
-              // Amount value is in dollars
-              totalCostDollars += result.amount?.value || 0;
+              // Amount value is in dollars - ensure it's a number
+              const value = result.amount?.value;
+              if (typeof value === 'number') {
+                totalCostDollars += value;
+              } else if (typeof value === 'string') {
+                const parsed = parseFloat(value);
+                if (!isNaN(parsed)) {
+                  totalCostDollars += parsed;
+                }
+              }
             }
           }
         }

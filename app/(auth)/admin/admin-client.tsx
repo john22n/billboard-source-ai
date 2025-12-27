@@ -25,6 +25,7 @@ import { deleteUsers } from "@/actions/user-actions"
 import { useRouter } from "next/navigation"
 import type { User } from "@/db/schema"
 import { BillboardDataUploader } from "@/components/BillboardDataUploader"
+import { showErrorToast, showSuccessToast, getErrorMessage } from "@/lib/error-handling"
 
 interface OpenAIUsage {
   totalCost: number;
@@ -109,8 +110,9 @@ export default function AdminClient({
         const data = await response.json()
         setOpenaiUsage(data)
       } catch (error) {
-        console.error('Error fetching OpenAI usage:', error)
-        setUsageError('Failed to load OpenAI usage data')
+        const message = getErrorMessage(error)
+        console.error('Error fetching OpenAI usage:', message)
+        setUsageError(message)
       } finally {
         setUsageLoading(false)
       }
@@ -125,8 +127,9 @@ export default function AdminClient({
         const data = await response.json()
         setTwilioUsage(data)
       } catch (error) {
-        console.error('Error fetching Twilio usage:', error)
-        setTwilioError('Failed to load Twilio usage data')
+        const message = getErrorMessage(error)
+        console.error('Error fetching Twilio usage:', message)
+        setTwilioError(message)
       } finally {
         setTwilioLoading(false)
       }
@@ -148,9 +151,10 @@ export default function AdminClient({
       const result = await deleteUsers(selectedUsers)
       if (result.success) {
         setSelectedUsers([])
+        showSuccessToast('Users deleted successfully')
         router.refresh() 
       } else {
-        console.error("Failed to delete:", result.message)
+        showErrorToast(result.message || 'Failed to delete users')
       }
     })
   }
