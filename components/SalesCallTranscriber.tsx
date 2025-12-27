@@ -1,15 +1,27 @@
 "use client";
 
 import { useRef, useState, useEffect, useMemo } from "react";
+import dynamic from "next/dynamic";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useBillboardFormExtraction, type BillboardFormData } from "@/hooks/useBillboardFormExtraction";
 import { useTwilio } from "@/hooks/useTwilio";
 import { useOpenAITranscription } from "@/hooks/useOpenAITranscription";
-import { LeadForm, PricingPanel, TranscriptView, GoogleMapPanel, ArcGISMapPanel } from "@/components/sales-call";
+import { LeadForm, PricingPanel, TranscriptView } from "@/components/sales-call";
 import type { ContactData, MarketData } from "@/components/sales-call/LeadForm";
 import type { TranscriptItem } from "@/types/sales-call";
+
+// Dynamic imports for heavy map components - only loaded when tab is activated
+const GoogleMapPanel = dynamic(
+  () => import("@/components/sales-call/GoogleMapPanel").then(mod => mod.GoogleMapPanel),
+  { ssr: false, loading: () => <div className="h-full flex items-center justify-center text-gray-500">Loading Google Maps...</div> }
+);
+
+const ArcGISMapPanel = dynamic(
+  () => import("@/components/sales-call/ArcGISMapPanel").then(mod => mod.ArcGISMapPanel),
+  { ssr: false, loading: () => <div className="h-full flex items-center justify-center text-gray-500">Loading ArcGIS Map...</div> }
+);
 
 export default function SalesCallTranscriber() {
   const scrollRef = useRef<HTMLDivElement | null>(null);

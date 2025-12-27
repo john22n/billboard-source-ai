@@ -354,10 +354,20 @@ export function DataTable({
     pageSize: 10,
   })
   const sortableId = React.useId()
-  const sensors = useSensors(
-    useSensor(MouseSensor, {}),
-    useSensor(TouchSensor, {}),
-    useSensor(KeyboardSensor, {})
+
+  // Memoize sensors to prevent recreation on every render
+  const sensors = React.useMemo(
+    () => [
+      { sensor: MouseSensor, options: {} },
+      { sensor: TouchSensor, options: {} },
+      { sensor: KeyboardSensor, options: {} },
+    ],
+    []
+  )
+  const activeSensors = useSensors(
+    useSensor(sensors[0].sensor, sensors[0].options),
+    useSensor(sensors[1].sensor, sensors[1].options),
+    useSensor(sensors[2].sensor, sensors[2].options)
   )
 
   const dataIds = React.useMemo<UniqueIdentifier[]>(
@@ -484,7 +494,7 @@ export function DataTable({
             collisionDetection={closestCenter}
             modifiers={[restrictToVerticalAxis]}
             onDragEnd={handleDragEnd}
-            sensors={sensors}
+            sensors={activeSensors}
             id={sortableId}
           >
             <Table>

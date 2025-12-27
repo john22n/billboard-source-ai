@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import Script from "next/script";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -26,6 +27,7 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const streetViewPanoramaRef = useRef<any>(null);
   const initCalledRef = useRef(false);
+  const [scriptReady, setScriptReady] = useState(false);
 
   const [isLoaded, setIsLoaded] = useState(false);
   const [showStreetView, setShowStreetView] = useState(false);
@@ -203,51 +205,19 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
     setIsLoaded(true);
   }, [initialLocation, updateMarkerAndStreetView]);
 
+  // Initialize map when script is ready
   useEffect(() => {
-    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAP_KEY;
-    if (!apiKey) {
-      console.error("Google Maps API key not found");
-      return;
-    }
-
-    // Check if script is already being loaded or loaded
-    const existingScript = document.querySelector(
-      'script[src*="maps.googleapis.com"]'
-    );
-
-    if (existingScript) {
-      // If google is already available, initialize
-      if (window.google?.maps?.Map) {
-        initializeMap();
-      } else {
-        // Wait for the script to load
-        existingScript.addEventListener("load", () => {
-          // Small delay to ensure all libraries are ready
-          setTimeout(initializeMap, 100);
-        });
-      }
-      return;
-    }
-
-    // Load the script with callback
-    const callbackName = `initGoogleMaps_${Date.now()}`;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (window as any)[callbackName] = () => {
+    if (scriptReady && window.google?.maps?.Map) {
       initializeMap();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      delete (window as any)[callbackName];
-    };
+    }
+  }, [scriptReady, initializeMap]);
 
-    const script = document.createElement("script");
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=marker&v=weekly&loading=async&callback=${callbackName}`;
-    script.async = true;
-    document.head.appendChild(script);
-
-    return () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      delete (window as any)[callbackName];
-    };
-  }, [initializeMap]);
+  // Check if Google Maps is already loaded (e.g., from another component)
+  useEffect(() => {
+    if (window.google?.maps?.Map) {
+      setScriptReady(true);
+    }
+  }, []);
 
   // Update map when initialLocation changes
   useEffect(() => {
@@ -344,6 +314,15 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
       <p className="text-xs text-slate-500 text-center">
         Click on the map to pin a location, or use the search bar above
       </p>
+
+      {/* Google Maps Script - loaded via Next.js Script for better optimization */}
+      {process.env.NEXT_PUBLIC_GOOGLE_MAP_KEY && (
+        <Script
+          src={`https://maps.googleapis.com/maps/api/js?key=${process.env.NEXT_PUBLIC_GOOGLE_MAP_KEY}&libraries=marker&v=weekly`}
+          strategy="afterInteractive"
+          onReady={() => setScriptReady(true)}
+        />
+      )}
     </div>
   );
 }
