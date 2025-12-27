@@ -11,6 +11,7 @@ import { useOpenAITranscription } from "@/hooks/useOpenAITranscription";
 import { LeadForm, PricingPanel, TranscriptView } from "@/components/sales-call";
 import type { ContactData, MarketData } from "@/components/sales-call/LeadForm";
 import type { TranscriptItem } from "@/types/sales-call";
+import { showSuccessToast, showErrorToast } from "@/lib/error-handling";
 
 // Dynamic imports for heavy map components - only loaded when tab is activated
 const GoogleMapPanel = dynamic(
@@ -371,14 +372,17 @@ export default function SalesCallTranscriber() {
       if (response.ok) {
         setNutshellStatus('success');
         setNutshellMessage('Lead created');
+        showSuccessToast('Lead sent to Nutshell');
       } else {
         setNutshellStatus('error');
         setNutshellMessage(result.error || 'Failed');
+        showErrorToast(result.error || 'Failed to create lead');
       }
     } catch (error) {
       console.error('Error submitting to Nutshell:', error);
       setNutshellStatus('error');
       setNutshellMessage('Connection failed');
+      showErrorToast('Connection to Nutshell failed');
     } finally {
       setIsSubmittingNutshell(false);
     }

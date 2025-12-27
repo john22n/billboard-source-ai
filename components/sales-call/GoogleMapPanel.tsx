@@ -59,7 +59,7 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
             });
           }
           mapInstanceRef.current.setCenter(location);
-          mapInstanceRef.current.setZoom(17);
+          mapInstanceRef.current.setZoom(13);
         }
 
         setCurrentAddress(address);
@@ -106,7 +106,7 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
 
       // Center map on location
       mapInstanceRef.current.setCenter(location);
-      mapInstanceRef.current.setZoom(17);
+      mapInstanceRef.current.setZoom(13);
 
       if (address) {
         setCurrentAddress(address);
