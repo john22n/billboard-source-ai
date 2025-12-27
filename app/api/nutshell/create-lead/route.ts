@@ -7,46 +7,46 @@ interface NutshellLeadRequest {
   position: string;
   phone: string;
   email: string;
-  
+
   // Account/Business info
   entityName: string;
   website: string;
-  
+
   // Lead classification
   typeName: 'business' | 'political' | 'nonprofit' | 'personal' | null;
   businessName: string;
   leadType: 'Availer' | 'Panel Requester' | 'Tire Kicker' | null;
-  
+
   // Billboard experience
   billboardsBeforeYN: string;
   billboardsBeforeDetails: string;
-  
+
   // Campaign details
   billboardPurpose: string;
   accomplishDetails: string;
   targetAudience: string;
-  
+
   // Location
   targetCity: string;
   state: string;
   targetArea: string;
-  
+
   // Timeline & preferences
   startMonth: string;
   campaignLength: string;
   boardType: string;
-  
+
   // Business context
   hasMediaExperience: boolean | null;
   yearsInBusiness: string;
-  
+
   // Decision making
   decisionMaker: 'alone' | 'partners' | 'boss' | 'committee' | null;
-  
+
   // Notes
   notes: string;
   sendOver: string[];
-  
+
   // Budget
   budget: string;
 }
@@ -305,7 +305,7 @@ export async function POST(req: NextRequest) {
 
     // OOH Experience (Ever used billboards before?)
     if (data.billboardsBeforeYN) {
-      const experience = data.billboardsBeforeYN === 'Y' 
+      const experience = data.billboardsBeforeYN === 'Y'
         ? `Yes${data.billboardsBeforeDetails ? ` - ${data.billboardsBeforeDetails}` : ''}`
         : 'No';
       customFields['OOH Experience'] = experience;
@@ -328,8 +328,8 @@ export async function POST(req: NextRequest) {
 
     // Contract Length? - ensure it's a string, not an array
     if (data.campaignLength) {
-      const length = Array.isArray(data.campaignLength) 
-        ? data.campaignLength[0] 
+      const length = Array.isArray(data.campaignLength)
+        ? data.campaignLength[0]
         : data.campaignLength;
       if (length) {
         customFields['Contract Length?'] = String(length);
@@ -392,7 +392,6 @@ export async function POST(req: NextRequest) {
     // Only add accounts if we have a valid account ID
     if (accountId && accountId > 0) {
       leadPayload.accounts = [{ id: accountId }];
-      leadPayload.primaryAccount = { id: accountId };
     }
 
     // Only add tags if we have any
