@@ -1,6 +1,6 @@
 'use server'
 
-import { deleteUsersByIds, getCurrentUser } from "@/lib/dal";
+import { deleteUsersByIds, getCurrentUser, updateUserTwilioPhone } from "@/lib/dal";
 import { getSession } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 
@@ -51,5 +51,28 @@ export async function deleteUsers(ids: string[]) {
       success: false,
       message: "An error occurred while deleting users",
     };
+  }
+}
+
+export async function updateTwilioPhone(userId: string, twilioPhoneNumber: string) {
+  try {
+    const session = await getSession();
+    if (!session?.userId) {
+      return { success: false, message: "Unauthorized" };
+    }
+
+    const currentUser = await getCurrentUser();
+    if (!currentUser || currentUser.role !== 'admin') {
+      return { success: false, message: "Admin access required" };
+    }
+
+    const phone = twilioPhoneNumber.trim() || null;
+    await updateUserTwilioPhone(userId, phone);
+
+    revalidatePath('/admin');
+    return { success: true, message: "Phone number updated" };
+  } catch (err) {
+    console.error("Update phone error:", err);
+    return { success: false, message: "Failed to update phone number" };
   }
 }

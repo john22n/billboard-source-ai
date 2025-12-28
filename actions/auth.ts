@@ -115,6 +115,9 @@ export async function signUp(prevState: ActionResponse, formData: FormData): Pro
     const isAdmin = formData.get('isAdmin') === 'on'
     const role = isAdmin ? 'admin' : 'user'
 
+    // get twilio phone number
+    const twilioPhoneNumber = formData.get('twilioPhoneNumber') as string | null
+
     // validate with zod
     const validationResult = SignUpSchema.safeParse(data)
     if (!validationResult.success) {
@@ -137,8 +140,8 @@ export async function signUp(prevState: ActionResponse, formData: FormData): Pro
       }
     }
 
-    // create new user with role
-    const user = await createUser(data.email, data.password, role)
+    // create new user with role and twilio phone number
+    const user = await createUser(data.email, data.password, role, twilioPhoneNumber || undefined)
     if (!user) {
       return {
         success: false,

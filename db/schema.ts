@@ -6,7 +6,8 @@ export const user = pgTable('User', {
   id: varchar('id', { length: 21 }).primaryKey().notNull(),
   email: varchar('email', { length: 64 }).notNull(),
   password: varchar('password', { length: 64 }),
-  role: varchar('role', { length: 20 }).default('user')
+  role: varchar('role', { length: 20 }).default('user'),
+  twilioPhoneNumber: varchar('twilio_phone_number', { length: 20 })
 })
 export type User = InferSelectModel<typeof user>;
 

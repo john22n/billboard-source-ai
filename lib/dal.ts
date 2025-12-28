@@ -62,6 +62,15 @@ export async function deleteUsersByIds(ids: string[]) {
   return await db.delete(user).where(inArray(user.id, ids));
 }
 
+export async function updateUserTwilioPhone(userId: string, twilioPhoneNumber: string | null) {
+  const result = await db
+    .update(user)
+    .set({ twilioPhoneNumber })
+    .where(eq(user.id, userId))
+    .returning();
+  return result[0] || null;
+}
+
 export async function getUserCosts() {
   return await db
     .select({

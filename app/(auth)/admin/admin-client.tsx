@@ -20,8 +20,9 @@ import {
 } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Input } from "@/components/ui/input"
 import { Trash2, Loader2 } from "lucide-react"
-import { deleteUsers } from "@/actions/user-actions"
+import { deleteUsers, updateTwilioPhone } from "@/actions/user-actions"
 import { useRouter } from "next/navigation"
 import type { User } from "@/db/schema"
 import { BillboardDataUploader } from "@/components/BillboardDataUploader"
@@ -87,6 +88,7 @@ export default function AdminClient({
 }: AdminClientProps) {
   const [selectedUsers, setSelectedUsers] = useState<string[]>([])
   const [isPending, startTransition] = useTransition()
+  const [phoneEdits, setPhoneEdits] = useState<Record<string, string>>({})
   const router = useRouter()
 
   // OpenAI usage state
@@ -163,6 +165,26 @@ export default function AdminClient({
     router.push('/dashboard')
   }
 
+  const handlePhoneUpdate = async (userId: string, currentValue: string | null) => {
+    const newValue = phoneEdits[userId]
+    if (newValue === undefined || newValue === (currentValue ?? '')) return
+
+    startTransition(async () => {
+      const result = await updateTwilioPhone(userId, newValue)
+      if (result.success) {
+        showSuccessToast(result.message || 'Phone updated')
+        setPhoneEdits(prev => {
+          const next = { ...prev }
+          delete next[userId]
+          return next
+        })
+        router.refresh()
+      } else {
+        showErrorToast(result.message || 'Failed to update')
+      }
+    })
+  }
+
   const totalCostNumber = Array.isArray(initialCosts) 
     ? initialCosts.reduce((sum, u) => sum + costToNumber(u.cost), 0)
     : 0
@@ -214,12 +236,13 @@ export default function AdminClient({
                   <TableHead>ID</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead>Role</TableHead>
+                  <TableHead>Twilio Phone</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {initialUsers.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center text-muted-foreground">
+                    <TableCell colSpan={5} className="text-center text-muted-foreground">
                       No users found
                     </TableCell>
                   </TableRow>
@@ -236,6 +259,18 @@ export default function AdminClient({
                       <TableCell>{index + 1}</TableCell>
                       <TableCell>{user.email}</TableCell>
                       <TableCell>{user.role ?? "User"}</TableCell>
+                      <TableCell>
+                        <Input
+                          type="tel"
+                          className="h-8 w-32"
+                          placeholder="+1234567890"
+                          value={phoneEdits[user.id] ?? user.twilioPhoneNumber ?? ''}
+                          onChange={(e) => setPhoneEdits(prev => ({ ...prev, [user.id]: e.target.value }))}
+                          onBlur={() => handlePhoneUpdate(user.id, user.twilioPhoneNumber)}
+                          onKeyDown={(e) => e.key === 'Enter' && handlePhoneUpdate(user.id, user.twilioPhoneNumber)}
+                          disabled={isPending}
+                        />
+                      </TableCell>
                     </TableRow>
                   ))
                 )}

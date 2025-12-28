@@ -32,7 +32,7 @@ export async function verifyPassword(password: string, hashedPassword: string) {
   return compare(password, hashedPassword)
 }
 // create a new user
-export async function createUser(email: string, password: string, role: string = 'user') {
+export async function createUser(email: string, password: string, role: string = 'user', twilioPhoneNumber?: string) {
   const hashedPassword = await hashPassword(password)
   const id = nanoid()
 
@@ -44,6 +44,7 @@ export async function createUser(email: string, password: string, role: string =
       email,
       password: hashedPassword,
       role,
+      twilioPhoneNumber: twilioPhoneNumber || null,
     })
     return { id, email }
   } catch (error) {

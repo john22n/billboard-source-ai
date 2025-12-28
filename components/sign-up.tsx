@@ -93,6 +93,16 @@ export function SignupForm({
             </p>
           )}
         </div>
+        <div className="grid gap-3">
+          <Label htmlFor="twilioPhoneNumber">Twilio Phone Number</Label>
+          <Input
+            id="twilioPhoneNumber"
+            type="tel"
+            name="twilioPhoneNumber"
+            placeholder="+1234567890"
+            disabled={isPending}
+          />
+        </div>
         <div className="flex items-center space-x-2">
           <Checkbox
             id="isAdmin"
