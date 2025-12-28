@@ -63,11 +63,11 @@ export async function POST(req: Request) {
       .then(rows => rows[0]);
 
     // Fallback: try matching normalized number if exact match fails
-    let clientIdentity = matchedUser?.email;
+    let clientIdentity: string | undefined = matchedUser?.email;
     if (!clientIdentity && normalizedTo) {
       const users = await db.select({ email: user.email, phone: user.twilioPhoneNumber }).from(user);
       const match = users.find(u => u.phone?.replace(/\D/g, '').slice(-10) === normalizedTo);
-      clientIdentity = match?.email;
+      clientIdentity = match?.email ?? undefined;
     }
 
     if (!clientIdentity) {

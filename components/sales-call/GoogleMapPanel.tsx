@@ -315,11 +315,12 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
         Click on the map to pin a location, or use the search bar above
       </p>
 
-      {/* Google Maps Script - loaded via Next.js Script for better optimization */}
+      {/* Google Maps Script - lazy loaded during browser idle time */}
       {process.env.NEXT_PUBLIC_GOOGLE_MAP_KEY && (
         <Script
           src={`https://maps.googleapis.com/maps/api/js?key=${process.env.NEXT_PUBLIC_GOOGLE_MAP_KEY}&libraries=marker&v=weekly`}
-          strategy="afterInteractive"
+          strategy="lazyOnload"
+          async
           onReady={() => setScriptReady(true)}
         />
       )}
