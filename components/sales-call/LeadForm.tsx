@@ -57,6 +57,10 @@ interface LeadFormProps {
   setConfirmedSendOver: React.Dispatch<React.SetStateAction<{[contactIndex: number]: string[]}>>;
 }
 
+// ✅ LIMITS: Maximum 1 additional market and 1 additional contact (2 total each)
+const MAX_ADDITIONAL_MARKETS = 1;
+const MAX_ADDITIONAL_CONTACTS = 1;
+
 export function LeadForm({ 
   formData, 
   updateField, 
@@ -176,8 +180,13 @@ export function LeadForm({
     }
   }, [resetTrigger]);
 
-  // Contact management
+  // ✅ Contact management - with limit check
   const addNewContact = () => {
+    // Check if we've reached the limit
+    if (additionalContacts.length >= MAX_ADDITIONAL_CONTACTS) {
+      return; // Don't add more
+    }
+    
     const newContact: ContactData = {
       id: Date.now().toString(),
       name: "",
@@ -231,8 +240,13 @@ export function LeadForm({
     }
   };
 
-  // Market management
+  // ✅ Market management - with limit check
   const addNewMarket = () => {
+    // Check if we've reached the limit
+    if (additionalMarkets.length >= MAX_ADDITIONAL_MARKETS) {
+      return; // Don't add more
+    }
+    
     const newMarket: MarketData = {
       targetCity: "",
       state: "",
@@ -312,6 +326,10 @@ export function LeadForm({
         })()
       }
     : additionalContacts[activeContactIndex - 1];
+
+  // ✅ Check if we can add more markets/contacts
+  const canAddMoreMarkets = additionalMarkets.length < MAX_ADDITIONAL_MARKETS;
+  const canAddMoreContacts = additionalContacts.length < MAX_ADDITIONAL_CONTACTS;
 
   return (
     <div className="lg:flex-[2] space-y-0 px-0.75 py-0.75 overflow-y-auto h-relative">
@@ -771,12 +789,15 @@ export function LeadForm({
             </span>
           </button>
         ))}
-        <button
-          onClick={addNewMarket}
-          className="inline-block text-gray-400 hover:text-black px-3.5 py-1.5 text-sm font-bold rounded-b-md transition-colors"
-        >
-          + Market
-        </button>
+        {/* ✅ Only show "+ Market" button if we can add more */}
+        {canAddMoreMarkets && (
+          <button
+            onClick={addNewMarket}
+            className="inline-block text-gray-400 hover:text-black px-3.5 py-1.5 text-sm font-bold rounded-b-md transition-colors"
+          >
+            + Market
+          </button>
+        )}
       </div>
 
       {/* Contact Tabs */}
@@ -809,12 +830,15 @@ export function LeadForm({
             </span>
           </button>
         ))}
-        <button
-          onClick={addNewContact}
-          className="inline-block text-gray-400 hover:text-black px-3.5 py-1.5 text-sm font-bold rounded-t-md transition-colors"
-        >
-          + Contact
-        </button>
+        {/* ✅ Only show "+ Contact" button if we can add more */}
+        {canAddMoreContacts && (
+          <button
+            onClick={addNewContact}
+            className="inline-block text-gray-400 hover:text-black px-3.5 py-1.5 text-sm font-bold rounded-t-md transition-colors"
+          >
+            + Contact
+          </button>
+        )}
       </div>
 
       {/* Active Contact */}
