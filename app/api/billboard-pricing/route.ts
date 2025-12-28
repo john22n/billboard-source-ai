@@ -28,15 +28,20 @@ export async function POST(req: NextRequest) {
     // Extract location information from transcript using AI
     const { text: extractedLocation } = await generateText({
       model: openai('gpt-4o-mini'),
-      prompt: `Extract ONLY the geographic location information from this conversation transcript. 
-Focus on: city names, state names, counties, regions, highways, neighborhoods, or specific areas mentioned.
-If multiple locations are mentioned, list all of them.
-Return ONLY the location names, separated by commas. Nothing else.
+      prompt: `Extract the geographic location from this conversation transcript.
+
+IMPORTANT formatting rules:
+- For US states, use the TWO-LETTER abbreviation (TX, CA, NY, FL, etc.)
+- Use the full city name as commonly written
+- Format: "City, STATE" (e.g., "Dallas, TX" not "Dallas, Texas")
+- If multiple locations mentioned, return the PRIMARY one being discussed
 
 Examples:
-- "Dallas, Texas"
-- "Houston, Austin, San Antonio"
-- "Los Angeles County, California"
+- "Dallas, TX"
+- "Los Angeles, CA"
+- "Miami, FL"
+
+Return ONLY the location in "City, ST" format. Nothing else.
 
 Transcript: ${transcript}`,
     });
@@ -54,6 +59,7 @@ Transcript: ${transcript}`,
     const state = locationParts[1] || '';
 
     console.log('🏙️ Parsed - City:', city, 'State:', state);
+    console.log('🔍 Location parts array:', locationParts);
 
     // Generate embedding for the EXTRACTED LOCATION
     const { embedding } = await embed({
@@ -61,7 +67,18 @@ Transcript: ${transcript}`,
       value: extractedLocation,
     });
 
-    // ✅ HYBRID SEARCH: Combine exact text matching with vector similarity
+    // ✅ First, let's check what we have in the database for this city/state
+    const debugResults = await db.execute(sql`
+      SELECT DISTINCT city, state
+      FROM billboard_locations
+      WHERE LOWER(city) LIKE LOWER(${'%' + city + '%'})
+         OR LOWER(state) LIKE LOWER(${'%' + state + '%'})
+      LIMIT 10
+    `);
+
+    console.log('🔍 DEBUG - Similar locations in database:', debugResults.rows);
+
+    // ✅ STRICT HYBRID SEARCH: Require both city AND state to match
     const results = await db.execute(sql`
       SELECT 
         city,
@@ -79,20 +96,19 @@ Transcript: ${transcript}`,
         avg_poster_views_per_week,
         avg_digital_price_per_month,
         avg_digital_views_per_week,
-        1 - (embedding <=> ${JSON.stringify(embedding)}::vector) as similarity,
-        CASE 
-          WHEN LOWER(city) = LOWER(${city}) AND LOWER(state) = LOWER(${state}) THEN 1.0
-          WHEN LOWER(city) = LOWER(${city}) THEN 0.5
-          WHEN LOWER(state) = LOWER(${state}) THEN 0.3
-          ELSE 0.0
-        END as text_match_boost
+        1 - (embedding <=> ${JSON.stringify(embedding)}::vector) as similarity
       FROM billboard_locations
       WHERE embedding IS NOT NULL
+        ${city && state ? sql`AND LOWER(city) = LOWER(${city}) AND LOWER(state) = LOWER(${state})` : sql``}
       ORDER BY 
-        text_match_boost DESC,
         embedding <=> ${JSON.stringify(embedding)}::vector ASC
       LIMIT 5
     `);
+
+    console.log('📊 Query returned:', results.rows.length, 'results');
+    if (results.rows.length > 0) {
+      console.log('🎯 First result:', results.rows[0]);
+    }
 
     if (!results.rows || results.rows.length === 0) {
       console.log('❌ No matching billboard locations found');
@@ -103,7 +119,6 @@ Transcript: ${transcript}`,
     console.log(`✅ Found ${results.rows.length} matching locations`);
     console.log(`🎯 Top match: ${topResult.city}, ${topResult.state}`);
     console.log(`   - Similarity: ${(topResult.similarity * 100).toFixed(1)}%`);
-    console.log(`   - Text boost: ${topResult.text_match_boost}`);
 
     const formattedContext = formatResults(results.rows as unknown as BillboardRow[]);
 
@@ -112,7 +127,6 @@ Transcript: ${transcript}`,
       topResult,
       extractedLocation
     });
-
   } catch (error) {
     console.error('❌ Billboard pricing error:', error);
     return NextResponse.json(
@@ -142,64 +156,63 @@ interface BillboardRow {
   avg_digital_price_per_month: number;
   avg_digital_views_per_week: number;
   similarity: number;
-  text_match_boost: number;
 }
 
 function formatResults(rows: BillboardRow[]) {
   return rows
     .map((row: BillboardRow) => {
       const parts: string[] = [];
-      
+
       parts.push(`Location: ${row.city}, ${row.state}`);
       if (row.county) parts.push(`County: ${row.county}`);
-      
+
       if (row.market) {
         parts.push(`Market: ${row.market}`);
       }
-      
+
       if (row.avg_daily_views) {
         parts.push(`Average Daily Views: ${row.avg_daily_views}`);
       }
-      
+
       if (row.four_week_range) {
         parts.push(`4-Week Price Range: ${row.four_week_range}`);
       }
-      
+
       if (row.market_range) {
         parts.push(`Market Range: ${row.market_range}`);
       }
-      
+
       if (row.general_range) {
         parts.push(`General Pricing: ${row.general_range}`);
       }
-      
+
       if (row.avg_bull_price_per_month > 0) {
         parts.push(`Static Bulletin: $${row.avg_bull_price_per_month}/month`);
         if (row.avg_stat_bull_views_per_week > 0) {
           parts.push(`  Weekly Views: ${row.avg_stat_bull_views_per_week.toLocaleString()}`);
         }
       }
-      
+
       if (row.avg_poster_price_per_month > 0) {
         parts.push(`Poster: $${row.avg_poster_price_per_month}/month`);
         if (row.avg_poster_views_per_week > 0) {
           parts.push(`  Weekly Views: ${row.avg_poster_views_per_week.toLocaleString()}`);
         }
       }
-      
+
       if (row.avg_digital_price_per_month > 0) {
         parts.push(`Digital: $${row.avg_digital_price_per_month}/month`);
         if (row.avg_digital_views_per_week > 0) {
           parts.push(`  Weekly Views: ${row.avg_digital_views_per_week.toLocaleString()}`);
         }
       }
-      
+
       if (row.details && row.details.trim() !== '') {
         parts.push(`\nDetails:\n${row.details}`);
       }
-      
+
       parts.push(`Similarity: ${(row.similarity * 100).toFixed(1)}%`);
-      
+
       return parts.join('\n');
     })
     .join('\n\n' + '='.repeat(50) + '\n\n');

@@ -50,7 +50,7 @@ export default function SalesCallTranscriber() {
 
   // ✅ ADD: State for Twilio phone (lifted from LeadForm)
   const [twilioPhone, setTwilioPhone] = useState("");
-  const [twilioPhonePreFilled, setTwilioPhonePreFilled] = useState(false);  // ✅ NEW: Track if phone was pre-filled
+  const [twilioPhonePreFilled, setTwilioPhonePreFilled] = useState(false);
 
   // ✅ ADD: State for user confirmations (lifted from LeadForm)
   const [confirmedLeadType, setConfirmedLeadType] = useState<string | null>(null);
@@ -186,7 +186,7 @@ export default function SalesCallTranscriber() {
     // Clear ballpark and phone
     setBallpark("");
     setTwilioPhone("");
-    setTwilioPhonePreFilled(false);  // ✅ RESET pre-fill flag
+    setTwilioPhonePreFilled(false);
 
     // Clear all confirmations
     setConfirmedLeadType(null);
@@ -224,9 +224,14 @@ export default function SalesCallTranscriber() {
     }
   }, [fullTranscript, extractFields, isExtracting]);
 
-  // Fetch billboard pricing data
+  // ✅ MODIFIED - Only fetch for primary market automatically
   useEffect(() => {
     const fetchBillboardData = async () => {
+      // Only auto-fetch if we're on the primary market (activeMarketIndex === 0)
+      if (activeMarketIndex !== 0) {
+        return; // Let PricingPanel handle additional markets
+      }
+
       const transcriptDiff = fullTranscript.length - lastFetchedTranscript.current.length;
 
       if (
@@ -260,7 +265,7 @@ export default function SalesCallTranscriber() {
 
     const timeoutId = setTimeout(fetchBillboardData, 1500);
     return () => clearTimeout(timeoutId);
-  }, [fullTranscript, isLoadingBillboard]);
+  }, [fullTranscript, isLoadingBillboard, activeMarketIndex]);
 
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -588,7 +593,6 @@ export default function SalesCallTranscriber() {
                 </TabsTrigger>
               </TabsList>
 
-
               {/* Form + Pricing Tab */}
               <TabsContent value="form" className="mt-0 flex-1 overflow-hidden flex flex-col">
                 <div className="flex flex-col lg:flex-row gap-1 flex-1 overflow-hidden">
@@ -624,6 +628,7 @@ export default function SalesCallTranscriber() {
                     setConfirmedSendOver={setConfirmedSendOver}
                   />
                   <PricingPanel
+                    key={`pricing-${activeMarketIndex}-${additionalMarkets.length}`}
                     isLoading={isLoadingBillboard}
                     billboardContext={billboardContext}
                     hasTranscripts={transcripts.length > 0}
@@ -631,6 +636,12 @@ export default function SalesCallTranscriber() {
                     isSubmittingNutshell={isSubmittingNutshell}
                     nutshellStatus={nutshellStatus}
                     nutshellMessage={nutshellMessage}
+                    activeMarketIndex={activeMarketIndex}
+                    formData={formData}
+                    additionalMarkets={additionalMarkets}
+                    fullTranscript={fullTranscript}
+                    setIsLoadingBillboard={setIsLoadingBillboard}
+                    setBillboardContext={setBillboardContext}
                   />
                 </div>
               </TabsContent>
