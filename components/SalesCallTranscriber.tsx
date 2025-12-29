@@ -37,22 +37,22 @@ export default function SalesCallTranscriber() {
   const [nutshellMessage, setNutshellMessage] = useState('');
   const [resetTrigger, setResetTrigger] = useState(0);
 
-  // ✅ ADD: State for additional contacts and markets (lifted from LeadForm)
+  // ✅ State for additional contacts and markets (lifted from LeadForm)
   const [additionalContacts, setAdditionalContacts] = useState<ContactData[]>([]);
   const [additionalMarkets, setAdditionalMarkets] = useState<MarketData[]>([]);
 
-  // ✅ ADD: State for active indices (lifted from LeadForm)
+  // ✅ State for active indices (lifted from LeadForm)
   const [activeContactIndex, setActiveContactIndex] = useState(0);
   const [activeMarketIndex, setActiveMarketIndex] = useState(0);
 
-  // ✅ ADD: State for ballpark (lifted from LeadForm)
+  // ✅ State for ballpark (lifted from LeadForm)
   const [ballpark, setBallpark] = useState("");
 
-  // ✅ ADD: State for Twilio phone (lifted from LeadForm)
+  // ✅ State for Twilio phone (lifted from LeadForm)
   const [twilioPhone, setTwilioPhone] = useState("");
   const [twilioPhonePreFilled, setTwilioPhonePreFilled] = useState(false);
 
-  // ✅ ADD: State for user confirmations (lifted from LeadForm)
+  // ✅ State for user confirmations (lifted from LeadForm)
   const [confirmedLeadType, setConfirmedLeadType] = useState<string | null>(null);
   const [confirmedDecisionMakers, setConfirmedDecisionMakers] = useState<{[contactIndex: number]: string | null}>({});
   const [confirmedBoardTypes, setConfirmedBoardTypes] = useState<{[marketIndex: number]: string | null}>({});
@@ -90,7 +90,7 @@ export default function SalesCallTranscriber() {
     },
   });
 
-  // Billboard form extraction hook
+  // Billboard form extraction hook - ✅ NOW WITH FIELD LOCKING
   const {
     formData: aiFormData,
     isExtracting,
@@ -101,6 +101,11 @@ export default function SalesCallTranscriber() {
     reset: resetExtraction,
     cleanup,
     canRetry,
+    // ✅ NEW: Field locking functions for incremental extraction
+    lockField,
+    unlockField,
+    isFieldLocked,
+    setCurrentFormData,
   } = useBillboardFormExtraction();
 
   // Local state for manual user edits (tracks which fields user has manually changed)
@@ -159,10 +164,48 @@ export default function SalesCallTranscriber() {
     return merged;
   }, [aiFormData, manualEdits, userEditedFields]);
 
+  // ✅ NEW: Update field and lock it so AI won't overwrite
   const updateField = (field: string, value: string | boolean | string[] | null) => {
     setManualEdits(prev => ({ ...prev, [field]: value }));
     setUserEditedFields(prev => new Set(prev).add(field));
+    // ✅ Lock the field when user manually edits it
+    lockField(field);
   };
+
+  // ✅ NEW: Sync confirmed fields with locked fields in the extraction hook
+  useEffect(() => {
+    // Lock leadType when confirmed
+    if (confirmedLeadType) {
+      lockField('leadType');
+    }
+    
+    // Lock board types for primary market
+    if (confirmedBoardTypes[0]) {
+      lockField('boardType');
+    }
+    
+    // Lock decision makers for primary contact
+    if (confirmedDecisionMakers[0]) {
+      lockField('decisionMaker');
+    }
+    
+    // Lock durations for primary market
+    if (confirmedDurations[0] && confirmedDurations[0].length > 0) {
+      lockField('campaignLength');
+    }
+    
+    // Lock sendOver for primary contact
+    if (confirmedSendOver[0] && confirmedSendOver[0].length > 0) {
+      lockField('sendOver');
+    }
+  }, [confirmedLeadType, confirmedBoardTypes, confirmedDecisionMakers, confirmedDurations, confirmedSendOver, lockField]);
+
+  // ✅ NEW: Keep extraction hook in sync with current form state
+  useEffect(() => {
+    if (formData && setCurrentFormData) {
+      setCurrentFormData(formData);
+    }
+  }, [formData, setCurrentFormData]);
 
   const clearAll = () => {
     // Clear transcripts first
@@ -173,7 +216,7 @@ export default function SalesCallTranscriber() {
     // Clear all form-related state
     setManualEdits({});
     setUserEditedFields(new Set());
-    resetExtraction(); // Clear AI extracted data
+    resetExtraction(); // ✅ This now also clears locked fields
 
     // Clear additional contacts/markets
     setAdditionalContacts([]);
@@ -224,7 +267,7 @@ export default function SalesCallTranscriber() {
     }
   }, [fullTranscript, extractFields, isExtracting]);
 
-  // ✅ MODIFIED - Only fetch for primary market automatically
+  // ✅ Only fetch billboard pricing for primary market automatically
   useEffect(() => {
     const fetchBillboardData = async () => {
       // Only auto-fetch if we're on the primary market (activeMarketIndex === 0)
@@ -316,7 +359,8 @@ export default function SalesCallTranscriber() {
   const handleRetryExtraction = () => {
     clearError();
     if (fullTranscript.length > 50) {
-      extractFields(fullTranscript);
+      // ✅ Force full extraction on retry
+      extractFields(fullTranscript, true);
     }
   };
 
