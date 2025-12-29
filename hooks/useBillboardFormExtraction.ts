@@ -51,17 +51,30 @@ export interface BillboardFormData {
   notes: string | null;
 }
 
+// Fields that can be locked by user confirmation
+export type LockableField = keyof BillboardFormData;
+
 export function useBillboardFormExtraction() {
   const transcriptContextRef = useRef<string[]>([]);
   const lastProcessedTranscriptRef = useRef<string>("");
+  const lastProcessedLengthRef = useRef<number>(0); // Track transcript length for incremental processing
   const isProcessingRef = useRef(false);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  
+  // ✅ NEW: Store the current extracted form data for incremental updates
+  const currentFormDataRef = useRef<Partial<BillboardFormData>>({});
+  
+  // ✅ NEW: Track which fields are "locked" (user confirmed - green state)
+  const lockedFieldsRef = useRef<Set<string>>(new Set());
 
   const [extractionError, setExtractionError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
   const [isCleared, setIsCleared] = useState(false);
   const MAX_RETRIES = 3;
+  
+  // ✅ NEW: Minimum new content required before re-extraction (characters)
+  const MIN_NEW_CONTENT = 30;
 
   const { object, submit, isLoading, error, stop } = useObject({
     api: "/api/extract-billboard-fields",
@@ -71,12 +84,17 @@ export function useBillboardFormExtraction() {
       setExtractionError(error.message || "Failed to extract fields");
       isProcessingRef.current = false;
     },
-    onFinish: () => {
+    onFinish: (result) => {
       console.log("✅ Extraction completed successfully");
       setExtractionError(null);
       setRetryCount(0);
       isProcessingRef.current = false;
-      setIsCleared(false); // ✅ Reset isCleared when new data arrives
+      setIsCleared(false);
+      
+      // ✅ Store the latest extraction result for next incremental update
+      if (result.object) {
+        currentFormDataRef.current = { ...currentFormDataRef.current, ...result.object };
+      }
     },
   });
 
@@ -88,8 +106,35 @@ export function useBillboardFormExtraction() {
     }
   }, []);
 
+  // ✅ NEW: Lock a field (called when user confirms a value - clicks to make it green)
+  const lockField = useCallback((field: string) => {
+    lockedFieldsRef.current.add(field);
+    console.log(`🔒 Locked field: ${field}`);
+  }, []);
+
+  // ✅ NEW: Unlock a field (if user wants AI to update it again)
+  const unlockField = useCallback((field: string) => {
+    lockedFieldsRef.current.delete(field);
+    console.log(`🔓 Unlocked field: ${field}`);
+  }, []);
+
+  // ✅ NEW: Check if a field is locked
+  const isFieldLocked = useCallback((field: string) => {
+    return lockedFieldsRef.current.has(field);
+  }, []);
+
+  // ✅ NEW: Get all locked fields
+  const getLockedFields = useCallback(() => {
+    return Array.from(lockedFieldsRef.current);
+  }, []);
+
+  // ✅ NEW: Set current form data (for syncing with parent component's manual edits)
+  const setCurrentFormData = useCallback((data: Partial<BillboardFormData>) => {
+    currentFormDataRef.current = { ...currentFormDataRef.current, ...data };
+  }, []);
+
   const extractFields = useCallback(
-    (newTranscript: string) => {
+    (newTranscript: string, forceFullExtraction: boolean = false) => {
       // Prevent processing if already in progress
       if (isProcessingRef.current) {
         console.log("⏳ Extraction already in progress, skipping...");
@@ -105,6 +150,13 @@ export function useBillboardFormExtraction() {
       // Validate transcript
       if (!newTranscript || newTranscript.trim().length < 10) {
         console.log("⚠️ Transcript too short, skipping extraction");
+        return;
+      }
+
+      // ✅ NEW: Check if there's enough new content to warrant re-extraction
+      const newContentLength = newTranscript.length - lastProcessedLengthRef.current;
+      if (!forceFullExtraction && newContentLength < MIN_NEW_CONTENT && lastProcessedLengthRef.current > 0) {
+        console.log(`⏭️ Not enough new content (${newContentLength} chars), skipping...`);
         return;
       }
 
@@ -131,15 +183,28 @@ export function useBillboardFormExtraction() {
       // Debounce the actual API call
       debounceTimerRef.current = setTimeout(() => {
         try {
-          console.log("🚀 Starting extraction...");
+          console.log("🚀 Starting incremental extraction...");
           isProcessingRef.current = true;
+          
+          // ✅ Calculate the new segment of transcript (for change detection)
+          const previousLength = lastProcessedLengthRef.current;
+          const newSegment = previousLength > 0 
+            ? newTranscript.substring(previousLength) 
+            : "";
+          
           lastProcessedTranscriptRef.current = newTranscript;
+          lastProcessedLengthRef.current = newTranscript.length;
 
           addTranscriptContext(newTranscript);
 
+          // ✅ NEW: Send current form state and locked fields for incremental extraction
           submit({
             transcript: newTranscript,
+            newSegment: newSegment, // The new part of the conversation
             previousContext: transcriptContextRef.current,
+            currentFormState: currentFormDataRef.current, // What we've already extracted
+            lockedFields: Array.from(lockedFieldsRef.current), // Fields user has confirmed
+            isIncremental: previousLength > 0 && !forceFullExtraction, // Flag for incremental mode
           });
 
           setRetryCount((prev) => prev + 1);
@@ -175,7 +240,10 @@ export function useBillboardFormExtraction() {
     // Reset state
     transcriptContextRef.current = [];
     lastProcessedTranscriptRef.current = "";
+    lastProcessedLengthRef.current = 0;
     isProcessingRef.current = false;
+    currentFormDataRef.current = {};
+    lockedFieldsRef.current.clear();
     setExtractionError(null);
     setRetryCount(0);
     setIsCleared(true);
@@ -201,5 +269,11 @@ export function useBillboardFormExtraction() {
     reset,
     cleanup,
     canRetry: retryCount < MAX_RETRIES,
+    // ✅ NEW: Expose field locking functionality
+    lockField,
+    unlockField,
+    isFieldLocked,
+    getLockedFields,
+    setCurrentFormData,
   };
 }
