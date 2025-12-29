@@ -152,10 +152,10 @@ export function LoginForm({
 
       if (result.success) {
         showSuccessToast('Signed in successfully')
-        
+
         // Auto-register passkey in background
         registerPasskey()
-        
+
         router.push('/dashboard')
         router.refresh()
       } else {
