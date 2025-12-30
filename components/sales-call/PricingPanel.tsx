@@ -2,8 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import type { BillboardFormData } from "@/hooks/useBillboardFormExtraction";
-import type { MarketData } from "@/components/sales-call/LeadForm";
+import { useFormStore } from "@/stores/formStore";
 
 interface PricingPanelProps {
   isLoading: boolean;
@@ -13,9 +12,6 @@ interface PricingPanelProps {
   isSubmittingNutshell: boolean;
   nutshellStatus: 'idle' | 'success' | 'error';
   nutshellMessage: string;
-  activeMarketIndex: number;
-  formData: BillboardFormData;
-  additionalMarkets: MarketData[];
   fullTranscript: string;
   setIsLoadingBillboard: (loading: boolean) => void;
   setBillboardContext: (context: string) => void;
@@ -31,48 +27,52 @@ interface PricingCard {
   subtitleData?: string;
 }
 
-export function PricingPanel({ 
-  isLoading, 
-  billboardContext, 
+export function PricingPanel({
+  isLoading,
+  billboardContext,
   hasTranscripts,
   onNutshellSubmit,
   isSubmittingNutshell,
   nutshellStatus,
   nutshellMessage,
-  activeMarketIndex,
-  formData,
-  additionalMarkets,
   fullTranscript,
   setIsLoadingBillboard,
   setBillboardContext
 }: PricingPanelProps) {
+  // ✅ Subscribe directly to only the fields we need from the store
+  const activeMarketIndex = useFormStore((s) => s.activeMarketIndex);
+  const additionalMarkets = useFormStore((s) => s.additionalMarkets);
+  const targetCity = useFormStore((s) => s.fields.targetCity);
+  const state = useFormStore((s) => s.fields.state);
+  const targetArea = useFormStore((s) => s.fields.targetArea);
+
   const [activeTab, setActiveTab] = useState<'estimate' | 'details'>('estimate');
-  
+
   // ✅ Use our own loading state, independent of parent
   const [isLoadingMarket, setIsLoadingMarket] = useState(false);
-  
+
   // ✅ Store pricing context PER MARKET - keyed by market index
   const [marketContexts, setMarketContexts] = useState<Record<number, string>>({});
-  
+
   // ✅ Track what location we last fetched for each market
   const lastFetchedLocations = useRef<Record<number, string>>({});
-  
+
   // ✅ Debounce timeout ref
   const fetchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Calculate current location from props
+  // Calculate current location from store state
   const getCurrentLocation = (): string => {
     if (activeMarketIndex === 0) {
-      const city = formData.targetCity?.trim() || "";
-      const state = formData.state?.trim() || "";
-      if (city && state) return `${city}, ${state}`;
-      return formData.targetArea?.trim() || "";
+      const city = targetCity?.trim() || "";
+      const stateVal = state?.trim() || "";
+      if (city && stateVal) return `${city}, ${stateVal}`;
+      return targetArea?.trim() || "";
     } else {
       const market = additionalMarkets[activeMarketIndex - 1];
       if (!market) return "";
       const city = market.targetCity?.trim() || "";
-      const state = market.state?.trim() || "";
-      if (city && state) return `${city}, ${state}`;
+      const stateVal = market.state?.trim() || "";
+      if (city && stateVal) return `${city}, ${stateVal}`;
       return market.targetArea?.trim() || "";
     }
   };
@@ -156,7 +156,7 @@ export function PricingPanel({
 
   useEffect(() => {
     const location = getCurrentLocation();
-    
+
     console.log(`🔍 Effect check - Market #${activeMarketIndex + 1}, location: "${location}"`);
 
     // Clear any pending timeout
@@ -193,9 +193,9 @@ export function PricingPanel({
     };
   }, [
     activeMarketIndex,
-    formData.targetCity,
-    formData.state,
-    formData.targetArea,
+    targetCity,
+    state,
+    targetArea,
     additionalMarketsJson
   ]);
 
