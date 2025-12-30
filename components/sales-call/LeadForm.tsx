@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { BillboardFormData } from "@/hooks/useBillboardFormExtraction";
-import { useEffect, useRef, memo, useCallback } from "react";
+import { useEffect, useRef } from "react";
 import { CircleQuestionMark, Minus} from 'lucide-react';
 
 interface ContactData {
@@ -61,88 +61,6 @@ interface LeadFormProps {
 const MAX_ADDITIONAL_MARKETS = 1;
 const MAX_ADDITIONAL_CONTACTS = 1;
 
-// ============================================================================
-// ✅ MEMOIZED FIELD COMPONENTS - Only re-render when their specific value changes
-// ============================================================================
-
-interface MemoInputProps {
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-  className?: string;
-}
-
-// ✅ Memoized Input - only re-renders when value or className changes
-const MemoInput = memo(function MemoInput({ value, onChange, placeholder, className }: MemoInputProps) {
-  return (
-    <Input
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder}
-      className={className}
-    />
-  );
-}, (prevProps, nextProps) => {
-  // Custom comparison - only re-render if value or className changed
-  return prevProps.value === nextProps.value && prevProps.className === nextProps.className;
-});
-
-interface MemoTextareaProps {
-  value: string;
-  onChange: (value: string) => void;
-  className?: string;
-}
-
-// ✅ Memoized Textarea - only re-renders when value or className changes
-const MemoTextarea = memo(function MemoTextarea({ value, onChange, className }: MemoTextareaProps) {
-  return (
-    <Textarea
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className={className}
-    />
-  );
-}, (prevProps, nextProps) => {
-  return prevProps.value === nextProps.value && prevProps.className === nextProps.className;
-});
-
-interface MemoButtonProps {
-  label: string;
-  isSelected: boolean;
-  isAISuggested: boolean;
-  onClick: () => void;
-  className?: string;
-}
-
-// ✅ Memoized Button - only re-renders when selection state changes
-const MemoButton = memo(function MemoButton({ label, isSelected, isAISuggested, onClick, className = "" }: MemoButtonProps) {
-  let bgClass = 'bg-red-100 border-black';
-  if (isSelected) {
-    bgClass = 'bg-green-100 border-green-500';
-  } else if (isAISuggested) {
-    bgClass = 'bg-yellow-100 border-yellow-500';
-  }
-  
-  return (
-    <button
-      onClick={onClick}
-      className={`font-bold border-2 rounded transition-colors ${bgClass} ${className}`}
-    >
-      {label}
-    </button>
-  );
-}, (prevProps, nextProps) => {
-  return (
-    prevProps.isSelected === nextProps.isSelected &&
-    prevProps.isAISuggested === nextProps.isAISuggested &&
-    prevProps.label === nextProps.label
-  );
-});
-
-// ============================================================================
-// ✅ MAIN LEADFORM COMPONENT
-// ============================================================================
-
 export function LeadForm({ 
   formData, 
   updateField, 
@@ -176,22 +94,16 @@ export function LeadForm({
   // ✅ Track if user has manually edited fields to prevent AI from overwriting
   const userEditedFieldsRef = useRef<Set<string>>(new Set());
   
-  // ============================================================================
-  // ✅ MEMOIZED HELPER FUNCTIONS
-  // ============================================================================
+  const isFilled = (value: string | null | undefined) => value && value.trim() !== "";
   
-  const isFilled = useCallback((value: string | null | undefined) => {
-    return value && value.trim() !== "";
-  }, []);
-  
-  const getInputClass = useCallback((value: string | null | undefined, baseClass: string = "") => {
+  const getInputClass = (value: string | null | undefined, baseClass: string = "") => {
     if (isFilled(value)) {
       return `${baseClass} bg-green-50 border-green-500 focus:border-green-600 focus:ring-green-500`;
     }
     return `${baseClass} bg-red-100`;
-  }, [isFilled]);
+  };
   
-  const getButtonClass = useCallback((value: string, aiValue: string | null | undefined, confirmedValue: string | null | undefined) => {
+  const getButtonClass = (value: string, aiValue: string | null | undefined, confirmedValue: string | null | undefined) => {
     if (confirmedValue === value) {
       return 'bg-green-100 border-green-500';
     }
@@ -199,10 +111,10 @@ export function LeadForm({
       return 'bg-yellow-100 border-yellow-500';
     }
     return 'bg-red-100 border-black';
-  }, []);
+  };
   
   // Multi-select button class for Duration and Send Over
-  const getMultiSelectButtonClass = useCallback((value: string, aiSuggestions: string[], confirmedSelections: string[]) => {
+  const getMultiSelectButtonClass = (value: string, aiSuggestions: string[], confirmedSelections: string[]) => {
     const isConfirmed = confirmedSelections.includes(value);
     const isAISuggested = aiSuggestions.includes(value);
     
@@ -213,10 +125,10 @@ export function LeadForm({
       return 'bg-yellow-100 border-yellow-500';
     }
     return 'bg-red-100 border-black';
-  }, []);
+  };
   
   // Phone input class - handles Twilio pre-fill logic
-  const getPhoneInputClass = useCallback((phoneValue: string | null | undefined) => {
+  const getPhoneInputClass = (phoneValue: string | null | undefined) => {
     // RED - empty
     if (!phoneValue || phoneValue.trim() === "") {
       return 'bg-red-100 border-black';
@@ -247,96 +159,7 @@ export function LeadForm({
     
     // GREEN - has value (no Twilio context)
     return 'bg-green-50 border-green-500 focus:border-green-600 focus:ring-green-500';
-  }, [twilioPhone, twilioPhonePreFilled, formData?.phone]);
-  
-  // ============================================================================
-  // ✅ MEMOIZED FIELD CHANGE HANDLERS - Stable references prevent re-renders
-  // ============================================================================
-  
-  const handleNameChange = useCallback((value: string) => {
-    userEditedFieldsRef.current.add('name');
-    updateField("name", value);
-  }, [updateField]);
-
-  const handleTypeNameChange = useCallback((value: string) => {
-    userEditedFieldsRef.current.add('typeName');
-    updateField("typeName", value);
-  }, [updateField]);
-
-  const handleBusinessNameChange = useCallback((value: string) => {
-    userEditedFieldsRef.current.add('businessName');
-    updateField("businessName", value);
-  }, [updateField]);
-
-  const handleEntityNameChange = useCallback((value: string) => {
-    userEditedFieldsRef.current.add('entityName');
-    updateField("entityName", value);
-  }, [updateField]);
-
-  const handleBillboardsBeforeYNChange = useCallback((value: string) => {
-    userEditedFieldsRef.current.add('billboardsBeforeYN');
-    updateField("billboardsBeforeYN", value);
-  }, [updateField]);
-
-  const handleBillboardsBeforeDetailsChange = useCallback((value: string) => {
-    userEditedFieldsRef.current.add('billboardsBeforeDetails');
-    updateField("billboardsBeforeDetails", value);
-  }, [updateField]);
-
-  const handleBillboardPurposeChange = useCallback((value: string) => {
-    userEditedFieldsRef.current.add('billboardPurpose');
-    updateField("billboardPurpose", value);
-  }, [updateField]);
-
-  const handleAccomplishDetailsChange = useCallback((value: string) => {
-    userEditedFieldsRef.current.add('accomplishDetails');
-    updateField("accomplishDetails", value);
-  }, [updateField]);
-
-  const handleTargetAudienceChange = useCallback((value: string) => {
-    userEditedFieldsRef.current.add('targetAudience');
-    updateField("targetAudience", value);
-  }, [updateField]);
-
-  const handleHasMediaExperienceChange = useCallback((value: string) => {
-    userEditedFieldsRef.current.add('hasMediaExperience');
-    updateField("hasMediaExperience", value);
-  }, [updateField]);
-
-  const handleYearsInBusinessChange = useCallback((value: string) => {
-    userEditedFieldsRef.current.add('yearsInBusiness');
-    updateField("yearsInBusiness", value);
-  }, [updateField]);
-
-  const handleWebsiteChange = useCallback((value: string) => {
-    userEditedFieldsRef.current.add('website');
-    updateField("website", value);
-  }, [updateField]);
-
-  const handleNotesChange = useCallback((value: string) => {
-    userEditedFieldsRef.current.add('notes');
-    updateField("notes", value);
-  }, [updateField]);
-
-  const handlePhoneChange = useCallback((value: string) => {
-    userEditedFieldsRef.current.add('phone');
-    setTwilioPhonePreFilled(false);
-    updateField("phone", value);
-  }, [updateField, setTwilioPhonePreFilled]);
-
-  const handleEmailChange = useCallback((value: string) => {
-    userEditedFieldsRef.current.add('email');
-    updateField("email", value);
-  }, [updateField]);
-
-  const handlePositionChange = useCallback((value: string) => {
-    userEditedFieldsRef.current.add('position');
-    updateField("position", value);
-  }, [updateField]);
-  
-  // ============================================================================
-  // ✅ EFFECTS
-  // ============================================================================
+  };
   
   // Set Twilio phone when it comes in and pre-fill
   useEffect(() => {
@@ -345,7 +168,7 @@ export function LeadForm({
       // Pre-fill the phone field for the primary contact
       if (!formData?.phone && !userEditedFieldsRef.current.has('phone')) {
         updateField("phone", inboundPhone);
-        setTwilioPhonePreFilled(true);
+        setTwilioPhonePreFilled(true);  // ✅ Mark as pre-filled from Twilio
       }
     }
   }, [inboundPhone, formData?.phone, updateField, setTwilioPhone, setTwilioPhonePreFilled]);
@@ -357,13 +180,11 @@ export function LeadForm({
     }
   }, [resetTrigger]);
 
-  // ============================================================================
-  // ✅ CONTACT MANAGEMENT
-  // ============================================================================
-
-  const addNewContact = useCallback(() => {
+  // ✅ Contact management - with limit check
+  const addNewContact = () => {
+    // Check if we've reached the limit
     if (additionalContacts.length >= MAX_ADDITIONAL_CONTACTS) {
-      return;
+      return; // Don't add more
     }
     
     const newContact: ContactData = {
@@ -376,10 +197,10 @@ export function LeadForm({
       sendOver: []
     };
     setAdditionalContacts([...additionalContacts, newContact]);
-    setActiveContactIndex(additionalContacts.length + 1);
-  }, [additionalContacts, setAdditionalContacts, setActiveContactIndex]);
+    setActiveContactIndex(additionalContacts.length + 1); // +1 because primary is index 0
+  };
 
-  const deleteContact = useCallback((indexToDelete: number) => {
+  const deleteContact = (indexToDelete: number) => {
     if (indexToDelete === 0 || additionalContacts.length === 0) return;
     
     const additionalIndex = indexToDelete - 1;
@@ -391,14 +212,16 @@ export function LeadForm({
     } else if (activeContactIndex > indexToDelete) {
       setActiveContactIndex(activeContactIndex - 1);
     } else if (activeContactIndex === indexToDelete) {
-      setActiveContactIndex(0);
+      setActiveContactIndex(0); // Go back to primary
     }
-  }, [additionalContacts, activeContactIndex, setAdditionalContacts, setActiveContactIndex]);
+  };
 
-  const updateContactField = useCallback((contactIndex: number, field: keyof ContactData, value: string) => {
+  const updateContactField = (contactIndex: number, field: keyof ContactData, value: string) => {
     if (contactIndex === 0) {
+      // Primary contact - update formData
       userEditedFieldsRef.current.add(field);
       
+      // If user is editing phone, clear the Twilio pre-fill flag
       if (field === 'phone') {
         setTwilioPhonePreFilled(false);
       }
@@ -407,6 +230,7 @@ export function LeadForm({
         updateField(field, value);
       }
     } else {
+      // Additional contact - update local state
       const additionalIndex = contactIndex - 1;
       setAdditionalContacts(prev =>
         prev.map((contact, idx) =>
@@ -414,15 +238,13 @@ export function LeadForm({
         )
       );
     }
-  }, [updateField, setTwilioPhonePreFilled, setAdditionalContacts]);
+  };
 
-  // ============================================================================
-  // ✅ MARKET MANAGEMENT
-  // ============================================================================
-
-  const addNewMarket = useCallback(() => {
+  // ✅ Market management - with limit check
+  const addNewMarket = () => {
+    // Check if we've reached the limit
     if (additionalMarkets.length >= MAX_ADDITIONAL_MARKETS) {
-      return;
+      return; // Don't add more
     }
     
     const newMarket: MarketData = {
@@ -434,10 +256,10 @@ export function LeadForm({
       boardType: ""
     };
     setAdditionalMarkets([...additionalMarkets, newMarket]);
-    setActiveMarketIndex(additionalMarkets.length + 1);
-  }, [additionalMarkets, setAdditionalMarkets, setActiveMarketIndex]);
+    setActiveMarketIndex(additionalMarkets.length + 1); // +1 because primary is index 0
+  };
 
-  const deleteMarket = useCallback((indexToDelete: number) => {
+  const deleteMarket = (indexToDelete: number) => {
     if (indexToDelete === 0 || additionalMarkets.length === 0) return;
     
     const additionalIndex = indexToDelete - 1;
@@ -449,18 +271,20 @@ export function LeadForm({
     } else if (activeMarketIndex > indexToDelete) {
       setActiveMarketIndex(activeMarketIndex - 1);
     } else if (activeMarketIndex === indexToDelete) {
-      setActiveMarketIndex(0);
+      setActiveMarketIndex(0); // Go back to primary
     }
-  }, [additionalMarkets, activeMarketIndex, setAdditionalMarkets, setActiveMarketIndex]);
+  };
 
-  const updateMarketField = useCallback((marketIndex: number, field: keyof MarketData, value: string | string[]) => {
+  const updateMarketField = (marketIndex: number, field: keyof MarketData, value: string | string[]) => {
     if (marketIndex === 0) {
+      // Primary market - update formData
       userEditedFieldsRef.current.add(field);
       if (field === "targetCity" || field === "state" || field === "targetArea" || 
           field === "startMonth" || field === "campaignLength" || field === "boardType") {
         updateField(field, value);
       }
     } else {
+      // Additional market - update local state
       const additionalIndex = marketIndex - 1;
       setAdditionalMarkets(prev =>
         prev.map((market, idx) =>
@@ -468,12 +292,9 @@ export function LeadForm({
         )
       );
     }
-  }, [updateField, setAdditionalMarkets]);
+  };
 
-  // ============================================================================
-  // ✅ COMPUTED VALUES
-  // ============================================================================
-
+  // ✅ HYBRID: Get current market/contact based on active index
   const currentMarket = activeMarketIndex === 0 
     ? {
         targetCity: formData?.targetCity ?? "",
@@ -483,7 +304,7 @@ export function LeadForm({
         campaignLength: (() => {
           const length = formData?.campaignLength;
           if (!length) return [];
-          if (Array.isArray(length)) return length.flat() as string[];
+          if (Array.isArray(length)) return length.flat() as string[]; // Flatten and ensure string[]
           return [length];
         })(),
         boardType: formData?.boardType ?? ""
@@ -506,12 +327,9 @@ export function LeadForm({
       }
     : additionalContacts[activeContactIndex - 1];
 
+  // ✅ Check if we can add more markets/contacts
   const canAddMoreMarkets = additionalMarkets.length < MAX_ADDITIONAL_MARKETS;
   const canAddMoreContacts = additionalContacts.length < MAX_ADDITIONAL_CONTACTS;
-
-  // ============================================================================
-  // ✅ RENDER
-  // ============================================================================
 
   return (
     <div className="lg:flex-[2] space-y-0 px-0.75 py-0.75 overflow-y-auto h-relative">
@@ -527,10 +345,15 @@ export function LeadForm({
           <div className="flex gap-8">
             <div className="w-60">
               <Label className="text-blue-600 font-bold text-md mb-1 block">Name</Label>
-              <MemoInput
+              <Input
                 value={formData?.name ?? ""}
-                onChange={handleNameChange}
-                className={`h-10 text-sm rounded border-2 transition-colors ${getInputClass(formData?.name, 'border-black')}`}
+                onChange={(e) => {
+                  userEditedFieldsRef.current.add('name');
+                  updateField("name", e.target.value);
+                }}
+                className={`h-10 text-sm rounded border-2 transition-colors ${
+                  getInputClass(formData?.name, 'border-black')
+                }`}
               />
             </div>
             <div className="flex-1">
@@ -538,25 +361,40 @@ export function LeadForm({
                 What do you want to advertise?
               </Label>
               <div className="flex">
-                <MemoInput
+                <Input
                   value={formData?.typeName ?? ""}
-                  onChange={handleTypeNameChange}
+                  onChange={(e) => {
+                    userEditedFieldsRef.current.add('typeName');
+                    updateField("typeName", e.target.value);
+                  }}
                   placeholder="Type (Business, Political, etc)"
-                  className={`w-50 h-10 text-sm border-2 border-black rounded placeholder:text-gray-400 transition-colors ${getInputClass(formData?.typeName)}`}
+                  className={`w-50 h-10 text-sm border-2 border-black rounded placeholder:text-gray-400 transition-colors ${
+                    getInputClass(formData?.typeName)
+                  }`}
                 />
                 <Minus className="mt-2.5 w-2" />
-                <MemoInput
+                <Input
                   value={formData?.businessName ?? ""}
-                  onChange={handleBusinessNameChange}
+                  onChange={(e) => {
+                    userEditedFieldsRef.current.add('businessName');
+                    updateField("businessName", e.target.value);
+                  }}
                   placeholder="Kind (HVAC, Governor, etc)"
-                  className={`w-50 h-10 text-sm border-2 border-black rounded placeholder:text-gray-400 transition-colors ${getInputClass(formData?.businessName)}`}
+                  className={`w-50 h-10 text-sm border-2 border-black rounded placeholder:text-gray-400 transition-colors ${
+                    getInputClass(formData?.businessName)
+                  }`}
                 />
                 <Minus className="mt-2.5 w-2" />
-                <MemoInput
+                <Input
                   value={formData?.entityName ?? ""}
-                  onChange={handleEntityNameChange}
+                  onChange={(e) => {
+                    userEditedFieldsRef.current.add('entityName');
+                    updateField("entityName", e.target.value);
+                  }}
                   placeholder="Entity Name"
-                  className={`flex-1 h-10 text-sm border-2 border-black rounded placeholder:text-gray-400 transition-colors ${getInputClass(formData?.entityName)}`}
+                  className={`flex-1 h-10 text-sm border-2 border-black rounded placeholder:text-gray-400 transition-colors ${
+                    getInputClass(formData?.entityName)
+                  }`}
                 />
               </div>
             </div>
@@ -570,18 +408,28 @@ export function LeadForm({
                 <CircleQuestionMark className="w-4 h-4 text-gray-400"/>
               </Label>
               <div className="flex">
-                <MemoInput 
+                <Input 
                   value={formData?.billboardsBeforeYN ?? ""}
-                  onChange={handleBillboardsBeforeYNChange}
+                  onChange={(e) => {
+                    userEditedFieldsRef.current.add('billboardsBeforeYN');
+                    updateField("billboardsBeforeYN", e.target.value);
+                  }}
                   placeholder="Y/N" 
-                  className={`w-14 text-sm text-center placeholder:text-gray-400 border-2 border-black rounded px-2.5 h-10 transition-colors ${getInputClass(formData?.billboardsBeforeYN)}`}
+                  className={`w-14 text-sm text-center placeholder:text-gray-400 border-2 border-black rounded px-2.5 h-10 transition-colors ${
+                    getInputClass(formData?.billboardsBeforeYN)
+                  }`}
                 />
                 <Minus className="mt-2.5 w-2" />
-                <MemoInput
+                <Input
                   value={formData?.billboardsBeforeDetails ?? ""}
-                  onChange={handleBillboardsBeforeDetailsChange}
+                  onChange={(e) => {
+                    userEditedFieldsRef.current.add('billboardsBeforeDetails');
+                    updateField("billboardsBeforeDetails", e.target.value);
+                  }}
                   placeholder="Details"
-                  className={`flex-1 h-10 text-sm border-2 border-black rounded placeholder:text-gray-400 transition-colors ${getInputClass(formData?.billboardsBeforeDetails)}`}
+                  className={`flex-1 h-10 text-sm border-2 border-black rounded placeholder:text-gray-400 transition-colors ${
+                    getInputClass(formData?.billboardsBeforeDetails)
+                  }`}
                 />
               </div>
             </div>
@@ -591,18 +439,28 @@ export function LeadForm({
                 What are you needing to accomplish?
               </Label>
               <div className="flex">
-                <MemoInput
+                <Input
                   value={formData?.billboardPurpose ?? ""}
-                  onChange={handleBillboardPurposeChange}
+                  onChange={(e) => {
+                    userEditedFieldsRef.current.add('billboardPurpose');
+                    updateField("billboardPurpose", e.target.value);
+                  }}
                   placeholder="Goal"
-                  className={`flex-[2] h-10 text-sm border-2 border-black rounded placeholder:text-gray-400 transition-colors ${getInputClass(formData?.billboardPurpose)}`}
+                  className={`flex-[2] h-10 text-sm border-2 border-black rounded placeholder:text-gray-400 transition-colors ${
+                    getInputClass(formData?.billboardPurpose)
+                  }`}
                 />
                 <Minus className="mt-2.5 w-2" />
-                <MemoInput
+                <Input
                   value={formData?.accomplishDetails ?? ""}
-                  onChange={handleAccomplishDetailsChange}
+                  onChange={(e) => {
+                    userEditedFieldsRef.current.add('accomplishDetails');
+                    updateField("accomplishDetails", e.target.value);
+                  }}
                   placeholder="Details"
-                  className={`flex-[3] h-10 text-sm border-2 border-black rounded placeholder:text-gray-400 transition-colors ${getInputClass(formData?.accomplishDetails)}`}
+                  className={`flex-[3] h-10 text-sm border-2 border-black rounded placeholder:text-gray-400 transition-colors ${
+                    getInputClass(formData?.accomplishDetails)
+                  }`}
                 />
               </div>
             </div>
@@ -614,10 +472,15 @@ export function LeadForm({
               Who are you trying to target?
               <CircleQuestionMark className="w-4 h-4 text-gray-400"/>
             </Label>
-            <MemoInput 
+            <Input 
               value={formData?.targetAudience ?? ""}
-              onChange={handleTargetAudienceChange}
-              className={`h-10 text-sm border-2 border-black rounded transition-colors ${getInputClass(formData?.targetAudience)}`}
+              onChange={(e) => {
+                userEditedFieldsRef.current.add('targetAudience');
+                updateField("targetAudience", e.target.value);
+              }}
+              className={`h-10 text-sm border-2 border-black rounded transition-colors ${
+                getInputClass(formData?.targetAudience)
+              }`}
             />
           </div>
 
@@ -628,20 +491,30 @@ export function LeadForm({
                 Are you doing any other advertising?
               <CircleQuestionMark className="w-4 h-4 text-gray-400"/>
               </Label>
-              <MemoInput
+              <Input
                 value={formData?.hasMediaExperience?.toString() ?? ""}
-                onChange={handleHasMediaExperienceChange}
-                className={`h-10 text-sm border-2 border-black rounded transition-colors ${getInputClass(formData?.hasMediaExperience?.toString())}`}
+                onChange={(e) => {
+                  userEditedFieldsRef.current.add('hasMediaExperience');
+                  updateField("hasMediaExperience", e.target.value);
+                }}
+                className={`h-10 text-sm border-2 border-black rounded transition-colors ${
+                  getInputClass(formData?.hasMediaExperience?.toString())
+                }`}
               />
             </div>
             <div className="flex-1">
               <Label className="text-blue-600 font-bold text-md mb-1 block">
                 How long in business?
               </Label>
-              <MemoInput
+              <Input
                 value={formData?.yearsInBusiness ?? ""}
-                onChange={handleYearsInBusinessChange}
-                className={`h-10 text-sm border-2 border-black rounded transition-colors ${getInputClass(formData?.yearsInBusiness)}`}
+                onChange={(e) => {
+                  userEditedFieldsRef.current.add('yearsInBusiness');
+                  updateField("yearsInBusiness", e.target.value);
+                }}
+                className={`h-10 text-sm border-2 border-black rounded transition-colors ${
+                  getInputClass(formData?.yearsInBusiness)
+                }`}
               />
             </div>
             <div className="flex-1">
@@ -649,10 +522,15 @@ export function LeadForm({
                 Have a website?
                 <CircleQuestionMark className="w-4 h-4 text-gray-400"/>
               </Label>
-              <MemoInput
+              <Input
                 value={formData?.website ?? ""}
-                onChange={handleWebsiteChange}
-                className={`h-10 text-sm border-2 border-black rounded transition-colors ${getInputClass(formData?.website)}`}
+                onChange={(e) => {
+                  userEditedFieldsRef.current.add('website');
+                  updateField("website", e.target.value);
+                }}
+                className={`h-10 text-sm border-2 border-black rounded transition-colors ${
+                  getInputClass(formData?.website)
+                }`}
               />
             </div>
           </div>
@@ -663,36 +541,39 @@ export function LeadForm({
       <div className="bg-gray-300 border-2 border-black shadow-sm shadow-black rounded-lg p-3.5 my-5 ml-35 -mb-7">
         <div className="flex items-center justify-between">
           <div className="flex gap-25">
-            <MemoButton
-              label="Availer"
-              isSelected={confirmedLeadType === "Availer"}
-              isAISuggested={formData?.leadType === "Availer" && !confirmedLeadType}
+            <button
               onClick={() => {
                 updateField("leadType", "Availer");
                 setConfirmedLeadType("Availer");
               }}
-              className="px-10 py-2.5 text-md"
-            />
-            <MemoButton
-              label="Panel Requester"
-              isSelected={confirmedLeadType === "Panel Requester"}
-              isAISuggested={formData?.leadType === "Panel Requester" && !confirmedLeadType}
+              className={`px-10 py-2.5 text-md font-bold border-2 rounded transition-colors ${
+                getButtonClass("Availer", formData?.leadType, confirmedLeadType)
+              }`}
+            >
+              Availer
+            </button>
+            <button
               onClick={() => {
                 updateField("leadType", "Panel Requester");
                 setConfirmedLeadType("Panel Requester");
               }}
-              className="px-10 py-2.5 text-md"
-            />
-            <MemoButton
-              label="Tire Kicker"
-              isSelected={confirmedLeadType === "Tire Kicker"}
-              isAISuggested={formData?.leadType === "Tire Kicker" && !confirmedLeadType}
+              className={`px-10 py-2.5 text-md font-bold border-2 rounded transition-colors ${
+                getButtonClass("Panel Requester", formData?.leadType, confirmedLeadType)
+              }`}
+            >
+              Panel Requester
+            </button>
+            <button
               onClick={() => {
                 updateField("leadType", "Tire Kicker");
                 setConfirmedLeadType("Tire Kicker");
               }}
-              className="px-10 py-2.5 text-md"
-            />
+              className={`px-10 py-2.5 text-md font-bold border-2 rounded transition-colors ${
+                getButtonClass("Tire Kicker", formData?.leadType, confirmedLeadType)
+              }`}
+            >
+              Tire Kicker
+          </button>
           </div>
           <div className="flex items-center gap-2">
             <Label className="text-md font-bold whitespace-nowrap">Ballpark:</Label>
@@ -700,7 +581,9 @@ export function LeadForm({
               value={ballpark}
               onChange={(e) => setBallpark(e.target.value)}
               placeholder="Manual entry"
-              className={`h-10 w-64 text-sm border-2 border-black rounded transition-colors ${getInputClass(ballpark)}`}
+              className={`h-10 w-64 text-sm border-2 border-black rounded transition-colors ${
+                getInputClass(ballpark)
+              }`}
             />
           </div>
         </div>
@@ -719,10 +602,15 @@ export function LeadForm({
             <Label className="text-blue-600 font-bold text-md mb-1 block">
               Purpose Recap & Additional Notes
             </Label>
-            <MemoTextarea
+            <Textarea
               value={formData?.notes ?? ""}
-              onChange={handleNotesChange}
-              className={`w-full h-[calc(100%-1.75rem)] text-sm resize-none border-2 border-black rounded transition-colors ${getInputClass(formData?.notes)}`}
+              onChange={(e) => {
+                userEditedFieldsRef.current.add('notes');
+                updateField("notes", e.target.value);
+              }}
+              className={`w-full h-[calc(100%-1.75rem)] text-sm resize-none border-2 border-black rounded transition-colors ${
+                getInputClass(formData?.notes)
+              }`}
             />
           </div>
 
@@ -736,18 +624,22 @@ export function LeadForm({
                 <div className="flex gap-1.5">
                   <div className="flex-1">
                     <Label className="text-blue-600 font-bold text-md mb-1 block">City</Label>
-                    <MemoInput
+                    <Input
                       value={currentMarket.targetCity}
-                      onChange={(value) => updateMarketField(activeMarketIndex, "targetCity", value)}
-                      className={`h-10 text-sm border-2 border-black rounded transition-colors ${getInputClass(currentMarket.targetCity)}`}
+                      onChange={(e) => updateMarketField(activeMarketIndex, "targetCity", e.target.value)}
+                      className={`h-10 text-sm border-2 border-black rounded transition-colors ${
+                        getInputClass(currentMarket.targetCity)
+                      }`}
                     />
                   </div>
                   <div className="w-18">
                     <Label className="text-blue-600 font-bold text-md mb-1 block">State</Label>
-                    <MemoInput 
+                    <Input 
                       value={currentMarket.state}
-                      onChange={(value) => updateMarketField(activeMarketIndex, "state", value)}
-                      className={`h-10 text-sm border-2 border-black rounded transition-colors text-center ${getInputClass(currentMarket.state)}`}
+                      onChange={(e) => updateMarketField(activeMarketIndex, "state", e.target.value)}
+                      className={`h-10 text-sm border-2 border-black rounded transition-colors text-center ${
+                        getInputClass(currentMarket.state)
+                      }`}
                     />
                   </div>
                 </div>
@@ -755,10 +647,12 @@ export function LeadForm({
                 {/* Start row */}
                 <div>
                   <Label className="text-blue-600 font-bold text-md mb-1 block">Start</Label>
-                  <MemoInput
+                  <Input
                     value={currentMarket.startMonth}
-                    onChange={(value) => updateMarketField(activeMarketIndex, "startMonth", value)}
-                    className={`h-10 text-sm border-2 border-black rounded transition-colors ${getInputClass(currentMarket.startMonth)}`}
+                    onChange={(e) => updateMarketField(activeMarketIndex, "startMonth", e.target.value)}
+                    className={`h-10 text-sm border-2 border-black rounded transition-colors ${
+                      getInputClass(currentMarket.startMonth)
+                    }`}
                   />
                 </div>
               </div>
@@ -766,10 +660,12 @@ export function LeadForm({
               {/* Right column: Area (spans full height) */}
               <div className="flex-[3]">
                 <Label className="text-blue-600 font-bold text-md mb-1 block">Area</Label>
-                <MemoTextarea
+                <Textarea
                   value={currentMarket.targetArea}
-                  onChange={(value) => updateMarketField(activeMarketIndex, "targetArea", value)}
-                  className={`h-[calc(100%-1.75rem)] text-sm resize-none border-2 border-black rounded transition-colors ${getInputClass(currentMarket.targetArea)}`}
+                  onChange={(e) => updateMarketField(activeMarketIndex, "targetArea", e.target.value)}
+                  className={`h-[calc(100%-1.75rem)] text-sm resize-none border-2 border-black rounded transition-colors ${
+                    getInputClass(currentMarket.targetArea)
+                  }`}
                 />
               </div>
             </div>
@@ -787,6 +683,7 @@ export function LeadForm({
                     { value: "12 Mo", label: "1 Yr", sub: "(13p)" },
                     { value: "TBD", label: "TBD", sub: "" }
                   ].map((duration) => {
+                    // ✅ Only show AI suggestions for primary market
                     const aiSuggestions = (() => {
                       if (activeMarketIndex !== 0) return [];
                       const length = formData?.campaignLength;
@@ -799,10 +696,7 @@ export function LeadForm({
                     
                     return (
                       <div key={duration.value} className="flex flex-col items-center">
-                        <MemoButton
-                          label={duration.label}
-                          isSelected={confirmedSelections.includes(duration.value)}
-                          isAISuggested={aiSuggestions.includes(duration.value) && !confirmedSelections.includes(duration.value)}
+                        <button
                           onClick={() => {
                             setConfirmedDurations(prev => {
                               const current = prev[activeMarketIndex] || [];
@@ -821,8 +715,12 @@ export function LeadForm({
                               updateField("campaignLength", newSelections);
                             }
                           }}
-                          className="px-2.5 py-1.5 text-sm min-w-[48px]"
-                        />
+                          className={`flex items-center justify-center px-2.5 py-1.5 text-sm font-bold border-2 rounded min-w-[48px] transition-colors ${
+                            getMultiSelectButtonClass(duration.value, aiSuggestions, confirmedSelections)
+                          }`}
+                        >
+                          <span>{duration.label}</span>
+                        </button>
                         {duration.sub && (
                           <span className="text-[10px] text-gray-500 font-normal">
                             {duration.sub}
@@ -841,17 +739,18 @@ export function LeadForm({
                 </Label>
                 <div className="flex gap-1.5">
                   {["Static", "Digital", "Both"].map((type) => (
-                    <MemoButton
+                    <button
                       key={type}
-                      label={type}
-                      isSelected={confirmedBoardTypes[activeMarketIndex] === type}
-                      isAISuggested={currentMarket.boardType === type && confirmedBoardTypes[activeMarketIndex] !== type}
                       onClick={() => {
                         updateMarketField(activeMarketIndex, "boardType", type);
                         setConfirmedBoardTypes(prev => ({...prev, [activeMarketIndex]: type}));
                       }}
-                      className="px-2.5 py-1.5 text-md flex-1"
-                    />
+                      className={`flex justify-center px-2.5 py-1.5 text-md font-bold border-2 rounded flex-1 transition-colors ${
+                        getButtonClass(type, currentMarket.boardType, confirmedBoardTypes[activeMarketIndex])
+                      }`}
+                    >
+                      {type}
+                    </button>
                   ))}
                 </div>
               </div>
@@ -890,6 +789,7 @@ export function LeadForm({
             </span>
           </button>
         ))}
+        {/* ✅ Only show "+ Market" button if we can add more */}
         {canAddMoreMarkets && (
           <button
             onClick={addNewMarket}
@@ -930,6 +830,7 @@ export function LeadForm({
             </span>
           </button>
         ))}
+        {/* ✅ Only show "+ Contact" button if we can add more */}
         {canAddMoreContacts && (
           <button
             onClick={addNewContact}
@@ -947,34 +848,42 @@ export function LeadForm({
           <div className="grid grid-cols-4 gap-2.5">
             <div className="flex-1">
               <Label className="text-blue-600 font-bold text-md mb-1.5 block">Name</Label>
-              <MemoInput
+              <Input
                 value={currentContact.name}
-                onChange={(value) => updateContactField(activeContactIndex, "name", value)}
-                className={`h-10 text-sm border-2 border-black rounded transition-colors ${getInputClass(currentContact.name)}`}
+                onChange={(e) => updateContactField(activeContactIndex, "name", e.target.value)}
+                className={`h-10 text-sm border-2 border-black rounded transition-colors ${
+                  getInputClass(currentContact.name)
+                }`}
               />
             </div>
             <div className="flex-1">
               <Label className="text-blue-600 font-bold text-md mb-1.5 block">Position</Label>
-              <MemoInput 
+              <Input 
                 value={currentContact.position}
-                onChange={(value) => updateContactField(activeContactIndex, "position", value)}
-                className={`h-10 text-sm border-2 border-black rounded transition-colors ${getInputClass(currentContact.position)}`}
+                onChange={(e) => updateContactField(activeContactIndex, "position", e.target.value)}
+                className={`h-10 text-sm border-2 border-black rounded transition-colors ${
+                  getInputClass(currentContact.position)
+                }`}
               />
             </div>
             <div className="flex-1">
               <Label className="text-blue-600 font-bold text-md mb-1.5 block">Phone</Label>
-              <MemoInput
+              <Input
                 value={currentContact.phone}
-                onChange={(value) => updateContactField(activeContactIndex, "phone", value)}
-                className={`h-10 text-sm border-2 rounded transition-colors ${getPhoneInputClass(currentContact.phone)}`}
+                onChange={(e) => updateContactField(activeContactIndex, "phone", e.target.value)}
+                className={`h-10 text-sm border-2 rounded transition-colors ${
+                  getPhoneInputClass(currentContact.phone)
+                }`}
               />
             </div>
             <div className="flex-1">
               <Label className="text-blue-600 font-bold text-md mb-1.5 block">Email</Label>
-              <MemoInput
+              <Input
                 value={currentContact.email}
-                onChange={(value) => updateContactField(activeContactIndex, "email", value)}
-                className={`h-10 text-sm border-2 border-black rounded transition-colors ${getInputClass(currentContact.email)}`}
+                onChange={(e) => updateContactField(activeContactIndex, "email", e.target.value)}
+                className={`h-10 text-sm border-2 border-black rounded transition-colors ${
+                  getInputClass(currentContact.email)
+                }`}
               />
             </div>
           </div>
@@ -993,17 +902,18 @@ export function LeadForm({
                   { value: "partners", label: "Partners" },
                   { value: "committee", label: "Committee" }
                 ].map((maker) => (
-                  <MemoButton
+                  <button
                     key={maker.value}
-                    label={maker.label}
-                    isSelected={confirmedDecisionMakers[activeContactIndex] === maker.value}
-                    isAISuggested={currentContact.decisionMaker === maker.value && confirmedDecisionMakers[activeContactIndex] !== maker.value}
                     onClick={() => {
                       updateContactField(activeContactIndex, "decisionMaker", maker.value);
                       setConfirmedDecisionMakers(prev => ({...prev, [activeContactIndex]: maker.value}));
                     }}
-                    className="px-3.5 py-2 text-md"
-                  />
+                    className={`px-3.5 py-2 text-md font-bold border-2 rounded transition-colors ${
+                      getButtonClass(maker.value, currentContact.decisionMaker, confirmedDecisionMakers[activeContactIndex])
+                    }`}
+                  >
+                    {maker.label}
+                  </button>
                 ))}
               </div>
             </div>
@@ -1018,6 +928,7 @@ export function LeadForm({
                   { value: "Panel Info", label: "Panel Info"},
                   { value: "Planning Rates", label: "Planning Rates"},
                 ].map((item) => {
+                  // ✅ Only show AI suggestions for primary contact
                   const aiSuggestions = activeContactIndex === 0 
                     ? ((formData?.sendOver ?? []).filter((s): s is "Avails" | "Panel Info" | "Planning Rates" => s !== undefined))
                     : [];
@@ -1025,11 +936,8 @@ export function LeadForm({
                   const confirmedSelections = confirmedSendOver[activeContactIndex] || [];
                   
                   return (
-                    <MemoButton
+                    <button
                       key={item.value}
-                      label={item.label}
-                      isSelected={confirmedSelections.includes(item.value)}
-                      isAISuggested={aiSuggestions.includes(item.value as "Avails" | "Panel Info" | "Planning Rates") && !confirmedSelections.includes(item.value)}
                       onClick={() => {
                         setConfirmedSendOver(prev => {
                           const current = prev[activeContactIndex] || [];
@@ -1047,8 +955,12 @@ export function LeadForm({
                           updateField("sendOver", newSelections);
                         }
                       }}
-                      className="px-3.5 py-2 text-md"
-                    />
+                      className={`px-3.5 py-2 text-md font-bold border-2 rounded transition-colors ${
+                        getMultiSelectButtonClass(item.value, aiSuggestions, confirmedSelections)
+                      }`}
+                    >
+                      {item.label}
+                    </button>
                   );
                 })}
               </div>
