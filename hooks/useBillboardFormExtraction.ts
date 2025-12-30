@@ -11,7 +11,7 @@ export interface BillboardFormData {
   leadType: LeadSentiment | null;
   
   // Entity information
-  typeName?: "business" | "political" | "nonprofit" | "personal" | null;
+  typeName?: "business" | "political" | "nonprofit" | "personal" | string | null;
   businessName?: string | null;
   entityName?: string | null;
   
@@ -44,7 +44,7 @@ export interface BillboardFormData {
   boardType?: string | null;
   
   // Business context
-  hasMediaExperience: boolean | null;
+  hasMediaExperience: boolean | string | null;
   yearsInBusiness: string | null;
   
   // Notes
@@ -63,6 +63,10 @@ export function useBillboardFormExtraction() {
   const [isCleared, setIsCleared] = useState(false);
   const MAX_RETRIES = 3;
 
+  // ✅ Track previous values to detect what actually changed
+  const previousDataRef = useRef<Partial<BillboardFormData> | null>(null);
+  const [changedFields, setChangedFields] = useState<Set<string>>(new Set());
+
   const { object, submit, isLoading, error, stop } = useObject({
     api: "/api/extract-billboard-fields",
     schema: billboardLeadSchema,
@@ -76,7 +80,31 @@ export function useBillboardFormExtraction() {
       setExtractionError(null);
       setRetryCount(0);
       isProcessingRef.current = false;
-      setIsCleared(false); // ✅ Reset isCleared when new data arrives
+      setIsCleared(false);
+      
+      // ✅ Track which fields changed in this extraction
+      if (object && previousDataRef.current) {
+        const newChangedFields = new Set<string>();
+        const fields = Object.keys(object) as (keyof typeof object)[];
+        
+        for (const field of fields) {
+          if (field === 'confidence') continue;
+          const prevValue = previousDataRef.current[field as keyof BillboardFormData];
+          const newValue = object[field];
+          
+          if (!deepEqual(prevValue, newValue)) {
+            newChangedFields.add(field);
+          }
+        }
+        
+        if (newChangedFields.size > 0) {
+          console.log("🔄 Fields that changed:", Array.from(newChangedFields));
+          setChangedFields(newChangedFields);
+        }
+      }
+      
+      // Save current as previous for next comparison
+      previousDataRef.current = object ? { ...object } as Partial<BillboardFormData> : null;
     },
   });
 
@@ -176,9 +204,11 @@ export function useBillboardFormExtraction() {
     transcriptContextRef.current = [];
     lastProcessedTranscriptRef.current = "";
     isProcessingRef.current = false;
+    previousDataRef.current = null;
     setExtractionError(null);
     setRetryCount(0);
     setIsCleared(true);
+    setChangedFields(new Set());
   }, [stop]);
 
   // Cleanup on unmount
@@ -192,7 +222,7 @@ export function useBillboardFormExtraction() {
   }, []);
 
   return {
-    formData: isCleared ? null : object, // Return null when cleared
+    formData: isCleared ? null : object, // Return the streaming object as before
     isExtracting: isLoading || isProcessingRef.current,
     extractFields,
     error: extractionError || error?.message,
@@ -201,5 +231,33 @@ export function useBillboardFormExtraction() {
     reset,
     cleanup,
     canRetry: retryCount < MAX_RETRIES,
+    // ✅ NEW: Expose which fields changed in the last extraction
+    changedFields,
   };
+}
+
+// ✅ Helper function for deep equality
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === null || b === null) return a === b;
+  if (a === undefined || b === undefined) return a === b;
+  
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    return a.every((val, idx) => deepEqual(val, b[idx]));
+  }
+  
+  if (typeof a === 'object' && typeof b === 'object') {
+    const aKeys = Object.keys(a as object);
+    const bKeys = Object.keys(b as object);
+    if (aKeys.length !== bKeys.length) return false;
+    return aKeys.every(key => 
+      deepEqual(
+        (a as Record<string, unknown>)[key], 
+        (b as Record<string, unknown>)[key]
+      )
+    );
+  }
+  
+  return false;
 }
