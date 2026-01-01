@@ -47,6 +47,14 @@ npm run make-admin:dev       # Uses .env.dev
 npm run make-admin:prod      # Uses .env.prod
 ```
 
+## Claude Code Plugins
+
+Install these plugins for full project support:
+```bash
+/plugin frontend-design
+/plugin vercel
+```
+
 ## Architecture
 
 ### Tech Stack

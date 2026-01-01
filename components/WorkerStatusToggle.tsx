@@ -12,11 +12,11 @@ import {
 
 const STATUS_CONFIG: Record<
   WorkerActivity,
-  { label: string; dot: string }
+  { label: string; dot: string; blink: string }
 > = {
-  available: { label: "Available", dot: "bg-green-500" },
-  unavailable: { label: "Away", dot: "bg-yellow-500" },
-  offline: { label: "Offline", dot: "bg-gray-400" },
+  available: { label: "Available", dot: "bg-green-500", blink: "animate-pulse shadow-[0_0_8px_2px_rgba(34,197,94,0.6)]" },
+  unavailable: { label: "Away", dot: "bg-yellow-500", blink: "animate-pulse shadow-[0_0_8px_2px_rgba(234,179,8,0.6)]" },
+  offline: { label: "Offline", dot: "bg-gray-400", blink: "" },
 };
 
 interface WorkerStatusToggleProps {
@@ -37,28 +37,31 @@ export function WorkerStatusToggle({ className }: WorkerStatusToggleProps) {
   return (
     <div className={cn("flex items-center gap-2", className)}>
       <Select value={status} onValueChange={handleChange} disabled={isLoading}>
-        <SelectTrigger className={cn("w-[140px]", isLoading && "opacity-50")}>
+        <SelectTrigger className={cn(
+          "w-[130px] h-8 text-xs font-medium bg-transparent hover:bg-accent hover:text-accent-foreground",
+          isLoading && "opacity-50"
+        )}>
           <SelectValue>
             <span className="flex items-center gap-2">
-              <span className={cn("w-2 h-2 rounded-full", STATUS_CONFIG[status].dot)} />
+              <span className={cn("w-2 h-2 rounded-full", STATUS_CONFIG[status].dot, STATUS_CONFIG[status].blink)} />
               {isLoading ? "..." : STATUS_CONFIG[status].label}
             </span>
           </SelectValue>
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="available">
+          <SelectItem value="available" className="text-xs">
             <span className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-green-500" />
               Available
             </span>
           </SelectItem>
-          <SelectItem value="unavailable">
+          <SelectItem value="unavailable" className="text-xs">
             <span className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-yellow-500" />
               Away
             </span>
           </SelectItem>
-          <SelectItem value="offline">
+          <SelectItem value="offline" className="text-xs">
             <span className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-gray-400" />
               Offline
@@ -68,7 +71,7 @@ export function WorkerStatusToggle({ className }: WorkerStatusToggleProps) {
       </Select>
 
       {error && (
-        <span className="text-xs text-red-500" title={error}>
+        <span className="text-xs text-destructive" title={error}>
           !
         </span>
       )}
