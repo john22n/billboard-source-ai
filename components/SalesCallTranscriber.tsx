@@ -9,6 +9,7 @@ import { useBillboardFormExtraction } from "@/hooks/useBillboardFormExtraction";
 import { useTwilio } from "@/hooks/useTwilio";
 import { useOpenAITranscription } from "@/hooks/useOpenAITranscription";
 import { LeadForm, PricingPanel, TranscriptView } from "@/components/sales-call";
+import { WorkerStatusToggle } from "@/components/WorkerStatusToggle";
 import type { TranscriptItem } from "@/types/sales-call";
 import { showSuccessToast, showErrorToast } from "@/lib/error-handling";
 import { useFormStore } from "@/stores/formStore";
@@ -381,6 +382,7 @@ export default function SalesCallTranscriber() {
                     >
                       <span className="mr-1.5">📁</span> {isUploading ? "Uploading..." : "Upload"}
                     </Button>
+                    <WorkerStatusToggle />
                   </div>
                 </div>
               </div>
