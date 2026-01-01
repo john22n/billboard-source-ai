@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { subscribeWithSelector } from 'zustand/middleware';
 import type { BillboardFormData } from '@/hooks/useBillboardFormExtraction';
 
 // Re-export the type so other files can import from store
@@ -146,8 +145,7 @@ const INITIAL_FIELDS: BillboardFormData = {
 // STORE
 // ============================================================================
 
-export const useFormStore = create<FormStore>()(
-  subscribeWithSelector((set, get) => ({
+export const useFormStore = create<FormStore>()((set, get) => ({
     // Initial state
     fields: { ...INITIAL_FIELDS },
     userEditedFields: new Set<string>(),
@@ -410,8 +408,7 @@ export const useFormStore = create<FormStore>()(
     clearRecentlyChanged: () => {
       set({ recentlyChangedFields: new Set<string>() });
     },
-  }))
-);
+  }));
 
 // ============================================================================
 // SELECTORS - Use these to subscribe to specific fields only
