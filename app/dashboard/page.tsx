@@ -11,7 +11,7 @@ import { getCurrentUser } from '@/lib/dal'
 
 function DashboardSkeleton() {
   return (
-    <div className="h-full bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 p-1 animate-pulse">
+    <div className="h-full animate-pulse">
       <div className="h-full max-w-[1800px] mx-auto flex flex-col">
         <div className="bg-white rounded-lg shadow-2xl h-full flex flex-col">
           <div className="bg-gradient-to-r from-blue-600 to-indigo-600 h-20 rounded-t-lg" />
@@ -54,14 +54,12 @@ export default async function Page() {
           role: currentUser.role ?? undefined
         }}
       />
-      <SidebarInset className="flex flex-col h-screen overflow-hidden">
+      <SidebarInset className="flex flex-col h-dvh min-h-0 overflow-hidden bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
         <SiteHeader />
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex-1 flex flex-col overflow-hidden px-2 lg:px-4">
-            <Suspense fallback={<DashboardSkeleton />}>
-              <SalesCallTranscriber />
-            </Suspense>
-          </div>
+        <div className="flex-1 min-h-0 overflow-hidden p-2 lg:p-4">
+          <Suspense fallback={<DashboardSkeleton />}>
+            <SalesCallTranscriber />
+          </Suspense>
         </div>
       </SidebarInset>
     </SidebarProvider>
