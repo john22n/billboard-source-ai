@@ -74,7 +74,7 @@ const billboardLeadSchema = z.object({
   phone: z.string().nullable()
     .describe("Phone number"),
   email: z.string().nullable()
-    .describe("Email address"),
+    .describe("Email address - MUST include @ symbol and domain (e.g., 'john@company.com'). If caller spells it out like 'john at company dot com', convert to proper format 'john@company.com'. Return null if no email mentioned."),
   
   // Decision making (matches your button values)
   decisionMaker: z.string().nullable()
@@ -383,7 +383,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const { transcript, previousContext = [] } = await req.json();
+    const { transcript } = await req.json();
 
     if (!transcript || transcript.trim().length === 0) {
       return new Response(
@@ -392,11 +392,7 @@ export async function POST(req: Request) {
       );
     }
 
-    let prompt = "";
-    if (previousContext.length > 0) {
-      prompt += `Previous conversation context:\n${previousContext.join("\n\n")}\n\n`;
-    }
-    prompt += `Extract structured information from this sales call transcript. Be thorough and extract ALL relevant information:\n\n${transcript}`;
+    const prompt = `Extract structured information from this sales call transcript. Be thorough and extract ALL relevant information:\n\n${transcript}`;
 
     const result = await streamObject({
       model: openai("gpt-4o-mini"),

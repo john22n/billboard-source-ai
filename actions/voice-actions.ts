@@ -49,7 +49,7 @@ export async function createRealtimeSession() {
 export async function generateTextResponse(prompt: string) {
   try {
     const { text } = await generateText({
-      model: openai('gpt-4o'),
+      model: openai('gpt-4o-mini'),
       prompt,
     });
 
@@ -70,7 +70,7 @@ export async function generateTextResponse(prompt: string) {
 export async function streamTextResponse(prompt: string) {
   try {
     const result = await streamText({
-      model: openai('gpt-4o'),
+      model: openai('gpt-4o-mini'),
       prompt,
     });
 
@@ -85,13 +85,14 @@ export async function streamTextResponse(prompt: string) {
 export async function generateStructuredResponse(prompt: string) {
   try {
     const { object } = await generateObject({
-      model: openai('gpt-4o'),
+      model: openai('gpt-4o-mini'),
       schema: z.object({
         summary: z.string().describe('A brief summary of the response'),
         keyPoints: z.array(z.string()).describe('Key points from the conversation'),
         sentiment: z.enum(['positive', 'neutral', 'negative']).describe('Overall sentiment'),
       }),
       prompt,
+      temperature: 0.2,
     });
 
     return {
@@ -165,7 +166,7 @@ export async function generateSpeech(
 export async function chatCompletion(messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>) {
   try {
     const { text } = await generateText({
-      model: openai('gpt-4o'),
+      model: openai('gpt-4o-mini'),
       messages: messages.map(msg => ({
         role: msg.role,
         content: msg.content,

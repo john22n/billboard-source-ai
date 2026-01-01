@@ -52,11 +52,8 @@ export interface BillboardFormData {
 }
 
 export function useBillboardFormExtraction() {
-  const transcriptContextRef = useRef<string[]>([]);
   const lastProcessedTranscriptRef = useRef<string>("");
-  const isProcessingRef = useRef(false);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
 
   const [extractionError, setExtractionError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
@@ -69,29 +66,19 @@ export function useBillboardFormExtraction() {
     onError: (error) => {
       console.error("❌ Extraction error:", error);
       setExtractionError(error.message || "Failed to extract fields");
-      isProcessingRef.current = false;
     },
     onFinish: () => {
       console.log("✅ Extraction completed successfully");
       setExtractionError(null);
       setRetryCount(0);
-      isProcessingRef.current = false;
-      setIsCleared(false); // ✅ Reset isCleared when new data arrives
+      setIsCleared(false);
     },
   });
 
-  const addTranscriptContext = useCallback((text: string) => {
-    transcriptContextRef.current.push(text);
-    // Keep only last 10 transcript chunks for context
-    if (transcriptContextRef.current.length > 10) {
-      transcriptContextRef.current.shift();
-    }
-  }, []);
-
   const extractFields = useCallback(
     (newTranscript: string) => {
-      // Prevent processing if already in progress
-      if (isProcessingRef.current) {
+      // Use isLoading from the hook instead of manual ref
+      if (isLoading) {
         console.log("⏳ Extraction already in progress, skipping...");
         return;
       }
@@ -120,37 +107,27 @@ export function useBillboardFormExtraction() {
         clearTimeout(debounceTimerRef.current);
       }
 
-      // Abort any in-flight request
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-
-      // Create new abort controller
-      abortControllerRef.current = new AbortController();
+      // Stop any in-flight streaming request
+      stop();
 
       // Debounce the actual API call
       debounceTimerRef.current = setTimeout(() => {
         try {
           console.log("🚀 Starting extraction...");
-          isProcessingRef.current = true;
           lastProcessedTranscriptRef.current = newTranscript;
 
-          addTranscriptContext(newTranscript);
-
-          submit({
-            transcript: newTranscript,
-            previousContext: transcriptContextRef.current,
-          });
+          // Send only the full transcript - no previousContext needed
+          // The transcript already contains the full conversation
+          submit({ transcript: newTranscript });
 
           setRetryCount((prev) => prev + 1);
         } catch (err) {
           console.error("❌ Error submitting extraction:", err);
           setExtractionError(err instanceof Error ? err.message : "Unknown error");
-          isProcessingRef.current = false;
         }
       }, 500); // 500ms debounce
     },
-    [submit, addTranscriptContext, retryCount]
+    [submit, retryCount, isLoading, stop]
   );
 
   const clearError = useCallback(() => {
@@ -160,22 +137,15 @@ export function useBillboardFormExtraction() {
 
   const reset = useCallback(() => {
     // Stop any in-progress extraction
-    if (isProcessingRef.current) {
-      stop();
-    }
+    stop();
 
-    // Clear timers and abort controllers
+    // Clear timers
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
     }
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
 
     // Reset state
-    transcriptContextRef.current = [];
     lastProcessedTranscriptRef.current = "";
-    isProcessingRef.current = false;
     setExtractionError(null);
     setRetryCount(0);
     setIsCleared(true);
@@ -186,14 +156,12 @@ export function useBillboardFormExtraction() {
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
     }
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-  }, []);
+    stop();
+  }, [stop]);
 
   return {
-    formData: isCleared ? null : object, // Return null when cleared
-    isExtracting: isLoading || isProcessingRef.current,
+    formData: isCleared ? null : object,
+    isExtracting: isLoading,
     extractFields,
     error: extractionError || error?.message,
     overallConfidence: isCleared ? 0 : (object?.confidence?.overall ?? 0),

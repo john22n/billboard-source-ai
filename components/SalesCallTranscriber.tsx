@@ -32,7 +32,6 @@ export default function SalesCallTranscriber() {
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const lastFetchedTranscript = useRef<string>("");
 
   const [isUploading, setIsUploading] = useState(false);
   const [billboardContext, setBillboardContext] = useState<string>("");
@@ -108,7 +107,6 @@ export default function SalesCallTranscriber() {
   const clearAll = useCallback(() => {
     clearTranscripts();
     setBillboardContext("");
-    lastFetchedTranscript.current = "";
     resetExtraction();
     resetForm(); // Reset Zustand store
     setResetTrigger(prev => prev + 1);
@@ -140,46 +138,8 @@ export default function SalesCallTranscriber() {
   }, [fullTranscript, extractFields, isExtracting]);
 
   // ✅ Fetch billboard pricing data
-  useEffect(() => {
-    const fetchBillboardData = async () => {
-      if (activeMarketIndex !== 0) {
-        return;
-      }
-
-      const transcriptDiff = fullTranscript.length - lastFetchedTranscript.current.length;
-
-      if (
-        fullTranscript.length > 100 &&
-        !isLoadingBillboard &&
-        (transcriptDiff > 50 || lastFetchedTranscript.current === '')
-      ) {
-        setIsLoadingBillboard(true);
-        lastFetchedTranscript.current = fullTranscript;
-
-        try {
-          const response = await fetch('/api/billboard-pricing', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ transcript: fullTranscript }),
-          });
-
-          if (response.ok) {
-            const data = await response.json();
-            if (data.context) {
-              setBillboardContext(data.context);
-            }
-          }
-        } catch (error) {
-          console.error("Error fetching billboard data:", error);
-        } finally {
-          setIsLoadingBillboard(false);
-        }
-      }
-    };
-
-    const timeoutId = setTimeout(fetchBillboardData, 1500);
-    return () => clearTimeout(timeoutId);
-  }, [fullTranscript, isLoadingBillboard, activeMarketIndex]);
+  // Billboard pricing is now handled exclusively by PricingPanel based on location field changes
+  // This prevents duplicate API calls when both transcript and location update simultaneously
 
   const handleFileSelect = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;

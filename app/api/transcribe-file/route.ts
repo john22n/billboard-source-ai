@@ -1,7 +1,7 @@
 // app/api/transcribe-file/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
-import { generateText, generateObject } from "ai";
+import { generateObject } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 import { getSession } from "@/lib/auth";
@@ -10,23 +10,25 @@ const openaiClient = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
 
-// Zod schemas for structured outputs
-const keyPointsSchema = z.object({
-  clientName: z.string().nullable(),
-  companyName: z.string().nullable(),
-  industry: z.string().nullable(),
-  companySize: z.string().nullable(),
-  painPoints: z.array(z.string()),
-  budget: z.string().nullable(),
-  timeline: z.string().nullable(),
-  competitors: z.array(z.string()),
-  decisionMakers: z.array(z.string()),
-  currentSolution: z.string().nullable(),
-  objections: z.array(z.string()),
-  requirements: z.array(z.string()),
-});
-
-const actionItemsSchema = z.object({
+// Combined analysis schema - single LLM call instead of 4 parallel calls
+const fullAnalysisSchema = z.object({
+  summary: z.string().describe("2-3 paragraph summary of the sales call covering main discussion points, client needs, solutions discussed, and next steps"),
+  
+  keyPoints: z.object({
+    clientName: z.string().nullable(),
+    companyName: z.string().nullable(),
+    industry: z.string().nullable(),
+    companySize: z.string().nullable(),
+    painPoints: z.array(z.string()),
+    budget: z.string().nullable(),
+    timeline: z.string().nullable(),
+    competitors: z.array(z.string()),
+    decisionMakers: z.array(z.string()),
+    currentSolution: z.string().nullable(),
+    objections: z.array(z.string()),
+    requirements: z.array(z.string()),
+  }),
+  
   actionItems: z.array(
     z.object({
       action: z.string(),
@@ -35,23 +37,23 @@ const actionItemsSchema = z.object({
       priority: z.enum(["high", "medium", "low"]),
     })
   ),
-});
-
-const sentimentSchema = z.object({
-  overall: z.enum(["positive", "neutral", "negative"]),
-  clientEngagement: z.enum(["high", "medium", "low"]),
-  buyingSignals: z.array(z.string()),
-  concerns: z.array(z.string()),
-  dealLikelihood: z.enum(["high", "medium", "low"]),
-  confidenceScore: z.number().min(0).max(100),
-  emotionalTone: z.enum([
-    "enthusiastic",
-    "interested",
-    "skeptical",
-    "resistant",
-    "neutral",
-  ]),
-  reasoning: z.string(),
+  
+  sentiment: z.object({
+    overall: z.enum(["positive", "neutral", "negative"]),
+    clientEngagement: z.enum(["high", "medium", "low"]),
+    buyingSignals: z.array(z.string()),
+    concerns: z.array(z.string()),
+    dealLikelihood: z.enum(["high", "medium", "low"]),
+    confidenceScore: z.number().min(0).max(100),
+    emotionalTone: z.enum([
+      "enthusiastic",
+      "interested",
+      "skeptical",
+      "resistant",
+      "neutral",
+    ]),
+    reasoning: z.string(),
+  }),
 });
 
 export async function POST(req: NextRequest) {
@@ -86,54 +88,22 @@ export async function POST(req: NextRequest) {
     const transcript = transcription.text;
     console.log("✅ Transcription complete, analyzing...");
 
-    // Step 2: Perform parallel analysis using Vercel AI SDK
-    const [summaryResult, keyPointsResult, actionItemsResult, sentimentResult] =
-      await Promise.all([
-        generateText({
-          model: openai("gpt-4o"),
-          system: `You are a sales call analyst. Summarize this sales call in 2-3 concise paragraphs.
-Focus on:
-- Main discussion points and topics covered
-- Client needs and pain points mentioned
-- Solutions or products discussed
-- Overall outcome and next steps`,
-          prompt: transcript,
-          temperature: 0.3,
-        }),
-        generateObject({
-          model: openai("gpt-4o"),
-          schema: keyPointsSchema,
-          system: `Extract key information from this sales call. Only include information that was explicitly mentioned. Use null for missing fields.`,
-          prompt: transcript,
-          temperature: 0.2,
-        }),
-        generateObject({
-          model: openai("gpt-4o-mini"),
-          schema: actionItemsSchema,
-          system: `Extract all action items and next steps from this sales call.`,
-          prompt: transcript,
-          temperature: 0.2,
-        }),
-        generateObject({
-          model: openai("gpt-4o-mini"),
-          schema: sentimentSchema,
-          system: `Analyze the sentiment and engagement of this sales call.`,
-          prompt: transcript,
-          temperature: 0.2,
-        }),
-      ]);
+    // Step 2: Single LLM call for all analysis (4x more efficient than parallel calls)
+    const { object: analysis } = await generateObject({
+      model: openai("gpt-4o-mini"),
+      schema: fullAnalysisSchema,
+      system: `You are a sales call analyst. Analyze this sales call transcript and extract all relevant information.
+Be thorough and only include information that was explicitly mentioned. Use null for missing fields.`,
+      prompt: transcript,
+      temperature: 0.2,
+    });
 
     console.log("✅ Analysis complete");
 
     return NextResponse.json({
       text: transcript,
       segments: transcription.segments,
-      analysis: {
-        summary: summaryResult.text,
-        keyPoints: keyPointsResult.object,
-        actionItems: actionItemsResult.object.actionItems,
-        sentiment: sentimentResult.object,
-      },
+      analysis,
     });
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
