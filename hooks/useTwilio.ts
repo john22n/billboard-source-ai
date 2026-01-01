@@ -126,10 +126,18 @@ export function useTwilio(options: UseTwilioOptions = {}) {
 
         call.on('reject', () => {
           console.log('🚫 Call rejected');
+          setIncomingCall(null);
+        });
+
+        call.on('cancel', () => {
+          console.log('📵 Call canceled (caller hung up)');
+          setIncomingCall(null);
+          setStatus('Call canceled');
         });
 
         call.on('error', (error: Error) => {
           console.error('❌ Call error:', error);
+          setIncomingCall(null);
         });
       });
 

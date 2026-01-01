@@ -66,10 +66,11 @@ export async function POST(req: Request) {
       console.log('TaskRouter will try next available worker or escalate');
     }
 
-    // Handle reservation rejected
+    // Handle reservation rejected - TaskRouter will automatically try next available worker
     if (eventType === 'reservation.rejected') {
       const workerSid = formData.get('WorkerSid') as string;
       console.log(`🚫 Reservation rejected by worker: ${workerSid}`);
+      console.log('📞 TaskRouter routing to next available worker');
     }
 
     // Handle task canceled (for logging)
