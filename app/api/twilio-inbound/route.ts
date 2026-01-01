@@ -1,11 +1,12 @@
 // app/api/twilio-inbound/route.ts
-// Handles incoming Twilio calls and connects them to the browser client
+// Handles incoming Twilio calls and enqueues them into TaskRouter
 import twilio from 'twilio';
 import { db } from '@/db';
 import { user } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
+const WORKFLOW_SID = process.env.TASKROUTER_WORKFLOW_SID;
 
 export async function POST(req: Request) {
   try {
@@ -83,14 +84,29 @@ export async function POST(req: Request) {
       });
     }
 
-    console.log(`📲 Routing call to client: ${clientIdentity}`);
+    if (!WORKFLOW_SID) {
+      console.error('❌ TASKROUTER_WORKFLOW_SID not set');
+      return new Response('Server config error', { status: 500 });
+    }
 
-    // Generate TwiML that dials the browser client
+    console.log(`📲 Enqueuing call to TaskRouter for: ${clientIdentity}`);
+
+    // Build task attributes for TaskRouter
+    // call_sid is auto-added by Twilio for <Enqueue>, but we include it explicitly
+    const taskAttributes = JSON.stringify({
+      call_sid: CallSid,
+      from: From,
+      to: To,
+      primary_owner: clientIdentity,
+    });
+
+    // Enqueue call into TaskRouter workflow
+    // TaskRouter will route to available workers and fall back to voicemail
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Dial>
-    <Client>${clientIdentity}</Client>
-  </Dial>
+  <Enqueue workflowSid="${WORKFLOW_SID}">
+    <Task>${taskAttributes}</Task>
+  </Enqueue>
 </Response>`;
 
     return new Response(twiml, {
