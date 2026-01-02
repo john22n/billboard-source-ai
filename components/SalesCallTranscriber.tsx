@@ -57,6 +57,7 @@ export default function SalesCallTranscriber() {
   const {
     transcripts,
     interimTranscript,
+    interimSpeaker,
     startTranscription,
     stopTranscription,
     clearTranscripts,
@@ -113,7 +114,10 @@ export default function SalesCallTranscriber() {
   }, [clearTranscripts, resetExtraction, resetForm]);
 
   const fullTranscript = useMemo(() => {
-    return transcripts.map(t => t.text).join(" ");
+    return transcripts.map(t => {
+      const speaker = t.speaker === 'agent' ? 'Sales Rep' : 'Caller';
+      return `${speaker}: ${t.text}`;
+    }).join("\n");
   }, [transcripts]);
 
   // Cleanup on unmount
@@ -499,6 +503,7 @@ export default function SalesCallTranscriber() {
                   ref={scrollRef}
                   transcripts={transcripts}
                   interimTranscript={interimTranscript}
+                  interimSpeaker={interimSpeaker}
                   twilioReady={twilioReady}
                 />
               </TabsContent>
