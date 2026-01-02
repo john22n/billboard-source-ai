@@ -100,16 +100,11 @@ export async function POST(req: Request) {
       primary_owner: clientIdentity,
     });
 
-    // Get the app URL for wait URL
-    const url = new URL(req.url);
-    const appUrl = `${url.protocol}//${url.host}`;
-    const waitUrl = `${appUrl}/api/taskrouter/wait`;
-
     // Enqueue call into TaskRouter workflow
     // TaskRouter will route to available workers and fall back to voicemail
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Enqueue workflowSid="${WORKFLOW_SID}" waitUrl="${waitUrl}">
+  <Enqueue workflowSid="${WORKFLOW_SID}">
     <Task>${taskAttributes}</Task>
   </Enqueue>
 </Response>`;
