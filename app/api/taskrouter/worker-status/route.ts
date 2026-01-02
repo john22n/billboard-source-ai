@@ -61,30 +61,12 @@ export async function POST(req: Request) {
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Handle both JSON and text/plain (sendBeacon sends text/plain)
-    const contentType = req.headers.get('content-type') || '';
-    let body: { status?: string };
-    
-    if (contentType.includes('application/json')) {
-      body = await req.json();
-    } else {
-      // sendBeacon sends as text/plain
-      const text = await req.text();
-      try {
-        body = JSON.parse(text);
-      } catch {
-        return Response.json({ error: 'Invalid body' }, { status: 400 });
-      }
-    }
-    
+    const body = await req.json();
     const newStatus = body.status as 'available' | 'unavailable' | 'offline';
 
     if (!['available', 'unavailable', 'offline'].includes(newStatus)) {
       return Response.json({ error: 'Invalid status' }, { status: 400 });
     }
-
-    // Always-available workers that should never go offline
-    const ALWAYS_AVAILABLE_EMAILS = ['tech@billboardsource.com'];
 
     const currentUser = await db
       .select({
@@ -102,12 +84,7 @@ export async function POST(req: Request) {
       return Response.json({ error: 'User not found' }, { status: 404 });
     }
 
-    // Force always-available workers to stay available
-    let effectiveStatus = newStatus;
-    if (ALWAYS_AVAILABLE_EMAILS.includes(currentUser.email) && newStatus !== 'available') {
-      console.log(`⚠️ ${currentUser.email} is always-available, keeping status as 'available'`);
-      effectiveStatus = 'available';
-    }
+    const effectiveStatus = newStatus;
 
     let workerSid = currentUser.taskRouterWorkerSid;
 
