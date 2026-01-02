@@ -18,8 +18,7 @@ export async function POST(req: Request) {
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Say voice="Polly.Joanna">Please hold while we connect you with the next available representative.</Say>
-  <Play>https://api.twilio.com/cowbell.mp3</Play>
-  <Redirect>${baseUrl}/api/taskrouter/wait</Redirect>
+  <Play loop="0">https://com.twilio.sounds.music.s3.amazonaws.com/ClockworkWaltz.mp3</Play>
 </Response>`;
 
   return new Response(twiml, {
