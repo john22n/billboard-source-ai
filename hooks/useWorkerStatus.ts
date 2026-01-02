@@ -82,19 +82,17 @@ export function useWorkerStatus(): UseWorkerStatusReturn {
     refresh();
   }, [refresh]);
 
-  // Handle page unload - set offline when closing browser/tab
-  useEffect(() => {
-    const handleBeforeUnload = () => {
-      // User is closing tab/browser - set to offline
-      setOfflineSync();
-    };
-
-    window.addEventListener("beforeunload", handleBeforeUnload);
-
-    return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-    };
-  }, [setOfflineSync]);
+  // NOTE: beforeunload disabled - was causing workers to go offline on refresh
+  // TODO: Use visibilitychange + sessionStorage to only offline on actual tab close
+  // useEffect(() => {
+  //   const handleBeforeUnload = () => {
+  //     setOfflineSync();
+  //   };
+  //   window.addEventListener("beforeunload", handleBeforeUnload);
+  //   return () => {
+  //     window.removeEventListener("beforeunload", handleBeforeUnload);
+  //   };
+  // }, [setOfflineSync]);
 
   return {
     status,
