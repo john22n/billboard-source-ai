@@ -68,9 +68,6 @@ export async function POST(req: Request) {
       return Response.json({ error: 'Invalid status' }, { status: 400 });
     }
 
-    // Always-available workers that should never go offline
-    const ALWAYS_AVAILABLE_EMAILS = ['tech@billboardsource.com'];
-
     const currentUser = await db
       .select({
         id: user.id,
@@ -87,12 +84,7 @@ export async function POST(req: Request) {
       return Response.json({ error: 'User not found' }, { status: 404 });
     }
 
-    // Force always-available workers to stay available
-    let effectiveStatus = newStatus;
-    if (ALWAYS_AVAILABLE_EMAILS.includes(currentUser.email) && newStatus !== 'available') {
-      console.log(`⚠️ ${currentUser.email} is always-available, keeping status as 'available'`);
-      effectiveStatus = 'available';
-    }
+    const effectiveStatus = newStatus;
 
     let workerSid = currentUser.taskRouterWorkerSid;
 
