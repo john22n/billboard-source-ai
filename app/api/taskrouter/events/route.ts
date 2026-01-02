@@ -9,9 +9,13 @@ import twilio from 'twilio';
 
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
 const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
 const client = twilio(ACCOUNT_SID, AUTH_TOKEN);
+
+function getAppUrl(req: Request): string {
+  const url = new URL(req.url);
+  return `${url.protocol}//${url.host}`;
+}
 
 export async function POST(req: Request) {
   try {
@@ -81,7 +85,8 @@ export async function POST(req: Request) {
       }
 
       // Redirect the call to voicemail
-      const voicemailUrl = `${APP_URL}/api/taskrouter/voicemail?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
+      const appUrl = getAppUrl(req);
+      const voicemailUrl = `${appUrl}/api/taskrouter/voicemail?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
       
       await client.calls(callSid).update({
         method: 'POST',
