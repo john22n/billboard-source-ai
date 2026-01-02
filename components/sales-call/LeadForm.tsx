@@ -100,7 +100,7 @@ export function LeadForm({ resetTrigger, inboundPhone }: LeadFormProps) {
               <div className="flex">
                 <FieldInput 
                   field="typeName" 
-                  placeholder="Type (Business, Political, etc)"
+                  placeholder="Type (Est. B2B, New B2C, etc)"
                   className="w-50"
                 />
                 <Minus className="mt-2.5 w-2" />
@@ -148,7 +148,7 @@ export function LeadForm({ resetTrigger, inboundPhone }: LeadFormProps) {
               <div className="flex">
                 <FieldInput 
                   field="billboardPurpose" 
-                  placeholder="Goal"
+                  placeholder="Goal (Hiring, Event, Brand Awareness, etc)"
                   className="flex-[2]"
                 />
                 <Minus className="mt-2.5 w-2" />
@@ -286,7 +286,7 @@ export function LeadForm({ resetTrigger, inboundPhone }: LeadFormProps) {
       </div>
 
       {/* Market Tabs */}
-      <div className="flex flex-wrap gap-1 mt-0 ml-172">
+      <div className="flex flex-wrap gap-1 mt-0 ml-172 lg:ml-113">
         <button
           onClick={() => setActiveMarketIndex(0)}
           className={`inline-block border-2 ${

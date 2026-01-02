@@ -529,7 +529,7 @@ export const BoardTypeButtonGroup = memo(function BoardTypeButtonGroup({
           <button
             key={option.value}
             onClick={() => handleClick(option.value)}
-            className={`font-bold border-2 rounded transition-colors px-2.5 py-1.5 text-md flex-1 ${bgClass}`}
+            className={`font-bold border-2 rounded transition-colors px-2.5 py-1.5 text-md xl:text-sm flex-1 ${bgClass}`}
           >
             {option.label}
           </button>
@@ -611,7 +611,7 @@ export const DurationButtonGroup = memo(function DurationButtonGroup({
           <div key={option.value} className="flex flex-col items-center">
             <button
               onClick={() => handleClick(option.value)}
-              className={`font-bold border-2 rounded transition-colors px-2.5 py-1.5 text-sm min-w-[48px] ${bgClass}`}
+              className={`font-bold border-2 rounded transition-colors px-2.5 py-1.5 text-sm text-nowrap lg:text-xs ${bgClass}`}
             >
               {option.label}
             </button>

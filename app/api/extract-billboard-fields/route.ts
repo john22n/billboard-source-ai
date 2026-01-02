@@ -3,16 +3,39 @@ import { openai } from "@ai-sdk/openai";
 import { streamObject } from "ai";
 import { z } from "zod";
 import { getSession } from "@/lib/auth";
-import { LeadSentiment } from "@/types/sales-call";
+import { LeadSentiment, LeadType, BillboardPurpose } from "@/types/sales-call";
+
+// LeadType enum values for schema
+const LEAD_TYPE_VALUES = [
+  LeadType.ESTABLISHED_B2B,
+  LeadType.ESTABLISHED_B2C,
+  LeadType.NEW_B2B,
+  LeadType.NEW_B2C,
+  LeadType.NON_PROFIT,
+  LeadType.POLITICAL,
+  LeadType.PERSONAL,
+] as const;
+
+// BillboardPurpose enum values for schema
+const BILLBOARD_PURPOSE_VALUES = [
+  BillboardPurpose.DIRECTIONAL,
+  BillboardPurpose.ENROLLMENT,
+  BillboardPurpose.EVENT,
+  BillboardPurpose.GENERAL_BRAND_AWARENESS,
+  BillboardPurpose.HIRING,
+  BillboardPurpose.NEW_LOCATION,
+  BillboardPurpose.NEW_PRODUCT_SERVICE,
+  BillboardPurpose.POLITICAL,
+] as const;
 
 const billboardLeadSchema = z.object({
   // Lead classification - USING ENUM for better accuracy
   leadType: z.enum([LeadSentiment.AVAILER, LeadSentiment.PANEL_REQUESTER, LeadSentiment.TIRE_KICKER]).nullable()
     .describe("Lead sentiment: 'Availer' (wants availability/ready to move forward), 'Panel Requester' (wants specific panel details), 'Tire Kicker' (low intent/just browsing)"),
   
-  // What do you want to advertise? (3 parts)
-  typeName: z.string().nullable()
-    .describe("Type - FREE TEXT field, not enum. Common values: 'Business', 'Political', 'Nonprofit', 'Personal' but accept any input"),
+  // What do you want to advertise? (3 parts) - typeName uses LeadType enum
+  typeName: z.enum(LEAD_TYPE_VALUES).nullable()
+    .describe("Business type classification based on conversation context. Must be one of: 'Established B2B' (existing business selling to other businesses), 'Established B2C' (existing business selling to consumers), 'New B2B' (new/startup business selling to other businesses), 'New B2C' (new/startup business selling to consumers), 'Non-Profit' (charitable/501c3 organizations), 'Political' (campaigns, PACs, political ads), 'Personal' (individual selling personal items/services)"),
   businessName: z.string().nullable()
     .describe("KIND field - Industry for business (e.g., 'HVAC'), office for political (e.g., 'Governor'), service area for nonprofit"),
   entityName: z.string().nullable()
@@ -25,8 +48,8 @@ const billboardLeadSchema = z.object({
     .describe("Details about previous billboard experience. If they answer 'N' (no), put 'None'. If 'Y' (yes), capture details like '10 years ago', 'Person hasn't but company has'. Never leave null if billboardsBeforeYN is filled."),
   
   // What do you need to accomplish? (form uses billboardPurpose, not accomplishGoal)
-  billboardPurpose: z.string().nullable()
-    .describe("Primary goal/purpose - examples: 'Brand awareness', 'Hiring', 'Event promotion', 'Grand opening', 'Drive traffic', 'Generate leads'"),
+  billboardPurpose: z.enum(BILLBOARD_PURPOSE_VALUES).nullable()
+    .describe("Primary billboard goal/purpose. Must be one of: 'Directional' (guide people to a location), 'Enrollment' (school/program signups), 'Event' (promote specific event), 'General Brand Awareness' (increase visibility/recognition), 'Hiring' (recruitment/job openings), 'New Location' (announce new store/office opening), 'New Product/Service' (launch new offering), 'Political' (campaign/political messaging)"),
   accomplishDetails: z.string().nullable()
     .describe("Additional details about what they need to accomplish beyond the main goal"),
   
@@ -119,18 +142,80 @@ IMPORTANT: Return the EXACT string value from the enum, not variations.
 
 === MODULE 1: BASIC INFORMATION ===
 
-WHAT DO YOU WANT TO ADVERTISE (3-part field):
+WHAT DO YOU WANT TO ADVERTISE - TYPE NAME (BUSINESS CLASSIFICATION ENUM):
 
-1. TYPE NAME (FREE TEXT - not restricted to enum):
-   Common values but accept ANY: "Business", "Political", "Nonprofit", "Personal"
-   
-   Context clues:
-   - "my company", "our business", "we sell" → "Business"
-   - "running for", "campaign", "elect" → "Political"
-   - "nonprofit", "charity", "501c3", "foundation" → "Nonprofit"
-   - "I'm selling my", "personal" → "Personal"
-   
-   IMPORTANT: This is a text input field, not a dropdown. Extract whatever makes sense.
+This field classifies the advertiser into one of 7 business categories. You MUST select exactly one of these values:
+
+1. "${LeadType.ESTABLISHED_B2B}" - Established Business-to-Business
+   - An EXISTING company (been around for a while, not new/startup) that sells to OTHER BUSINESSES
+   - Examples: Commercial HVAC company, wholesale distributor, industrial supplier, business software company, logistics/freight company, commercial contractor
+   - Listen for: "We've been in business for X years", "We service commercial clients", "Our customers are businesses", "B2B", "wholesale", "commercial accounts"
+   - Key indicators: Sells products/services to other companies, not consumers
+
+2. "${LeadType.ESTABLISHED_B2C}" - Established Business-to-Consumer
+   - An EXISTING company that sells directly to INDIVIDUAL CONSUMERS/the general public
+   - Examples: Restaurant chain, retail store, car dealership, law firm serving individuals, medical practice, home services (residential HVAC, plumbing), real estate agent
+   - Listen for: "We've been serving customers for years", "Our customers are homeowners", "retail", "consumer", "residential"
+   - Key indicators: Sells to individuals/families, not businesses
+
+3. "${LeadType.NEW_B2B}" - New Business-to-Business
+   - A NEW/STARTUP company (< 2 years, just launched, new venture) that sells to OTHER BUSINESSES
+   - Examples: New SaaS startup, new consulting firm, new commercial cleaning company, new B2B service provider
+   - Listen for: "We're a new company", "Just started", "Launching our business", "Startup", combined with mentions of business clients
+   - Key indicators: New + sells to businesses
+
+4. "${LeadType.NEW_B2C}" - New Business-to-Consumer
+   - A NEW/STARTUP company that sells directly to CONSUMERS
+   - Examples: New restaurant opening, new retail store, new salon, new consumer app, new residential service company
+   - Listen for: "Grand opening", "New location", "Just opened", "New business", combined with consumer/retail focus
+   - Key indicators: New + sells to consumers
+
+5. "${LeadType.NON_PROFIT}" - Non-Profit Organization
+   - Charitable organizations, 501(c)(3), foundations, churches, community organizations
+   - Examples: Food bank, animal shelter, hospital foundation, church, community center, advocacy group
+   - Listen for: "Non-profit", "Nonprofit", "501c3", "Charity", "Foundation", "We're a church", "Community organization", "Donations"
+   - Key indicators: Not selling products/services for profit, mission-driven
+
+6. "${LeadType.POLITICAL}" - Political
+   - Political campaigns, PACs, political advocacy, government agencies
+   - Examples: "Committee to Elect John Smith", political action committee, ballot measure campaign, political party
+   - Listen for: "Running for", "Campaign", "Elect", "Vote for", "PAC", "Political", office names like "Governor", "Mayor", "Senator", "City Council"
+   - Key indicators: Seeking votes/political support, election-related
+
+7. "${LeadType.PERSONAL}" - Personal
+   - Individual selling personal items or promoting themselves (not a business)
+   - Examples: Selling a house, selling a car, personal brand, individual artist, personal announcement
+   - Listen for: "I'm selling my...", "Personal", "My own...", not representing a business entity
+   - Key indicators: Individual person, not a company or organization
+
+CLASSIFICATION DECISION TREE:
+1. Is this political (campaign, election, PAC)? → "${LeadType.POLITICAL}"
+2. Is this a non-profit/charity/501c3? → "${LeadType.NON_PROFIT}"
+3. Is this a personal individual (not a business)? → "${LeadType.PERSONAL}"
+4. Is this a business? Continue...
+   a. Is it NEW (< 2 years, startup, just opened, grand opening)? 
+      - Sells to businesses? → "${LeadType.NEW_B2B}"
+      - Sells to consumers? → "${LeadType.NEW_B2C}"
+   b. Is it ESTABLISHED (been around, existing company)?
+      - Sells to businesses? → "${LeadType.ESTABLISHED_B2B}"
+      - Sells to consumers? → "${LeadType.ESTABLISHED_B2C}"
+
+B2B vs B2C DETERMINATION:
+- B2B (Business-to-Business): Customers are other businesses, commercial, wholesale, industrial, professional services to companies
+- B2C (Business-to-Consumer): Customers are individuals, retail, residential, consumer services, general public
+
+Common industry classifications:
+- HVAC: "Residential HVAC" → B2C, "Commercial HVAC" → B2B
+- Restaurant/Retail: Almost always B2C
+- Law Firm: Depends - "Personal injury" → B2C, "Corporate law" → B2B
+- Medical Practice: Usually B2C (serves patients/individuals)
+- Wholesale/Distribution: Usually B2B
+- Software: "Enterprise software" → B2B, "Consumer app" → B2C
+
+IMPORTANT: Return the EXACT enum value string. Listen carefully to determine:
+1. Whether they sell to businesses (B2B) or consumers (B2C)
+2. Whether they're new/startup or established
+3. Or if they're non-profit, political, or personal
 
 2. BUSINESS NAME (KIND - the subcategory):
    - Business: Industry/category → "HVAC", "Restaurant", "Law Firm", "Plumbing", "Retail Store"
@@ -161,23 +246,63 @@ BILLBOARD EXPERIENCE (CRITICAL - NEVER LEAVE DETAILS NULL):
   - User says "Yes, about 10 years ago" → billboardsBeforeYN: "Y", billboardsBeforeDetails: "10 years ago"
   - User says "No" → billboardsBeforeYN: "N", billboardsBeforeDetails: "None"
 
-BILLBOARD PURPOSE (CRITICAL - This is the goal field):
-- billboardPurpose: The PRIMARY purpose/goal - this is what the form calls it
-  
-  Common goals to extract:
-  * "Brand awareness" / "Get our name out there"
-  * "Hiring" / "Recruitment" / "Need employees"
-  * "Event promotion" / "Promote event"
-  * "Grand opening" / "New location"
-  * "Drive traffic" / "Get people in the door"
-  * "Generate leads"
-  * "Increase sales"
-  
-  Listen for phrases:
-  - "We want to...", "We need to...", "Looking to...", "Trying to..."
-  - "The goal is...", "We're hoping to..."
-  
-- accomplishDetails: Extra context about their goals
+BILLBOARD PURPOSE (CRITICAL - This is the goal field - ENUM VALUES):
+
+The billboardPurpose field classifies WHY the advertiser wants a billboard. You MUST select exactly one of these values:
+
+1. "${BillboardPurpose.DIRECTIONAL}" - Directional/Wayfinding
+   - Guide people to a physical location (exit here, turn left, X miles ahead)
+   - Examples: "We need to direct people off the highway to our store", "People can't find us", "We want to show people where to exit"
+   - Listen for: "directional", "wayfinding", "guide people", "show them where", "exit", "turn", "find us", "located at"
+
+2. "${BillboardPurpose.ENROLLMENT}" - Enrollment/Registration
+   - Drive signups for schools, programs, courses, memberships
+   - Examples: "Increase enrollment at our school", "Get students to register", "Promote our certification program"
+   - Listen for: "enrollment", "enroll", "register", "sign up", "students", "admissions", "school", "university", "program", "classes", "courses"
+
+3. "${BillboardPurpose.EVENT}" - Event Promotion
+   - Promote a specific event (concert, festival, sale, conference, fundraiser)
+   - Examples: "Promote our annual festival", "Advertise the concert", "Get people to our grand opening event"
+   - Listen for: "event", "concert", "festival", "show", "conference", "fair", "sale event", "fundraiser", "gala", "celebration", specific dates
+
+4. "${BillboardPurpose.GENERAL_BRAND_AWARENESS}" - General Brand Awareness
+   - Increase overall visibility and recognition (no specific call-to-action)
+   - Examples: "Get our name out there", "People should know who we are", "Build brand recognition"
+   - Listen for: "brand awareness", "get our name out", "visibility", "recognition", "top of mind", "people should know us", "general awareness", "branding"
+
+5. "${BillboardPurpose.HIRING}" - Hiring/Recruitment
+   - Recruit employees, attract job applicants
+   - Examples: "We need to hire more drivers", "Looking for employees", "Recruiting nurses"
+   - Listen for: "hiring", "recruiting", "employees", "workers", "staff", "job openings", "now hiring", "help wanted", "careers", "positions available"
+
+6. "${BillboardPurpose.NEW_LOCATION}" - New Location/Grand Opening
+   - Announce a new store, office, restaurant, or facility opening
+   - Examples: "We're opening a new location", "Grand opening next month", "New store in the area"
+   - Listen for: "new location", "grand opening", "now open", "coming soon", "opening", "new store", "new office", "new restaurant", "expanding to"
+
+7. "${BillboardPurpose.NEW_PRODUCT_SERVICE}" - New Product/Service Launch
+   - Promote a new product, service, or offering
+   - Examples: "Launching our new product line", "Introducing our new service", "New menu items"
+   - Listen for: "new product", "new service", "launching", "introducing", "new offering", "just released", "new line", "new menu"
+
+8. "${BillboardPurpose.POLITICAL}" - Political/Campaign
+   - Political campaigns, ballot measures, political advocacy
+   - Examples: "Vote for John Smith", "Support Proposition 5", "Campaign messaging"
+   - Listen for: "vote", "elect", "campaign", "political", "candidate", "proposition", "ballot", "PAC"
+
+CLASSIFICATION DECISION TREE FOR BILLBOARD PURPOSE:
+1. Are they running for office or promoting a political cause? → "${BillboardPurpose.POLITICAL}"
+2. Are they hiring/recruiting employees? → "${BillboardPurpose.HIRING}"
+3. Are they opening a new location/store? → "${BillboardPurpose.NEW_LOCATION}"
+4. Are they launching a new product/service? → "${BillboardPurpose.NEW_PRODUCT_SERVICE}"
+5. Are they promoting a specific event with a date? → "${BillboardPurpose.EVENT}"
+6. Are they trying to get enrollments/registrations? → "${BillboardPurpose.ENROLLMENT}"
+7. Are they helping people find their location (directions)? → "${BillboardPurpose.DIRECTIONAL}"
+8. Do they just want general visibility/branding? → "${BillboardPurpose.GENERAL_BRAND_AWARENESS}"
+
+IMPORTANT: If multiple purposes apply, choose the PRIMARY one. If someone says "We're opening a new location and want to hire staff", the primary purpose is likely "${BillboardPurpose.NEW_LOCATION}" - put hiring details in accomplishDetails.
+
+- accomplishDetails: Extra context about their goals that doesn't fit the primary purpose (e.g., secondary goals, specific details, timeline)
 
 WHO ARE YOU TRYING TO TARGET:
 - targetAudience: Listen for ANY mention of who they want to reach
@@ -197,6 +322,7 @@ OTHER ADVERTISING (CRITICAL - Never leave null if discussed):
 
 YEARS IN BUSINESS:
 - Can be exact ("5 years") or approximate ("over 10 years", "new business", "just started")
+- This also helps determine if they're ESTABLISHED vs NEW for the typeName field
 
 WEBSITE (CRITICAL - Use "No" when no website):
 - website: 
@@ -311,14 +437,16 @@ SEND OVER (CRITICAL - ARRAY, CAN BE MULTIPLE):
 3. Go back and infer implied information from context
 4. Pay special attention to:
    - leadType (MUST be exact enum value: "${LeadSentiment.AVAILER}", "${LeadSentiment.PANEL_REQUESTER}", or "${LeadSentiment.TIRE_KICKER}")
+   - typeName (MUST be exact enum value - classify the business type correctly)
+   - billboardPurpose (MUST be exact enum value - classify the primary goal correctly)
    - Duration mentions (ARRAY - can be multiple: ["3 Mo", "6 Mo"])
    - sendOver items (ARRAY - can be multiple: ["Avails", "Planning Rates"])
-   - billboardPurpose (what they want to accomplish - this is critical)
    - notes field (purpose recap and additional notes)
    - hasMediaExperience (never leave null if discussed - use "No" if not advertising)
    - website (use "No" if not mentioned or they don't have one)
    - billboardsBeforeDetails (MUST be "None" if they answer "N" to billboardsBeforeYN)
-5. Use exact string values for enums (leadType, decisionMaker, boardType)
+   - yearsInBusiness (helps determine Established vs New for typeName)
+5. Use exact string values for enums (leadType, typeName, billboardPurpose, decisionMaker, boardType)
 6. For multi-select fields (campaignLength, sendOver), include ALL relevant options
 7. Don't leave fields null if you can reasonably infer the answer or use "No"/"None"
 
@@ -329,6 +457,25 @@ Lead Type patterns (MUST use exact enum values):
 - "Tell me about the board on Main Street", "I saw panel #123" → "${LeadSentiment.PANEL_REQUESTER}"
 - "Just looking", "Just curious", "Maybe later" → "${LeadSentiment.TIRE_KICKER}"
 
+Business Type (typeName) patterns:
+- "We've been in business 20 years doing commercial HVAC" → "${LeadType.ESTABLISHED_B2B}"
+- "I own a restaurant that's been here 10 years" → "${LeadType.ESTABLISHED_B2C}"
+- "We're a new startup selling to businesses" → "${LeadType.NEW_B2B}"
+- "Grand opening of our new store next month" → "${LeadType.NEW_B2C}"
+- "We're a 501c3 food bank" → "${LeadType.NON_PROFIT}"
+- "I'm running for city council" → "${LeadType.POLITICAL}"
+- "I want to sell my house" → "${LeadType.PERSONAL}"
+
+Billboard Purpose (billboardPurpose) patterns:
+- "Help people find us off the highway" → "${BillboardPurpose.DIRECTIONAL}"
+- "Increase enrollment at our school" → "${BillboardPurpose.ENROLLMENT}"
+- "Promote our annual festival" → "${BillboardPurpose.EVENT}"
+- "Get our name out there", "Brand recognition" → "${BillboardPurpose.GENERAL_BRAND_AWARENESS}"
+- "We need to hire more drivers" → "${BillboardPurpose.HIRING}"
+- "Grand opening next month" → "${BillboardPurpose.NEW_LOCATION}"
+- "Launching our new product line" → "${BillboardPurpose.NEW_PRODUCT_SERVICE}"
+- "Vote for John Smith" → "${BillboardPurpose.POLITICAL}"
+
 Duration mentions (extract as ARRAY - can be multiple):
 - "for a few months" → ["3 Mo"]
 - "3 to 6 month range" → ["3 Mo", "6 Mo"] (BOTH)
@@ -336,12 +483,6 @@ Duration mentions (extract as ARRAY - can be multiple):
 - "maybe start with a month or try 3 months" → ["1 Mo", "3 Mo"] (BOTH)
 - "quarterly" → ["3 Mo"]
 - "looking at 1, 3, or 6 months" → ["1 Mo", "3 Mo", "6 Mo"] (ALL THREE)
-
-Purpose/goal patterns (goes in billboardPurpose field):
-- "we're trying to..." → extract the goal
-- "need to get..." → extract the goal
-- "looking to attract..." → might be targetAudience or billboardPurpose
-- "want people to..." → extract the goal
 
 Other advertising patterns (goes in hasMediaExperience as TEXT):
 - "We also run Facebook ads" → "Facebook ads"
@@ -370,6 +511,8 @@ Be thorough. Extract everything. Use exact field names and values.
 Fill in "No" or "None" for negative responses instead of leaving null.
 For multi-select fields, include ALL relevant options mentioned.
 For leadType, use the EXACT enum value: "${LeadSentiment.AVAILER}", "${LeadSentiment.PANEL_REQUESTER}", or "${LeadSentiment.TIRE_KICKER}".
+For typeName, use the EXACT enum value from LeadType - classify based on B2B/B2C and Established/New status.
+For billboardPurpose, use the EXACT enum value from BillboardPurpose - classify based on their primary advertising goal.
 Your goal is to fill out this form as completely as possible with data that matches the form's structure exactly.
 `;
 
