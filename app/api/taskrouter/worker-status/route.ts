@@ -61,7 +61,22 @@ export async function POST(req: Request) {
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const body = await req.json();
+    // Handle both JSON and text/plain (sendBeacon sends text/plain)
+    const contentType = req.headers.get('content-type') || '';
+    let body: { status?: string };
+    
+    if (contentType.includes('application/json')) {
+      body = await req.json();
+    } else {
+      // sendBeacon sends as text/plain
+      const text = await req.text();
+      try {
+        body = JSON.parse(text);
+      } catch {
+        return Response.json({ error: 'Invalid body' }, { status: 400 });
+      }
+    }
+    
     const newStatus = body.status as 'available' | 'unavailable' | 'offline';
 
     if (!['available', 'unavailable', 'offline'].includes(newStatus)) {

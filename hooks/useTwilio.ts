@@ -47,6 +47,11 @@ export function useTwilio(options: UseTwilioOptions = {}) {
       setDeviceError(null);
       setIsDestroyed(false);
 
+      // Request notification permission for incoming call alerts
+      if ('Notification' in window && Notification.permission === 'default') {
+        await Notification.requestPermission();
+      }
+
       console.log('═══════════════════════════════════════════');
       console.log('🚀 TWILIO INITIALIZATION STARTING');
       console.log('Environment:', process.env.NODE_ENV);
@@ -111,6 +116,26 @@ export function useTwilio(options: UseTwilioOptions = {}) {
 
         setIncomingCall(call);
         setStatus(`Incoming call from ${call.parameters.From}`);
+
+        // Show browser notification if tab is not focused
+        if (document.visibilityState === 'hidden' && Notification.permission === 'granted') {
+          const notification = new Notification('Incoming Call', {
+            body: `Call from ${call.parameters.From}`,
+            icon: '/favicon.ico',
+            tag: 'incoming-call',
+            requireInteraction: true,
+          });
+
+          notification.onclick = () => {
+            window.focus();
+            notification.close();
+          };
+
+          // Close notification when call ends
+          call.on('disconnect', () => notification.close());
+          call.on('cancel', () => notification.close());
+          call.on('reject', () => notification.close());
+        }
 
         call.on('disconnect', () => {
           console.log('📴 Call disconnected');
