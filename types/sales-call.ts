@@ -6,6 +6,7 @@ export interface TranscriptItem {
   text: string;
   isFinal: boolean;
   timestamp: number;
+  speaker?: 'agent' | 'caller';
 }
 
 export interface TwilioState {
