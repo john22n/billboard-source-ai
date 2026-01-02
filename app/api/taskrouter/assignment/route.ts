@@ -70,6 +70,12 @@ export async function POST(req: Request) {
     console.log('Call from:', taskAttrs.from);
     console.log('═══════════════════════════════════════════');
 
+    // Build status callback URL with task info
+    const url = new URL(req.url);
+    const appUrl = `${url.protocol}//${url.host}`;
+    const workspaceSid = formData.get('WorkspaceSid') as string;
+    const statusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
+
     // Dequeue instruction: redirects the call to the worker
     // This tells TaskRouter to connect the caller to the agent
     const instruction = {
@@ -78,6 +84,8 @@ export async function POST(req: Request) {
       from: process.env.TWILIO_MAIN_NUMBER || '+18338547126',
       post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
       timeout: 20,
+      status_callback_url: statusCallbackUrl,
+      status_callback_events: 'completed',
     };
 
     console.log('📞 Dequeue instruction:', instruction);
