@@ -85,7 +85,7 @@ export async function POST(req: Request) {
       post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
       timeout: 20,
       status_callback_url: statusCallback,
-      status_callback_events: ['completed', 'busy', 'failed', 'no-answer', 'canceled'],
+      status_callback_events: 'completed busy failed no-answer canceled',
     };
 
     console.log('📞 Dequeue instruction:', instruction);
