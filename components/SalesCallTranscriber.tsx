@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useBillboardFormExtraction } from "@/hooks/useBillboardFormExtraction";
-import { useTwilio } from "@/hooks/useTwilio";
+import { useTwilioContext } from "@/components/providers/TwilioProvider";
 import { useOpenAITranscription } from "@/hooks/useOpenAITranscription";
 import { LeadForm, PricingPanel, TranscriptView } from "@/components/sales-call";
 import type { TranscriptItem } from "@/types/sales-call";
@@ -77,13 +77,18 @@ export default function SalesCallTranscriber() {
     hangupCall,
     updateStatus,
     resetStatus,
-  } = useTwilio({
-    onCallAccepted: (call) => startTranscription(call),
-    onCallDisconnected: () => {
+    onCallAccepted,
+    onCallDisconnected,
+  } = useTwilioContext();
+
+  // Register callbacks for call events
+  useEffect(() => {
+    onCallAccepted((call) => startTranscription(call));
+    onCallDisconnected(() => {
       stopTranscription();
       resetStatus();
-    },
-  });
+    });
+  }, [onCallAccepted, onCallDisconnected, startTranscription, stopTranscription, resetStatus]);
 
   // Billboard form extraction hook
   const {
