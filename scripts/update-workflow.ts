@@ -28,7 +28,7 @@ async function updateWorkflow() {
     throw new Error('Required queues not found');
   }
 
-  // Restored workflow config with skip_if (original working version)
+  // Updated workflow config without skip_if
   const workflowConfig = {
     task_routing: {
       filters: [
@@ -38,13 +38,11 @@ async function updateWorkflow() {
           targets: [
             {
               queue: salesQueue.sid,
-              timeout: 20,
-              skip_if: 'workers.available == 0',
+              timeout: 30, // 30 seconds for first attempt
             },
             {
               queue: salesQueue.sid,
-              timeout: 20,
-              skip_if: 'workers.available == 0',
+              timeout: 30, // 30 seconds for second attempt  
             },
             {
               queue: voicemailQueue.sid, // Fallback to voicemail

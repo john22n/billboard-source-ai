@@ -38,10 +38,7 @@ export async function POST(req: Request) {
 
       if (!isValid) {
         console.error('❌ Invalid Twilio signature');
-        console.error('URL used for validation:', webhookUrl);
-        console.error('Signature received:', twilioSignature);
-        // Don't block - signature validation often fails with Vercel/proxies
-        // return new Response('Forbidden', { status: 403 });
+        return new Response('Forbidden', { status: 403 });
       }
     } else {
       console.warn('⚠️ TWILIO_AUTH_TOKEN not set - skipping signature validation');
