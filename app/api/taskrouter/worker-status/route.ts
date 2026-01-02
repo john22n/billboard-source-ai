@@ -83,6 +83,9 @@ export async function POST(req: Request) {
       return Response.json({ error: 'Invalid status' }, { status: 400 });
     }
 
+    // Always-available workers that should never go offline
+    const ALWAYS_AVAILABLE_EMAILS = ['tech@billboardsource.com'];
+
     const currentUser = await db
       .select({
         id: user.id,
@@ -99,6 +102,13 @@ export async function POST(req: Request) {
       return Response.json({ error: 'User not found' }, { status: 404 });
     }
 
+    // Force always-available workers to stay available
+    let effectiveStatus = newStatus;
+    if (ALWAYS_AVAILABLE_EMAILS.includes(currentUser.email) && newStatus !== 'available') {
+      console.log(`⚠️ ${currentUser.email} is always-available, keeping status as 'available'`);
+      effectiveStatus = 'available';
+    }
+
     let workerSid = currentUser.taskRouterWorkerSid;
 
     // Create worker if doesn't exist
@@ -109,7 +119,7 @@ export async function POST(req: Request) {
         .workspaces(WORKSPACE_SID)
         .workers.create({
           friendlyName: currentUser.email,
-          activitySid: ACTIVITY_SIDS[newStatus],
+          activitySid: ACTIVITY_SIDS[effectiveStatus],
           attributes: JSON.stringify({
             email: currentUser.email,
             contact_uri: `client:${currentUser.email}`,
@@ -127,24 +137,24 @@ export async function POST(req: Request) {
         .workspaces(WORKSPACE_SID)
         .workers(workerSid)
         .update({
-          activitySid: ACTIVITY_SIDS[newStatus],
+          activitySid: ACTIVITY_SIDS[effectiveStatus],
         });
 
-      console.log(`✅ Worker ${currentUser.email} status updated to: ${newStatus}`);
+      console.log(`✅ Worker ${currentUser.email} status updated to: ${effectiveStatus}`);
     }
 
     // Update database
     await db
       .update(user)
       .set({
-        workerActivity: newStatus,
+        workerActivity: effectiveStatus,
         taskRouterWorkerSid: workerSid,
       })
       .where(eq(user.id, currentUser.id));
 
     return Response.json({
       success: true,
-      status: newStatus,
+      status: effectiveStatus,
       workerSid,
     });
   } catch (error) {
