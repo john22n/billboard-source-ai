@@ -78,7 +78,7 @@ export function LeadForm({ resetTrigger, inboundPhone }: LeadFormProps) {
   const canAddMoreContacts = additionalContacts.length < MAX_ADDITIONAL_CONTACTS;
 
   return (
-    <div className="lg:flex-[2] space-y-0 px-0.75 py-0.75 overflow-y-auto h-relative">
+    <div className="lg:flex-[2] space-y-0 px-0.75 py-0.75 overflow-y-auto h-full min-h-0">
       {/* INTRO Section */}
       <div className="mb-0">
         <span className="inline-block bg-white border-2 border-b-0 border-black px-3.5 py-1.5 shadow-sm shadow-black text-md font-bold rounded-t-md">
@@ -286,7 +286,7 @@ export function LeadForm({ resetTrigger, inboundPhone }: LeadFormProps) {
       </div>
 
       {/* Market Tabs */}
-      <div className="flex flex-wrap gap-1 mt-0 ml-172 lg:ml-113">
+      <div className="flex flex-wrap gap-1 mt-0 ml-172">
         <button
           onClick={() => setActiveMarketIndex(0)}
           className={`inline-block border-2 ${

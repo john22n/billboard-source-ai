@@ -287,7 +287,7 @@ export default function SalesCallTranscriber() {
   // ✅ PricingPanel will subscribe to fields directly, no need to pass them
 
   return (
-    <div className="h-full overflow-hidden">
+    <div className="h-full overflow-hidden ">
       <div className="h-full max-w-[1800px] mx-auto flex flex-col">
         <Card className="shadow-2xl border-0 overflow-hidden flex flex-col h-full py-1">
           {/* Header */}
