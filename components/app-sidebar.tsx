@@ -1,5 +1,6 @@
 "use client"
 import * as React from "react"
+import dynamic from "next/dynamic"
 import { BrainCircuit } from 'lucide-react'
 import {
   IconCamera,
@@ -9,7 +10,6 @@ import {
 import { NavDocuments } from "@/components/nav-documents"
 import { NavMain } from "@/components/nav-main"
 import { NavSecondary } from "@/components/nav-secondary"
-import { NavUser } from "@/components/nav-user"
 import {
   Sidebar,
   SidebarContent,
@@ -20,6 +20,12 @@ import {
   SidebarMenuItem,
   SidebarSeparator,
 } from "@/components/ui/sidebar"
+
+// Dynamic import to prevent hydration mismatch from Radix DropdownMenu
+const NavUser = dynamic(
+  () => import("@/components/nav-user").then(mod => ({ default: mod.NavUser })),
+  { ssr: false }
+)
 
 const data = {
   navMain: [],

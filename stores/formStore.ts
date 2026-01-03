@@ -369,15 +369,21 @@ export const useFormStore = create<FormStore>()((set, get) => ({
     setTwilioPhonePreFilled: (value) => set({ twilioPhonePreFilled: value }),
     
     prefillPhoneFromTwilio: (phone) => {
-      const { fields, userEditedFields } = get();
-      // Only prefill if phone hasn't been edited and is empty
-      if (!userEditedFields.has('phone') && !fields.phone) {
-        set({
-          fields: { ...fields, phone },
-          twilioPhone: phone,
-          twilioPhonePreFilled: true,
-        });
-      }
+    const { fields, userEditedFields } = get();
+    // Only prefill if phone hasn't been edited and is empty
+    if (!userEditedFields.has('phone') && !fields.phone) {
+      // Normalize: strip +1 country code and format as (XXX) XXX-XXXX
+    const digits = phone.replace(/^\+1/, '').replace(/\D/g, '');
+    const formatted = digits.length === 10 
+      ? `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`
+      : digits; // Fallback to just digits if not 10 digits
+    
+    set({
+      fields: { ...fields, phone: formatted },
+      twilioPhone: formatted,
+      twilioPhonePreFilled: true,
+      });
+     }
     },
 
     // ✅ Ballpark
