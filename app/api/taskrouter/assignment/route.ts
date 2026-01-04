@@ -8,6 +8,10 @@
 import twilio from 'twilio';
 
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
+const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
+const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
+
+const twilioClient = twilio(ACCOUNT_SID, AUTH_TOKEN);
 
 export async function POST(req: Request) {
   try {
@@ -77,19 +81,46 @@ export async function POST(req: Request) {
 
     // Check if this is the voicemail worker
     if (workerAttrs.email === 'voicemail@system') {
-      console.log('📼 Voicemail worker - dequeuing to voicemail number');
+      console.log('📼 Voicemail worker - redirecting call to voicemail TwiML');
       
-      // Dequeue to the voicemail phone number which is configured to play voicemail TwiML
-      const voicemailNumber = process.env.TWILIO_VOICEMAIL_NUMBER || '+17123773679';
+      // Get the call_sid from task attributes to redirect the original call
+      const callSid = taskAttrs.call_sid;
+      
+      // Build voicemail URL with task context
+      const voicemailUrl = `${appUrl}/api/taskrouter/voicemail?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
+      
+      // Cancel the task immediately since voicemail doesn't need ongoing task tracking
+      // This frees up the voicemail worker for the next call
+      try {
+        await twilioClient.taskrouter.v1
+          .workspaces(workspaceSid)
+          .tasks(taskSid)
+          .update({
+            assignmentStatus: 'canceled',
+            reason: 'Redirected to voicemail',
+          });
+        console.log('✅ Voicemail task canceled');
+        
+        // Set voicemail worker back to Available
+        const availableActivitySid = process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID;
+        if (availableActivitySid && workerSid) {
+          await twilioClient.taskrouter.v1
+            .workspaces(workspaceSid)
+            .workers(workerSid)
+            .update({ activitySid: availableActivitySid });
+          console.log('✅ Voicemail worker set back to Available');
+        }
+      } catch (err) {
+        console.error('❌ Failed to cancel voicemail task:', err);
+      }
       
       const instruction = {
-        instruction: 'dequeue',
-        to: voicemailNumber,
-        from: process.env.TWILIO_MAIN_NUMBER || '+18338547126',
-        timeout: 30,
+        instruction: 'redirect',
+        call_sid: callSid,
+        url: voicemailUrl,
       };
       
-      console.log('📼 Dequeue to voicemail instruction:', instruction);
+      console.log('📼 Redirect to voicemail instruction:', instruction);
       return Response.json(instruction);
     }
 
