@@ -100,19 +100,20 @@ export async function POST(req: Request) {
       primary_owner: clientIdentity,
     });
 
-    // Build action URL - called when Enqueue ends for any reason
+    // Build voicemail fallback URL
     const reqUrl = new URL(req.url);
     const appUrl = `${reqUrl.protocol}//${reqUrl.host}`;
-    const enqueueActionUrl = `${appUrl}/api/taskrouter/enqueue-complete`;
+    const voicemailUrl = `${appUrl}/api/taskrouter/voicemail`;
 
     // Enqueue call into TaskRouter workflow
     // TaskRouter will route to available workers
-    // The action URL is called when Enqueue ends (timeout, canceled, no workers, etc.)
+    // If Enqueue ends without connecting (caller hangs up), fall through to voicemail
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Enqueue action="${enqueueActionUrl}" method="POST" workflowSid="${WORKFLOW_SID}">
+  <Enqueue workflowSid="${WORKFLOW_SID}">
     <Task>${taskAttributes}</Task>
   </Enqueue>
+  <Redirect method="POST">${voicemailUrl}</Redirect>
 </Response>`;
 
     return new Response(twiml, {
