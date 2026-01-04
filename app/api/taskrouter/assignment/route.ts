@@ -81,13 +81,21 @@ export async function POST(req: Request) {
 
       const voicemailUrl = `${appUrl}/api/taskrouter/voicemail?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
 
+      // call_sid is required for redirect instruction
+      const callSid = taskAttrs.call_sid;
+      if (!callSid) {
+        console.error('❌ No call_sid in task attributes - cannot redirect');
+        return Response.json({ instruction: 'reject' });
+      }
+
       // Use TaskRouter's redirect instruction - this properly:
       // 1. Redirects the call to voicemail TwiML
       // 2. Completes the reservation
       // 3. Pulls the call out of the Enqueue cleanly
       const instruction = {
         instruction: 'redirect',
-        call_url: voicemailUrl,
+        call_sid: callSid,
+        url: voicemailUrl,
         post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
       };
 
