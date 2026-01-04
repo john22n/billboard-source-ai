@@ -100,17 +100,19 @@ export async function POST(req: Request) {
       primary_owner: clientIdentity,
     });
 
-    // Build the action URL for when Enqueue ends
+    // Build URLs for Enqueue
     const url = new URL(req.url);
     const appUrl = `${url.protocol}//${url.host}`;
     const enqueueActionUrl = `${appUrl}/api/taskrouter/enqueue-complete`;
+    const waitUrl = `${appUrl}/api/taskrouter/wait`;
 
     // Enqueue call into TaskRouter workflow
-    // action attribute: called when Enqueue ends (bridged, hangup, leave, error)
+    // - action: called when Enqueue ends (bridged, hangup, leave, error)
+    // - waitUrl: plays hold music while waiting for worker
     // If not bridged, enqueue-complete will redirect to voicemail
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Enqueue workflowSid="${WORKFLOW_SID}" action="${enqueueActionUrl}" method="POST">
+  <Enqueue workflowSid="${WORKFLOW_SID}" action="${enqueueActionUrl}" method="POST" waitUrl="${waitUrl}" waitUrlMethod="POST">
     <Task>${taskAttributes}</Task>
   </Enqueue>
 </Response>`;
