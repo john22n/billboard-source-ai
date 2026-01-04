@@ -84,6 +84,24 @@ export async function POST(req: Request) {
         return new Response(null, { status: 204 });
       }
 
+      // Cancel the task FIRST to prevent re-enqueue loop
+      // When we redirect the call, it leaves the Enqueue which can trigger
+      // the Voice URL again. Canceling the task first breaks this cycle.
+      if (taskSid && workspaceSid) {
+        try {
+          await client.taskrouter.v1
+            .workspaces(workspaceSid)
+            .tasks(taskSid)
+            .update({
+              assignmentStatus: 'canceled',
+              reason: 'Routing to voicemail',
+            });
+          console.log('✅ Task canceled before voicemail redirect');
+        } catch (err) {
+          console.error('Failed to cancel task:', err);
+        }
+      }
+
       // Redirect the call to voicemail
       const appUrl = getAppUrl(req);
       const voicemailUrl = `${appUrl}/api/taskrouter/voicemail?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
