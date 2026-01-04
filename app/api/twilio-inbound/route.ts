@@ -103,11 +103,13 @@ export async function POST(req: Request) {
     // Enqueue call into TaskRouter workflow
     // TaskRouter will route to available workers
     // Voicemail redirect is handled by events callback when task enters Voicemail queue
+    // The <Hangup> prevents Twilio from retrying the Voice URL if Enqueue ends unexpectedly
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Enqueue workflowSid="${WORKFLOW_SID}">
     <Task>${taskAttributes}</Task>
   </Enqueue>
+  <Hangup/>
 </Response>`;
 
     return new Response(twiml, {
