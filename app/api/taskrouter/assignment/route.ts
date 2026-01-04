@@ -77,16 +77,19 @@ export async function POST(req: Request) {
 
     // Check if this is the voicemail worker
     if (workerAttrs.email === 'voicemail@system') {
-      console.log('📼 Voicemail worker - redirecting to voicemail');
-      const voicemailUrl = `${appUrl}/api/taskrouter/voicemail?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
+      console.log('📼 Voicemail worker - dequeuing to voicemail number');
+      
+      // Dequeue to the voicemail phone number which is configured to play voicemail TwiML
+      const voicemailNumber = process.env.TWILIO_VOICEMAIL_NUMBER || '+17123773679';
       
       const instruction = {
-        instruction: 'redirect',
-        call_sid: taskAttrs.call_sid,
-        url: voicemailUrl,
+        instruction: 'dequeue',
+        to: voicemailNumber,
+        from: process.env.TWILIO_MAIN_NUMBER || '+18338547126',
+        timeout: 30,
       };
       
-      console.log('📼 Redirect instruction:', instruction);
+      console.log('📼 Dequeue to voicemail instruction:', instruction);
       return Response.json(instruction);
     }
 
