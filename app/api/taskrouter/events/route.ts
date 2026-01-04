@@ -68,10 +68,35 @@ export async function POST(req: Request) {
     }
 
     // Handle task entering Voicemail queue
-    // Cancel the task to end the Enqueue - the <Redirect> in twilio-inbound will handle voicemail
+    // Redirect the call to voicemail and cancel the task
     if (eventType === 'task-queue.entered' && taskQueueName === 'Voicemail') {
-      console.log('📨 Task entered Voicemail queue - canceling task to trigger voicemail redirect');
+      console.log('📨 Task entered Voicemail queue - redirecting call to voicemail');
 
+      let attrs: { call_sid?: string } = {};
+      try {
+        attrs = JSON.parse(taskAttributes || '{}');
+      } catch {
+        console.error('Failed to parse task attributes');
+      }
+
+      const callSid = attrs.call_sid;
+      if (callSid) {
+        try {
+          // Redirect the call to voicemail
+          const appUrl = getAppUrl(req);
+          const voicemailUrl = `${appUrl}/api/taskrouter/voicemail?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
+
+          await client.calls(callSid).update({
+            method: 'POST',
+            url: voicemailUrl,
+          });
+          console.log('✅ Call redirected to voicemail');
+        } catch (err) {
+          console.error('Failed to redirect call:', err);
+        }
+      }
+
+      // Cancel the task
       if (taskSid && workspaceSid) {
         try {
           await client.taskrouter.v1
@@ -81,7 +106,7 @@ export async function POST(req: Request) {
               assignmentStatus: 'canceled',
               reason: 'Routing to voicemail',
             });
-          console.log('✅ Task canceled - Enqueue will end and Redirect to voicemail');
+          console.log('✅ Task canceled');
         } catch (err) {
           console.error('Failed to cancel task:', err);
         }
