@@ -96,6 +96,7 @@ export async function POST(req: Request) {
         instruction: 'redirect',
         call_sid: callSid,
         url: voicemailUrl,
+        accept: true,
         post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
       };
 

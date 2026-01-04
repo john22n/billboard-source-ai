@@ -61,11 +61,10 @@ export async function POST(req: Request) {
 
     if (queueResult === 'redirected') {
       // Call was redirected via assignment instruction (e.g., to voicemail)
-      console.log('📨 Call was redirected via assignment - no action needed');
+      // Return empty response - the redirect instruction already handled the call
+      console.log('📨 Call was redirected via assignment - returning empty response');
       const twiml = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Hangup/>
-</Response>`;
+<Response/>`;
       return new Response(twiml, {
         status: 200,
         headers: { 'Content-Type': 'text/xml' },
