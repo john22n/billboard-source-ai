@@ -21,7 +21,7 @@ export async function POST(req: Request) {
     console.log('═══════════════════════════════════════════');
     console.log('📞 ENQUEUE COMPLETE');
     console.log('═══════════════════════════════════════════');
-    console.log('QueueResult:', queueResult);
+    console.log('QueueResult:', queueResult, '(type:', typeof queueResult, ')');
     console.log('QueueSid:', queueSid);
     console.log('QueueTime:', queueTime, 'seconds');
     console.log('DequeingCallSid:', dequeuedCallSid || 'N/A');
@@ -59,14 +59,7 @@ export async function POST(req: Request) {
       });
     }
 
-    if (queueResult === 'leave') {
-      // Call was redirected elsewhere (e.g., by events route to voicemail)
-      // Don't return any TwiML - let the redirect handle it
-      console.log('📞 Call left queue (redirected elsewhere)');
-      return new Response(null, { status: 204 });
-    }
-
-    // For "error" or unknown - redirect to voicemail
+    // For "leave", "error", or unknown - redirect to voicemail
     console.log('📨 Redirecting to voicemail');
     const url = new URL(req.url);
     const appUrl = `${url.protocol}//${url.host}`;

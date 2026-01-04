@@ -17,8 +17,11 @@ export async function POST(req: Request) {
     console.log('TaskSid:', taskSid);
     console.log('WorkspaceSid:', workspaceSid);
 
-    const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-    const actionUrl = `${APP_URL}/api/taskrouter/voicemail-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
+    // Build action URL from request to ensure correct host
+    const reqUrl = new URL(req.url);
+    const appUrl = `${reqUrl.protocol}//${reqUrl.host}`;
+    const actionUrl = `${appUrl}/api/taskrouter/voicemail-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
+    console.log('ActionUrl:', actionUrl);
 
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>

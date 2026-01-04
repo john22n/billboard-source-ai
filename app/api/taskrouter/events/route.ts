@@ -68,35 +68,10 @@ export async function POST(req: Request) {
     }
 
     // Handle task entering Voicemail queue
-    // Redirect the call to voicemail and cancel the task
+    // Cancel the task to end the Enqueue - the action URL will redirect to voicemail
     if (eventType === 'task-queue.entered' && taskQueueName === 'Voicemail') {
-      console.log('📨 Task entered Voicemail queue - redirecting call to voicemail');
+      console.log('📨 Task entered Voicemail queue - canceling task to trigger Enqueue action');
 
-      let attrs: { call_sid?: string } = {};
-      try {
-        attrs = JSON.parse(taskAttributes || '{}');
-      } catch {
-        console.error('Failed to parse task attributes');
-      }
-
-      const callSid = attrs.call_sid;
-      if (callSid) {
-        try {
-          // Redirect the call to voicemail
-          const appUrl = getAppUrl(req);
-          const voicemailUrl = `${appUrl}/api/taskrouter/voicemail?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
-
-          await client.calls(callSid).update({
-            method: 'POST',
-            url: voicemailUrl,
-          });
-          console.log('✅ Call redirected to voicemail');
-        } catch (err) {
-          console.error('Failed to redirect call:', err);
-        }
-      }
-
-      // Cancel the task
       if (taskSid && workspaceSid) {
         try {
           await client.taskrouter.v1
@@ -108,7 +83,8 @@ export async function POST(req: Request) {
             });
           console.log('✅ Task canceled');
         } catch (err) {
-          console.error('Failed to cancel task:', err);
+          // Task might already be canceled - that's OK
+          console.log('Task cancel attempt:', err instanceof Error ? err.message : err);
         }
       }
     }
