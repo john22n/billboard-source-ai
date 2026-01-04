@@ -81,10 +81,26 @@ export async function POST(req: Request) {
 
     // Check if this is the voicemail worker
     if (workerAttrs.email === 'voicemail@system') {
-      console.log('📼 Voicemail worker assigned - canceling task to trigger enqueue-complete');
+      console.log('📼 Voicemail worker assigned - redirecting to voicemail');
       
-      // Cancel the task - this will end the Enqueue and trigger enqueue-complete
-      // enqueue-complete will then redirect to voicemail
+      const callSid = taskAttrs.call_sid;
+      const voicemailUrl = `${appUrl}/api/taskrouter/voicemail?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
+      
+      // Redirect the call via API - this pulls it out of the Enqueue immediately
+      // The Enqueue action attribute will handle cleanup (returns Hangup since call already redirected)
+      if (callSid) {
+        try {
+          await twilioClient.calls(callSid).update({
+            url: voicemailUrl,
+            method: 'POST',
+          });
+          console.log('✅ Call redirected to voicemail');
+        } catch (err) {
+          console.error('❌ Failed to redirect call:', err);
+        }
+      }
+      
+      // Cancel the task and free the worker
       try {
         await twilioClient.taskrouter.v1
           .workspaces(workspaceSid)
@@ -108,7 +124,6 @@ export async function POST(req: Request) {
         console.error('❌ Failed to cancel voicemail task:', err);
       }
       
-      // Return reject to complete the reservation (task already canceled)
       return Response.json({ instruction: 'reject' });
     }
 
