@@ -59,6 +59,19 @@ export async function POST(req: Request) {
       });
     }
 
+    if (queueResult === 'redirected') {
+      // Call was redirected via assignment instruction (e.g., to voicemail)
+      console.log('📨 Call was redirected via assignment - no action needed');
+      const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Hangup/>
+</Response>`;
+      return new Response(twiml, {
+        status: 200,
+        headers: { 'Content-Type': 'text/xml' },
+      });
+    }
+
     // For "leave", "error", or unknown - redirect to voicemail
     console.log('📨 Redirecting to voicemail');
     const url = new URL(req.url);

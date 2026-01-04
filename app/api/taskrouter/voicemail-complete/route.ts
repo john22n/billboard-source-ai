@@ -38,7 +38,8 @@ export async function POST(req: Request) {
     console.log('Transcription:', transcriptionText || '(pending)');
     console.log('═══════════════════════════════════════════');
 
-    // Update task attributes with voicemail info and cancel it
+    // Update task attributes with voicemail info and complete/cancel it
+    // Note: Reservation was already completed by the redirect instruction
     if (taskSid && workspaceSid) {
       try {
         const task = await client.taskrouter.v1
@@ -68,35 +69,17 @@ export async function POST(req: Request) {
           },
         };
 
-        const reservations = await client.taskrouter.v1
-          .workspaces(workspaceSid)
-          .tasks(taskSid)
-          .reservations
-          .list({ limit: 1 });
-
-        if (reservations.length > 0) {
-          await client.taskrouter.v1
-          .workspaces(workspaceSid)
-          .tasks(taskSid)
-          .reservations(reservations[0].sid)
-          .update({
-            reservationStatus: 'completed',
-          });
-
-          console.log('✅ Reservation completed');
-        }
-
-        // Update and cancel the task
+        // Update attributes and mark task as completed
         await client.taskrouter.v1
           .workspaces(workspaceSid)
           .tasks(taskSid)
           .update({
             attributes: JSON.stringify(updatedAttributes),
-            assignmentStatus: 'canceled',
-            reason: 'Voicemail left',
+            assignmentStatus: 'completed',
+            reason: 'Voicemail recorded',
           });
 
-        console.log('✅ Task updated and canceled');
+        console.log('✅ Task updated and completed');
       } catch (error) {
         console.error('❌ Failed to update task:', error);
       }

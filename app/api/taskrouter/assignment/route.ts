@@ -8,10 +8,6 @@
 import twilio from 'twilio';
 
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
-const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
-const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
-
-const twilioClient = twilio(ACCOUNT_SID, AUTH_TOKEN);
 
 export async function POST(req: Request) {
   try {
@@ -81,50 +77,22 @@ export async function POST(req: Request) {
 
     // Check if this is the voicemail worker
     if (workerAttrs.email === 'voicemail@system') {
-      console.log('📼 Voicemail worker assigned - redirecting to voicemail');
-      
-      const callSid = taskAttrs.call_sid;
+      console.log('📼 Voicemail worker assigned - using redirect instruction');
+
       const voicemailUrl = `${appUrl}/api/taskrouter/voicemail?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
-      
-      // Redirect the call via API - this pulls it out of the Enqueue immediately
-      // The Enqueue action attribute will handle cleanup (returns Hangup since call already redirected)
-      if (callSid) {
-        try {
-          await twilioClient.calls(callSid).update({
-            url: voicemailUrl,
-            method: 'POST',
-          });
-          console.log('✅ Call redirected to voicemail');
-        } catch (err) {
-          console.error('❌ Failed to redirect call:', err);
-        }
-      }
-      
-      // Cancel the task and free the worker
-      try {
-        await twilioClient.taskrouter.v1
-          .workspaces(workspaceSid)
-          .tasks(taskSid)
-          .update({
-            assignmentStatus: 'canceled',
-            reason: 'Routed to voicemail',
-          });
-        console.log('✅ Voicemail task canceled');
-        
-        // Set voicemail worker back to Available
-        const availableActivitySid = process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID;
-        if (availableActivitySid && workerSid) {
-          await twilioClient.taskrouter.v1
-            .workspaces(workspaceSid)
-            .workers(workerSid)
-            .update({ activitySid: availableActivitySid });
-          console.log('✅ Voicemail worker set back to Available');
-        }
-      } catch (err) {
-        console.error('❌ Failed to cancel voicemail task:', err);
-      }
-      
-      return Response.json({ instruction: 'reject' });
+
+      // Use TaskRouter's redirect instruction - this properly:
+      // 1. Redirects the call to voicemail TwiML
+      // 2. Completes the reservation
+      // 3. Pulls the call out of the Enqueue cleanly
+      const instruction = {
+        instruction: 'redirect',
+        call_url: voicemailUrl,
+        post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
+      };
+
+      console.log('📞 Redirect instruction:', instruction);
+      return Response.json(instruction);
     }
 
     // Normal worker - dequeue to connect the call
