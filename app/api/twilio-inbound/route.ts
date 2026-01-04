@@ -100,13 +100,20 @@ export async function POST(req: Request) {
       primary_owner: clientIdentity,
     });
 
+    // Build voicemail fallback URL
+    const reqUrl = new URL(req.url);
+    const appUrl = `${reqUrl.protocol}//${reqUrl.host}`;
+    const voicemailUrl = `${appUrl}/api/taskrouter/voicemail`;
+
     // Enqueue call into TaskRouter workflow
     // TaskRouter will route to available workers and fall back to voicemail
+    // The <Redirect> after Enqueue catches cases where Enqueue ends without connecting
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Enqueue workflowSid="${WORKFLOW_SID}">
     <Task>${taskAttributes}</Task>
   </Enqueue>
+  <Redirect method="POST">${voicemailUrl}</Redirect>
 </Response>`;
 
     return new Response(twiml, {
