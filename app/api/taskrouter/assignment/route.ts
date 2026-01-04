@@ -90,14 +90,18 @@ export async function POST(req: Request) {
       const voicemailUrl = `${appUrl}/api/taskrouter/voicemail?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
       
       // Redirect the call via REST API (this pulls it out of the Enqueue)
-      try {
-        await twilioClient.calls(callSid).update({
-          url: voicemailUrl,
-          method: 'POST',
-        });
-        console.log('✅ Call redirected to voicemail via API');
-      } catch (err) {
-        console.error('❌ Failed to redirect call:', err);
+      if (callSid) {
+        try {
+          await twilioClient.calls(callSid).update({
+            url: voicemailUrl,
+            method: 'POST',
+          });
+          console.log('✅ Call redirected to voicemail via API');
+        } catch (err) {
+          console.error('❌ Failed to redirect call:', err);
+        }
+      } else {
+        console.error('❌ No call_sid in task attributes');
       }
       
       // Now cancel the task and free the worker
