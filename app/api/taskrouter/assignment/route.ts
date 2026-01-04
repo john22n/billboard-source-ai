@@ -70,14 +70,29 @@ export async function POST(req: Request) {
     console.log('Call from:', taskAttrs.from);
     console.log('═══════════════════════════════════════════');
 
-    // Build status callback URL with task info
+    // Build URLs
     const url = new URL(req.url);
     const appUrl = `${url.protocol}//${url.host}`;
     const workspaceSid = formData.get('WorkspaceSid') as string;
+
+    // Check if this is the voicemail worker
+    if (workerAttrs.email === 'voicemail@system') {
+      console.log('📼 Voicemail worker - redirecting to voicemail');
+      const voicemailUrl = `${appUrl}/api/taskrouter/voicemail?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
+      
+      const instruction = {
+        instruction: 'redirect',
+        call_sid: taskAttrs.call_sid,
+        url: voicemailUrl,
+      };
+      
+      console.log('📼 Redirect instruction:', instruction);
+      return Response.json(instruction);
+    }
+
+    // Normal worker - dequeue to connect the call
     const statusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
 
-    // Dequeue instruction: redirects the call to the worker
-    // This tells TaskRouter to connect the caller to the agent
     const instruction = {
       instruction: 'dequeue',
       to: workerAttrs.contact_uri || `client:${workerAttrs.email}`,
