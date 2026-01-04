@@ -100,16 +100,19 @@ export async function POST(req: Request) {
       primary_owner: clientIdentity,
     });
 
+    // Build the action URL for when Enqueue ends
+    const url = new URL(req.url);
+    const appUrl = `${url.protocol}//${url.host}`;
+    const enqueueActionUrl = `${appUrl}/api/taskrouter/enqueue-complete`;
+
     // Enqueue call into TaskRouter workflow
-    // TaskRouter will route to available workers
-    // Voicemail redirect is handled by events callback when task enters Voicemail queue
-    // The <Hangup> prevents Twilio from retrying the Voice URL if Enqueue ends unexpectedly
+    // action attribute: called when Enqueue ends (bridged, hangup, leave, error)
+    // If not bridged, enqueue-complete will redirect to voicemail
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Enqueue workflowSid="${WORKFLOW_SID}">
+  <Enqueue workflowSid="${WORKFLOW_SID}" action="${enqueueActionUrl}" method="POST">
     <Task>${taskAttributes}</Task>
   </Enqueue>
-  <Hangup/>
 </Response>`;
 
     return new Response(twiml, {
