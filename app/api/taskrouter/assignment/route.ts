@@ -59,7 +59,7 @@ export async function POST(req: Request) {
     console.log('Raw WorkerAttributes:', workerAttributes);
 
     let workerAttrs: { email?: string; contact_uri?: string } = {};
-    let taskAttrs: { call_sid?: string; from?: string; to?: string } = {};
+    let taskAttrs: { call_sid?: string; from?: string; caller?: string; to?: string; called?: string } = {};
 
     try {
       workerAttrs = JSON.parse(workerAttributes || '{}');
@@ -72,9 +72,14 @@ export async function POST(req: Request) {
 
     console.log('Worker email:', workerAttrs.email);
     console.log('Caller number (from):', taskAttrs.from);
+    console.log('Caller number (caller):', taskAttrs.caller);
     console.log('Called number (to):', taskAttrs.to);
+    console.log('Called number (called):', taskAttrs.called);
     console.log('Call SID:', taskAttrs.call_sid);
     console.log('═══════════════════════════════════════════');
+
+    // ✅ Get caller number from task attributes (try both 'from' and 'caller' keys)
+    const callerNumber = taskAttrs.from || taskAttrs.caller;
 
     // Build URLs
     const url = new URL(req.url);
@@ -116,7 +121,7 @@ export async function POST(req: Request) {
     const instruction = {
       instruction: 'dequeue',
       to: workerAttrs.contact_uri || `client:${workerAttrs.email}`,
-      from: taskAttrs.from || process.env.TWILIO_MAIN_NUMBER || '+18338547126', // ✅ Use actual caller's number
+      from: callerNumber || process.env.TWILIO_MAIN_NUMBER || '+18338547126', // ✅ Use actual caller's number (from or caller attribute)
       post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
       timeout: 20,
       status_callback_url: statusCallbackUrl,
@@ -124,7 +129,8 @@ export async function POST(req: Request) {
     };
 
     console.log('📞 Dequeue instruction:', instruction);
-    console.log('✅ Caller number (from):', taskAttrs.from);
+    console.log('✅ Using caller number:', callerNumber);
+    console.log('✅ Fallback if undefined:', process.env.TWILIO_MAIN_NUMBER || '+18338547126');
 
     return Response.json(instruction);
   } catch (error) {
