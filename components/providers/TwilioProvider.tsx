@@ -11,6 +11,7 @@ interface TwilioContextType {
   userEmail: string;
   deviceError: string | null;
   isDestroyed: boolean;
+  originalCallerNumber: string;  // ✅ The REAL caller's phone number
   acceptCall: () => Promise<void>;
   rejectCall: () => void;
   hangupCall: () => void;
@@ -53,6 +54,7 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
   const [userEmail, setUserEmail] = useState<string>('');
   const [deviceError, setDeviceError] = useState<string | null>(null);
   const [isDestroyed, setIsDestroyed] = useState(false);
+  const [originalCallerNumber, setOriginalCallerNumber] = useState<string>('');  // ✅ NEW
 
   const initTwilio = useCallback(async () => {
     if (isInitializing.current) {
@@ -71,29 +73,18 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
       setIsDestroyed(false);
 
       console.log('═══════════════════════════════════════════');
-      console.log('🚀 TWILIO INITIALIZATION STARTING (Provider)');
-      console.log('Environment:', process.env.NODE_ENV);
-      console.log('Timestamp:', new Date().toISOString());
+      console.log('🚀 TWILIO INITIALIZATION STARTING');
       console.log('═══════════════════════════════════════════');
 
       setStatus("Initializing Twilio...");
 
       if (twilioDevice.current && twilioDevice.current.state !== 'destroyed') {
-        console.log('🧹 Destroying previous device...');
         twilioDevice.current.destroy();
         twilioDevice.current = null;
       }
 
-      console.log('1️⃣ Fetching token from /api/twilio-token...');
       const response = await fetch('/api/twilio-token');
-      console.log('2️⃣ Token response status:', response.status);
-
       const data = await response.json();
-      console.log('3️⃣ Token data received:', {
-        hasToken: !!data.token,
-        identity: data.identity,
-        error: data.error
-      });
 
       if (data.error) {
         console.error('❌ Token error:', data.error);
@@ -104,45 +95,55 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
 
       const email = data.identity;
       if (!email) {
-        console.error('❌ No identity in token');
         setStatus("Error: No user identity in token");
         setDeviceError('No user identity found. Please log in again.');
         return false;
       }
 
       setUserEmail(email);
-      console.log('4️⃣ User identity:', email);
 
-      console.log('5️⃣ Creating Device with token...');
       const device = new Device(data.token, {
         codecPreferences: [Call.Codec.Opus, Call.Codec.PCMU],
       });
 
-      console.log('6️⃣ Device created, setting up event listeners...');
-
+      // =========================================================================
+      // INCOMING CALL HANDLER - Read originalFrom from customParameters
+      // =========================================================================
       device.on('incoming', (call) => {
         console.log('═══════════════════════════════════════════');
-        console.log('📞 INCOMING CALL EVENT FIRED!');
+        console.log('📞 INCOMING CALL EVENT');
         console.log('═══════════════════════════════════════════');
-        console.log('Call parameters:', {
-          from: call.parameters.From,
-          to: call.parameters.To,
-          callSid: call.parameters.CallSid,
-        });
+        
+        // ✅ Get original caller from custom parameters (set by bridge-to-worker TwiML)
+        const customOriginalFrom = call.customParameters?.get('originalFrom');
+        const standardFrom = call.parameters.From;
+        
+        console.log('Standard From (Twilio internal):', standardFrom);
+        console.log('Custom originalFrom (real caller):', customOriginalFrom);
+        
+        // Use custom parameter if available, fall back to standard
+        const realCallerNumber = customOriginalFrom || standardFrom || 'Unknown';
+        
+        console.log('✅ Using caller number:', realCallerNumber);
+        console.log('═══════════════════════════════════════════');
 
+        // ✅ Store the REAL caller number
+        setOriginalCallerNumber(realCallerNumber);
+        
         setIncomingCall(call);
-        setStatus(`Incoming call from ${call.parameters.From}`);
+        setStatus(`Incoming call from ${realCallerNumber}`);
 
         call.on('disconnect', () => {
           console.log('📴 Call disconnected');
           setCallActive(false);
           setIncomingCall(null);
           activeCall.current = null;
+          // Don't clear originalCallerNumber - keep it for form
           onCallDisconnectedRef.current?.();
         });
 
         call.on('accept', () => {
-          console.log('✅ Call accepted event fired');
+          console.log('✅ Call accepted');
         });
 
         call.on('reject', () => {
@@ -151,7 +152,7 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
         });
 
         call.on('cancel', () => {
-          console.log('📵 Call canceled (caller hung up)');
+          console.log('📵 Call canceled');
           setIncomingCall(null);
           setStatus('Call canceled');
         });
@@ -164,17 +165,7 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
 
       device.on('registered', () => {
         registrationTime.current = Date.now();
-
-        console.log('═══════════════════════════════════════════');
-        console.log('✅ DEVICE REGISTERED SUCCESSFULLY (Provider)');
-        console.log('═══════════════════════════════════════════');
-        console.log('Identity:', email);
-        console.log('Device state:', device.state);
-        console.log('Device token:', device.token ? 'Present' : 'Missing');
-        console.log('Registration time:', new Date(registrationTime.current).toISOString());
-        console.log('Edge:', device.edge || 'unknown');
-        console.log('═══════════════════════════════════════════');
-
+        console.log('✅ DEVICE REGISTERED');
         setTwilioReady(true);
         setStatus(`Ready to receive calls`);
         setDeviceError(null);
@@ -184,36 +175,16 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
 
       device.on('unregistered', () => {
         const durationMs = Date.now() - registrationTime.current;
-        const durationSec = (durationMs / 1000).toFixed(2);
-
-        console.log('═══════════════════════════════════════════');
-        console.warn('⚠️ DEVICE UNREGISTERED (Provider)');
-        console.log('═══════════════════════════════════════════');
-        console.log('Time since registration:', durationSec, 'seconds');
-        console.log('Current device state:', device.state);
-        console.log('Was registered at:', new Date(registrationTime.current).toISOString());
-        console.log('Unregistered at:', new Date().toISOString());
-        console.log('═══════════════════════════════════════════');
-
+        console.warn('⚠️ DEVICE UNREGISTERED after', (durationMs / 1000).toFixed(2), 'seconds');
         setTwilioReady(false);
 
         if (durationMs < 2000) {
-          console.error('❌ UNREGISTERED IMMEDIATELY - Possible causes:');
-          console.error('  1. Another device with same identity registered');
-          console.error('  2. Multiple tabs open');
-          console.error('  3. Token validation failed');
-          setDeviceError('Device unregistered immediately. Check for multiple tabs or identity conflicts.');
+          setDeviceError('Device unregistered immediately. Check for multiple tabs.');
         }
       });
 
       device.on('error', (error: Error) => {
-        console.error('═══════════════════════════════════════════');
         console.error('❌ DEVICE ERROR:', error);
-        console.error('Error name:', error.name);
-        console.error('Error message:', error.message);
-        console.error('Error code:', (error as unknown as { code?: number }).code);
-        console.error('Timestamp:', new Date().toISOString());
-        console.error('═══════════════════════════════════════════');
         setStatus(`Twilio error: ${error.message}`);
         setDeviceError(`Twilio error: ${error.message}`);
       });
@@ -224,35 +195,18 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
         setTimeout(() => initTwilio(), 1000);
       });
 
-      console.log('7️⃣ Event listeners set up, registering device...');
       await device.register();
-      console.log('8️⃣ Device.register() called successfully');
-
       twilioDevice.current = device;
 
       if (typeof window !== 'undefined') {
         (window as unknown as { twilioDevice: typeof twilioDevice }).twilioDevice = twilioDevice;
-
-        console.log('🔍 DEBUGGING INFO:');
-        console.log('Window location:', window.location.href);
-        console.log('User agent:', navigator.userAgent);
-        console.log('Online:', navigator.onLine);
       }
 
-      console.log('9️⃣ Device stored in ref and window');
-      console.log('═══════════════════════════════════════════');
-      console.log('✅ INITIALIZATION COMPLETE (Provider)');
-      console.log('Device state:', device.state);
-      console.log('Waiting for incoming calls...');
-      console.log('═══════════════════════════════════════════');
-
+      console.log('✅ INITIALIZATION COMPLETE');
       return true;
 
     } catch (error) {
-      console.error('═══════════════════════════════════════════');
-      console.error('❌ INITIALIZATION FAILED');
-      console.error('Error:', error);
-      console.error('═══════════════════════════════════════════');
+      console.error('❌ INITIALIZATION FAILED:', error);
       setStatus("Twilio initialization failed");
       setDeviceError(`Initialization failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       return false;
@@ -262,20 +216,13 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
   }, []);
 
   useEffect(() => {
-    console.log('🎬 TwilioProvider mounted - initializing device');
-    console.log('Environment:', process.env.NODE_ENV);
-
     initTwilio();
-
-    // NO cleanup - device should persist for the lifetime of the app
-    // Only destroy when user logs out explicitly
   }, [initTwilio]);
 
   useEffect(() => {
     const checkInterval = setInterval(() => {
       if (twilioDevice.current) {
         const state = twilioDevice.current.state;
-
         if (state === 'destroyed' && hasInitialized.current) {
           console.error('⚠️ DEVICE WAS DESTROYED!');
           setIsDestroyed(true);
@@ -297,29 +244,21 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
     }
 
     try {
-      console.log('═══════════════════════════════════════════');
       console.log('📞 ACCEPTING CALL');
-      console.log('═══════════════════════════════════════════');
-
       setStatus("Accepting call...");
 
       incomingCall.on('accept', () => {
-        console.log('✅ Call accept event - call is connected');
+        console.log('✅ Call connected');
         setTimeout(() => {
-          console.log('🎤 Triggering onCallAccepted callback');
           onCallAcceptedRef.current?.(incomingCall);
         }, 500);
       });
 
-      console.log('Calling incomingCall.accept()...');
       await incomingCall.accept();
-      console.log('✅ accept() completed');
 
       activeCall.current = incomingCall;
       setCallActive(true);
       setIncomingCall(null);
-
-      console.log('Call active, state updated');
 
     } catch (error) {
       console.error('❌ Error accepting call:', error);
@@ -332,6 +271,7 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
       console.log('🚫 Rejecting call');
       incomingCall.reject();
       setIncomingCall(null);
+      setOriginalCallerNumber('');  // ✅ Clear on reject
       setStatus(twilioReady ? "Ready to receive calls" : "Idle");
     }
   }, [incomingCall, twilioReady]);
@@ -342,6 +282,7 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
       activeCall.current.disconnect();
       activeCall.current = null;
       setCallActive(false);
+      // Don't clear originalCallerNumber - keep for form submission
       onCallDisconnectedRef.current?.();
     }
   }, []);
@@ -380,6 +321,7 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
     userEmail,
     deviceError,
     isDestroyed,
+    originalCallerNumber,  // ✅ Expose the real caller number
     acceptCall,
     rejectCall,
     hangupCall,

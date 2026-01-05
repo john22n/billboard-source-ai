@@ -13,7 +13,6 @@ import type { TranscriptItem } from "@/types/sales-call";
 import { showSuccessToast, showErrorToast } from "@/lib/error-handling";
 import { useFormStore } from "@/stores/formStore";
 
-// Dynamic imports for heavy map components
 const GoogleMapPanel = dynamic(
   () => import("@/components/sales-call/GoogleMapPanel").then(mod => mod.GoogleMapPanel),
   { ssr: false, loading: () => <div className="h-full flex items-center justify-center text-gray-500">Loading Google Maps...</div> }
@@ -25,7 +24,6 @@ const ArcGISMapPanel = dynamic(
 );
 
 export default function SalesCallTranscriber() {
-  // 🔍 Performance monitoring (only in development)
   if (process.env.NODE_ENV === 'development') {
     console.log('🔄 Re-render: SalesCallTranscriber');
   }
@@ -40,23 +38,17 @@ export default function SalesCallTranscriber() {
   const [nutshellStatus, setNutshellStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [nutshellMessage, setNutshellMessage] = useState('');
   const [resetTrigger, setResetTrigger] = useState(0);
-  
-  // ✅ NEW: Store caller's phone number separately so it persists after call is accepted
-  const [callerPhone, setCallerPhone] = useState<string>("");
 
-  // ✅ Get store actions (STABLE - won't cause re-renders)
   const updateFromAI = useFormStore((s) => s.updateFromAI);
   const resetForm = useFormStore((s) => s.reset);
   const getFormData = useFormStore((s) => s.getFormData);
 
-  // ✅ Subscribe to minimal state for maps/pricing
   const activeMarketIndex = useFormStore((s) => s.activeMarketIndex);
   const additionalMarkets = useFormStore((s) => s.additionalMarkets);
   const targetCity = useFormStore((s) => s.fields.targetCity);
   const state = useFormStore((s) => s.fields.state);
   const targetArea = useFormStore((s) => s.fields.targetArea);
 
-  // Custom hooks for Twilio and transcription
   const {
     transcripts,
     interimTranscript,
@@ -75,6 +67,7 @@ export default function SalesCallTranscriber() {
     incomingCall,
     callActive,
     userEmail,
+    originalCallerNumber,  // ✅ Get the REAL caller number from TwilioContext
     acceptCall,
     rejectCall,
     hangupCall,
@@ -84,27 +77,14 @@ export default function SalesCallTranscriber() {
     onCallDisconnected,
   } = useTwilioContext();
 
-  // ✅ NEW: Capture caller's phone number as soon as incoming call arrives
-  // This runs BEFORE the call is accepted, so we capture the number while it's still available
-  useEffect(() => {
-    if (incomingCall?.parameters?.From) {
-      const fromNumber = incomingCall.parameters.From;
-      console.log('📞 Captured caller phone from Twilio:', fromNumber);
-      setCallerPhone(fromNumber);
-    }
-  }, [incomingCall]);
-
-  // Register callbacks for call events
   useEffect(() => {
     onCallAccepted((call) => startTranscription(call));
     onCallDisconnected(() => {
       stopTranscription();
       resetStatus();
-      // Note: We don't clear callerPhone here so it persists for the form
     });
   }, [onCallAccepted, onCallDisconnected, startTranscription, stopTranscription, resetStatus]);
 
-  // Billboard form extraction hook
   const {
     formData: aiFormData,
     isExtracting,
@@ -117,7 +97,6 @@ export default function SalesCallTranscriber() {
     canRetry,
   } = useBillboardFormExtraction();
 
-  // ✅ Push AI data to Zustand store when it changes
   useEffect(() => {
     if (aiFormData) {
       updateFromAI(aiFormData);
@@ -128,8 +107,7 @@ export default function SalesCallTranscriber() {
     clearTranscripts();
     setBillboardContext("");
     resetExtraction();
-    resetForm(); // Reset Zustand store
-    setCallerPhone(""); // ✅ Clear caller phone on reset
+    resetForm();
     setResetTrigger(prev => prev + 1);
   }, [clearTranscripts, resetExtraction, resetForm]);
 
@@ -140,30 +118,23 @@ export default function SalesCallTranscriber() {
     }).join("\n");
   }, [transcripts]);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       cleanup();
     };
   }, [cleanup]);
 
-  // Auto-scroll transcripts
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [transcripts, interimTranscript]);
 
-  // Extract form fields when transcripts update
   useEffect(() => {
     if (fullTranscript.length > 50 && !isExtracting) {
       extractFields(fullTranscript);
     }
   }, [fullTranscript, extractFields, isExtracting]);
-
-  // ✅ Fetch billboard pricing data
-  // Billboard pricing is now handled exclusively by PricingPanel based on location field changes
-  // This prevents duplicate API calls when both transcript and location update simultaneously
 
   const handleFileSelect = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -223,7 +194,6 @@ export default function SalesCallTranscriber() {
     setNutshellStatus('idle');
     setNutshellMessage('');
 
-    // ✅ Get current form data from store
     const formData = getFormData();
 
     try {
@@ -284,7 +254,6 @@ export default function SalesCallTranscriber() {
     status.includes("Starting") || status.includes("Uploading") ||
     status.includes("Initializing");
 
-  // ✅ Memoized current market location for maps
   const currentMarketLocation = useMemo(() => {
     if (activeMarketIndex === 0) {
       return targetCity && state
@@ -299,13 +268,10 @@ export default function SalesCallTranscriber() {
     }
   }, [activeMarketIndex, targetCity, state, targetArea, additionalMarkets]);
 
-  // ✅ PricingPanel will subscribe to fields directly, no need to pass them
-
   return (
     <div className="h-full overflow-hidden">
       <div className="h-full max-w-[1800px] mx-auto flex flex-col">
         <Card className="shadow-2xl border-0 overflow-hidden flex flex-col h-full py-1">
-          {/* Header */}
           <CardHeader className="bg-gradient-to-r from-blue-600 via-indigo-600 to-primary text-white py-3 px-4">
             <div className="flex flex-col gap-2">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
@@ -369,12 +335,12 @@ export default function SalesCallTranscriber() {
                 </div>
               </div>
 
-              {/* Incoming Call Alert */}
+              {/* Incoming Call Alert - shows REAL caller number */}
               {incomingCall && (
                 <div className="bg-green-500/30 border border-white/30 rounded px-3 py-2 animate-pulse">
                   <div className="flex items-center justify-between">
                     <p className="text-white text-sm font-semibold">
-                      📞 Incoming call from {incomingCall.parameters.From}
+                      📞 Incoming call from {originalCallerNumber || 'Unknown'}
                     </p>
                     <div className="flex gap-2">
                       <Button
@@ -397,10 +363,10 @@ export default function SalesCallTranscriber() {
                 </div>
               )}
 
-              {/* ✅ NEW: Show captured caller phone for debugging (can remove later) */}
-              {callerPhone && !incomingCall && (
+              {/* Debug: Show caller phone (remove later) */}
+              {originalCallerNumber && !incomingCall && (
                 <div className="px-2 py-1 bg-blue-500/30 backdrop-blur-sm border border-blue-300/30 rounded text-xs">
-                  <span className="text-white font-medium">📱 Caller: {callerPhone}</span>
+                  <span className="text-white font-medium">📱 Caller: {originalCallerNumber}</span>
                 </div>
               )}
 
@@ -486,13 +452,12 @@ export default function SalesCallTranscriber() {
                 </TabsTrigger>
               </TabsList>
 
-              {/* Form + Pricing Tab */}
               <TabsContent value="form" className="mt-0 flex-1 overflow-hidden flex flex-col">
                 <div className="flex flex-col lg:flex-row gap-1 flex-1 overflow-hidden">
                   <LeadForm
                     key={resetTrigger}
                     resetTrigger={resetTrigger}
-                    inboundPhone={callerPhone}  // ✅ Use stored callerPhone instead of incomingCall
+                    inboundPhone={originalCallerNumber}
                   />
                   <PricingPanel
                     key={`pricing-${activeMarketIndex}-${additionalMarkets.length}`}
@@ -510,21 +475,18 @@ export default function SalesCallTranscriber() {
                 </div>
               </TabsContent>
 
-              {/* Map Tab */}
               <TabsContent value="map" className="mt-0 flex-1 overflow-hidden">
                 <GoogleMapPanel
                   initialLocation={currentMarketLocation}
                 />
               </TabsContent>
 
-              {/* ArcGIS Map Tab */}
               <TabsContent value="arcgis" className="mt-0 flex-1 overflow-hidden">
                 <ArcGISMapPanel
                   initialLocation={currentMarketLocation}
                 />
               </TabsContent>
 
-              {/* Transcript Tab */}
               <TabsContent value="transcript" className="mt-0 flex-1 overflow-hidden">
                 <TranscriptView
                   ref={scrollRef}

@@ -2,7 +2,7 @@
  * TaskRouter Assignment Callback
  * 
  * Called when TaskRouter needs to assign a task to a worker.
- * Returns instructions to dial the worker's browser client.
+ * Uses redirect + custom TwiML to pass original caller number to browser.
  */
 
 import twilio from 'twilio';
@@ -15,7 +15,7 @@ export async function POST(req: Request) {
     const bodyText = await clonedReq.text();
     const formData = await req.formData();
 
-    // Validate Twilio signature (skip in dev, log failures in prod)
+    // Validate Twilio signature
     if (TWILIO_AUTH_TOKEN) {
       const twilioSignature = req.headers.get('X-Twilio-Signature') || '';
       const url = new URL(req.url);
@@ -36,10 +36,6 @@ export async function POST(req: Request) {
 
       if (!isValid) {
         console.error('❌ Invalid Twilio signature on assignment callback');
-        console.error('URL used:', webhookUrl);
-        console.error('Signature:', twilioSignature);
-        // Don't block - Twilio signature validation can fail with proxies/load balancers
-        // return new Response('Forbidden', { status: 403 });
       }
     }
 
@@ -48,6 +44,7 @@ export async function POST(req: Request) {
     const workerSid = formData.get('WorkerSid') as string;
     const workerAttributes = formData.get('WorkerAttributes') as string;
     const taskAttributes = formData.get('TaskAttributes') as string;
+    const workspaceSid = formData.get('WorkspaceSid') as string;
 
     console.log('═══════════════════════════════════════════');
     console.log('📋 TASKROUTER ASSIGNMENT CALLBACK');
@@ -55,84 +52,79 @@ export async function POST(req: Request) {
     console.log('TaskSid:', taskSid);
     console.log('ReservationSid:', reservationSid);
     console.log('WorkerSid:', workerSid);
-    console.log('Raw TaskAttributes:', taskAttributes);
-    console.log('Raw WorkerAttributes:', workerAttributes);
 
     let workerAttrs: { email?: string; contact_uri?: string } = {};
-    let taskAttrs: { call_sid?: string; from?: string; caller?: string; to?: string; called?: string } = {};
+    let taskAttrs: { call_sid?: string; from?: string; to?: string } = {};
 
     try {
       workerAttrs = JSON.parse(workerAttributes || '{}');
       taskAttrs = JSON.parse(taskAttributes || '{}');
-      console.log('✅ Parsed taskAttrs:', JSON.stringify(taskAttrs, null, 2));
-      console.log('✅ Parsed workerAttrs:', JSON.stringify(workerAttrs, null, 2));
-    } catch (err) {
-      console.error('❌ Failed to parse attributes:', err);
+    } catch {
+      console.error('Failed to parse attributes');
     }
 
     console.log('Worker email:', workerAttrs.email);
-    console.log('Caller number (from):', taskAttrs.from);
-    console.log('Caller number (caller):', taskAttrs.caller);
-    console.log('Called number (to):', taskAttrs.to);
-    console.log('Called number (called):', taskAttrs.called);
-    console.log('Call SID:', taskAttrs.call_sid);
+    console.log('Original caller (from):', taskAttrs.from);
     console.log('═══════════════════════════════════════════');
-
-    // ✅ Get caller number from task attributes (try both 'from' and 'caller' keys)
-    const callerNumber = taskAttrs.from || taskAttrs.caller;
 
     // Build URLs
     const url = new URL(req.url);
     const appUrl = `${url.protocol}//${url.host}`;
-    const workspaceSid = formData.get('WorkspaceSid') as string;
 
     // Check if this is the voicemail worker
     if (workerAttrs.email === 'voicemail@system') {
-      console.log('📼 Voicemail worker assigned - using redirect instruction');
+      console.log('📼 Voicemail worker assigned');
 
       const voicemailUrl = `${appUrl}/api/taskrouter/voicemail?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
-
-      // call_sid is required for redirect instruction
       const callSid = taskAttrs.call_sid;
+      
       if (!callSid) {
-        console.error('❌ No call_sid in task attributes - cannot redirect');
+        console.error('❌ No call_sid in task attributes');
         return Response.json({ instruction: 'reject' });
       }
 
-      // Use TaskRouter's redirect instruction - this properly:
-      // 1. Redirects the call to voicemail TwiML
-      // 2. Completes the reservation
-      // 3. Pulls the call out of the Enqueue cleanly
-      const instruction = {
+      return Response.json({
         instruction: 'redirect',
         call_sid: callSid,
         url: voicemailUrl,
         accept: true,
         post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
-      };
-
-      console.log('📞 Redirect instruction:', instruction);
-      return Response.json(instruction);
+      });
     }
 
-    // Normal worker - dequeue to connect the call
-    const statusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
+    // =========================================================================
+    // NORMAL WORKER - Use redirect to pass original caller number
+    // =========================================================================
+    
+    const callSid = taskAttrs.call_sid;
+    if (!callSid) {
+      console.error('❌ No call_sid in task attributes');
+      return Response.json({ instruction: 'reject' });
+    }
+
+    const workerIdentity = workerAttrs.email || '';
+    const originalCallerNumber = taskAttrs.from || 'Unknown';
+    
+    // Build URL to our bridge endpoint with the original caller number
+    const bridgeUrl = new URL(`${appUrl}/api/taskrouter/bridge-to-worker`);
+    bridgeUrl.searchParams.set('worker', workerIdentity);
+    bridgeUrl.searchParams.set('originalFrom', originalCallerNumber);
+    bridgeUrl.searchParams.set('taskSid', taskSid);
+    bridgeUrl.searchParams.set('workspaceSid', workspaceSid);
+
+    console.log('📞 Redirecting to bridge with original caller:', originalCallerNumber);
 
     const instruction = {
-      instruction: 'dequeue',
-      to: workerAttrs.contact_uri || `client:${workerAttrs.email}`,
-      from: callerNumber || process.env.TWILIO_MAIN_NUMBER || '+18338547126', // ✅ Use actual caller's number (from or caller attribute)
+      instruction: 'redirect',
+      call_sid: callSid,
+      url: bridgeUrl.toString(),
+      accept: true,
       post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
-      timeout: 20,
-      status_callback_url: statusCallbackUrl,
-      status_callback_events: 'completed',
     };
 
-    console.log('📞 Dequeue instruction:', instruction);
-    console.log('✅ Using caller number:', callerNumber);
-    console.log('✅ Fallback if undefined:', process.env.TWILIO_MAIN_NUMBER || '+18338547126');
-
+    console.log('📞 Redirect instruction:', instruction);
     return Response.json(instruction);
+
   } catch (error) {
     console.error('❌ Assignment callback error:', error);
     return new Response('Error', { status: 500 });
