@@ -286,7 +286,7 @@ export function LeadForm({ resetTrigger, inboundPhone }: LeadFormProps) {
       </div>
 
       {/* Market Tabs */}
-      <div className="flex flex-wrap gap-1 mt-0 ml-172 lg:ml-113">
+      <div className="flex flex-wrap gap-1 mt-0 ml-172">
         <button
           onClick={() => setActiveMarketIndex(0)}
           className={`inline-block border-2 ${
