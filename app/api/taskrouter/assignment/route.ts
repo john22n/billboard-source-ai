@@ -110,7 +110,7 @@ export async function POST(req: Request) {
     const instruction = {
       instruction: 'dequeue',
       to: workerAttrs.contact_uri || `client:${workerAttrs.email}`,
-      from: process.env.TWILIO_MAIN_NUMBER || '+18338547126',
+      from: taskAttrs.from || process.env.TWILIO_MAIN_NUMBER || '+18338547126', // ✅ Use actual caller's number
       post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
       timeout: 20,
       status_callback_url: statusCallbackUrl,
@@ -118,6 +118,7 @@ export async function POST(req: Request) {
     };
 
     console.log('📞 Dequeue instruction:', instruction);
+    console.log('✅ Caller number (from):', taskAttrs.from);
 
     return Response.json(instruction);
   } catch (error) {
