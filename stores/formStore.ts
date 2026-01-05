@@ -180,6 +180,7 @@ export const useFormStore = create<FormStore>()((set, get) => ({
     },
 
     // ✅ Update from AI - only updates fields NOT edited by user
+    // ✅ FIXED: Now properly protects Twilio-prefilled phone numbers
     updateFromAI: (data) => {
       const { userEditedFields, fields, twilioPhone, twilioPhonePreFilled } = get();
       const newFields = { ...fields };
@@ -198,23 +199,42 @@ export const useFormStore = create<FormStore>()((set, get) => ({
         if (value === undefined) continue;
         if (JSON.stringify(newFields[key as FormFieldKey]) === JSON.stringify(value)) continue;
 
-        // Special handling for phone field
-        if (key === 'phone' && value) {
-          const extractedNormalized = normalizePhone(value as string);
-          const twilioNormalized = normalizePhone(twilioPhone);
-          
-          // If Twilio phone exists and AI extracted phone matches it
-          if (twilioNormalized && extractedNormalized === twilioNormalized) {
-            console.log('✅ Phone VERIFIED! AI extraction matches Twilio caller ID');
-            set({ phoneVerified: true });
-          }
-          
-          // Don't overwrite if already prefilled from Twilio
+        // =========================================================================
+        // PHONE FIELD SPECIAL HANDLING
+        // =========================================================================
+        if (key === 'phone') {
+          // If Twilio phone is prefilled, NEVER overwrite it with AI extraction
           if (twilioPhonePreFilled) {
+            // But still check for verification if AI extracted a valid phone
+            if (value && typeof value === 'string' && value.trim()) {
+              const extractedNormalized = normalizePhone(value);
+              const twilioNormalized = normalizePhone(twilioPhone);
+              
+              if (twilioNormalized && extractedNormalized) {
+                if (extractedNormalized === twilioNormalized) {
+                  console.log('✅ Phone VERIFIED! AI extraction matches Twilio caller ID');
+                  console.log(`   Twilio: ${twilioNormalized}, Extracted: ${extractedNormalized}`);
+                  set({ phoneVerified: true });
+                } else {
+                  console.log('⚠️ Phone MISMATCH - AI extracted different number');
+                  console.log(`   Twilio: ${twilioNormalized}, Extracted: ${extractedNormalized}`);
+                  // Keep phoneVerified as false (stays yellow)
+                }
+              }
+            }
+            // ALWAYS skip updating the phone field when Twilio prefilled
             console.log('📞 Keeping Twilio phone, skipping AI extraction');
             continue;
           }
+          
+          // If not Twilio prefilled, skip if AI sends null/empty (don't clear existing phone)
+          if (!value || (typeof value === 'string' && !value.trim())) {
+            continue;
+          }
         }
+        // =========================================================================
+        // END PHONE FIELD SPECIAL HANDLING
+        // =========================================================================
 
         (newFields as Record<string, unknown>)[key] = value;
         changed.add(key);
