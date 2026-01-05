@@ -100,6 +100,10 @@ export async function POST(req: Request) {
       primary_owner: clientIdentity,
     });
 
+    console.log('📋 Task Attributes being sent to TaskRouter:', taskAttributes);
+    console.log('🔍 Caller (From):', From);
+    console.log('🔍 Called (To):', To);
+
     // Build URLs for Enqueue
     const url = new URL(req.url);
     const appUrl = `${url.protocol}//${url.host}`;

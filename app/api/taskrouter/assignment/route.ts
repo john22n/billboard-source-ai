@@ -55,19 +55,25 @@ export async function POST(req: Request) {
     console.log('TaskSid:', taskSid);
     console.log('ReservationSid:', reservationSid);
     console.log('WorkerSid:', workerSid);
+    console.log('Raw TaskAttributes:', taskAttributes);
+    console.log('Raw WorkerAttributes:', workerAttributes);
 
     let workerAttrs: { email?: string; contact_uri?: string } = {};
-    let taskAttrs: { call_sid?: string; from?: string } = {};
+    let taskAttrs: { call_sid?: string; from?: string; to?: string } = {};
 
     try {
       workerAttrs = JSON.parse(workerAttributes || '{}');
       taskAttrs = JSON.parse(taskAttributes || '{}');
-    } catch {
-      console.error('Failed to parse attributes');
+      console.log('✅ Parsed taskAttrs:', JSON.stringify(taskAttrs, null, 2));
+      console.log('✅ Parsed workerAttrs:', JSON.stringify(workerAttrs, null, 2));
+    } catch (err) {
+      console.error('❌ Failed to parse attributes:', err);
     }
 
     console.log('Worker email:', workerAttrs.email);
-    console.log('Call from:', taskAttrs.from);
+    console.log('Caller number (from):', taskAttrs.from);
+    console.log('Called number (to):', taskAttrs.to);
+    console.log('Call SID:', taskAttrs.call_sid);
     console.log('═══════════════════════════════════════════');
 
     // Build URLs
