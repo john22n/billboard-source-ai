@@ -95,7 +95,7 @@ const billboardLeadSchema = z.object({
   position: z.string().nullable()
     .describe("Job title or position at the company"),
   phone: z.string().nullable()
-    .describe("Phone number"),
+  .describe("Phone number - format as (XXX) XXX-XXXX for US numbers. Example: (555) 123-4567"),
   email: z.string().nullable()
     .describe("Email address - MUST include @ symbol and domain (e.g., 'john@company.com'). If caller spells it out like 'john at company dot com', convert to proper format 'john@company.com'. Return null if no email mentioned."),
   
