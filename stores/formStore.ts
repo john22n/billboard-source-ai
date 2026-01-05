@@ -57,6 +57,9 @@ interface FormStore {
   twilioPhone: string;
   twilioPhonePreFilled: boolean;
   
+  // ✅ Phone verification (AI extracted phone matches Twilio caller ID)
+  phoneVerified: boolean;
+  
   // ✅ Ballpark
   ballpark: string;
   
@@ -96,6 +99,9 @@ interface FormStore {
   setTwilioPhone: (phone: string) => void;
   setTwilioPhonePreFilled: (value: boolean) => void;
   prefillPhoneFromTwilio: (phone: string) => void;
+  
+  // Phone verification
+  setPhoneVerified: (verified: boolean) => void;
   
   // Ballpark
   setBallpark: (value: string) => void;
@@ -161,6 +167,7 @@ export const useFormStore = create<FormStore>()((set, get) => ({
     confirmedSendOver: {},
     twilioPhone: '',
     twilioPhonePreFilled: false,
+    phoneVerified: false,
     ballpark: '',
 
     // ✅ Update single field (user action) - marks field as user-edited
@@ -174,9 +181,13 @@ export const useFormStore = create<FormStore>()((set, get) => ({
 
     // ✅ Update from AI - only updates fields NOT edited by user
     updateFromAI: (data) => {
-      const { userEditedFields, fields } = get();
+      const { userEditedFields, fields, twilioPhone, twilioPhonePreFilled } = get();
       const newFields = { ...fields };
       const changed = new Set<string>();
+
+      // Helper to normalize phone numbers for comparison (last 10 digits only)
+      const normalizePhone = (phone: string | null | undefined): string => 
+        phone?.replace(/\D/g, '').slice(-10) || '';
 
       for (const [key, value] of Object.entries(data)) {
         // Skip 'confidence' field - it's not part of the form
@@ -186,6 +197,24 @@ export const useFormStore = create<FormStore>()((set, get) => ({
         // Skip if value is undefined or same as current
         if (value === undefined) continue;
         if (JSON.stringify(newFields[key as FormFieldKey]) === JSON.stringify(value)) continue;
+
+        // Special handling for phone field
+        if (key === 'phone' && value) {
+          const extractedNormalized = normalizePhone(value as string);
+          const twilioNormalized = normalizePhone(twilioPhone);
+          
+          // If Twilio phone exists and AI extracted phone matches it
+          if (twilioNormalized && extractedNormalized === twilioNormalized) {
+            console.log('✅ Phone VERIFIED! AI extraction matches Twilio caller ID');
+            set({ phoneVerified: true });
+          }
+          
+          // Don't overwrite if already prefilled from Twilio
+          if (twilioPhonePreFilled) {
+            console.log('📞 Keeping Twilio phone, skipping AI extraction');
+            continue;
+          }
+        }
 
         (newFields as Record<string, unknown>)[key] = value;
         changed.add(key);
@@ -254,9 +283,9 @@ export const useFormStore = create<FormStore>()((set, get) => ({
           get().updateField(fieldMap[field], value as string);
         }
         
-        // Handle phone special case
+        // Handle phone special case - clear verification when manually edited
         if (field === 'phone') {
-          set({ twilioPhonePreFilled: false });
+          set({ twilioPhonePreFilled: false, phoneVerified: false });
         }
       } else {
         // Additional contact
@@ -382,9 +411,13 @@ export const useFormStore = create<FormStore>()((set, get) => ({
           fields: { ...fields, phone: formatted },
           twilioPhone: formatted,
           twilioPhonePreFilled: true,
+          phoneVerified: false, // Reset verification on new prefill
         });
       }
     },
+
+    // ✅ Phone verification
+    setPhoneVerified: (verified) => set({ phoneVerified: verified }),
 
     // ✅ Ballpark
     setBallpark: (value) => set({ ballpark: value }),
@@ -406,6 +439,7 @@ export const useFormStore = create<FormStore>()((set, get) => ({
         confirmedSendOver: {},
         twilioPhone: '',
         twilioPhonePreFilled: false,
+        phoneVerified: false,
         ballpark: '',
       });
     },
@@ -437,6 +471,9 @@ export const selectFields = <K extends FormFieldKey>(fields: K[]) =>
 // Check if a field was recently changed
 export const selectIsRecentlyChanged = (field: string) =>
   (state: FormStore) => state.recentlyChangedFields.has(field);
+
+// Phone verification selector
+export const selectPhoneVerified = (state: FormStore) => state.phoneVerified;
 
 // Select current market data
 export const selectCurrentMarket = (state: FormStore) => {

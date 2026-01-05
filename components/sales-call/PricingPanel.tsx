@@ -25,6 +25,7 @@ interface PricingCard {
   note?: string;
   subtitle?: string;
   subtitleData?: string;
+  tiers?: { label: string; range: string }[];
 }
 
 export function PricingPanel({
@@ -248,7 +249,7 @@ export function PricingPanel({
         note: '*Rates vary by location.'
       });
     }
-    // PRIORITY 2: BLACK - has General Pricing
+    // PRIORITY 2: BLACK - has General Pricing with market size tiers
     else if (hasGeneralPricing) {
       const priceRangePattern = /\$[\d,]+\s*-\s*\$[\d,]+/g;
       const generalPricingIndex = contextToUse.toLowerCase().indexOf('general pricing:');
@@ -256,11 +257,29 @@ export function PricingPanel({
       const rangesAfterGeneral = textAfterGeneral.match(priceRangePattern);
       const generalRanges = rangesAfterGeneral ? [...new Set(rangesAfterGeneral)] : [];
       
+      // Build tiers from extracted price ranges
+      const tierLabels = ['Small Market', 'Medium Market', 'Large Market'];
+      const tiers: { label: string; range: string }[] = [];
+      
+      if (generalRanges.length >= 3) {
+        // Use first 3 ranges for small/medium/large
+        tiers.push({ label: tierLabels[0], range: generalRanges[0] });
+        tiers.push({ label: tierLabels[1], range: generalRanges[1] });
+        tiers.push({ label: tierLabels[2], range: generalRanges[2] });
+      } else if (generalRanges.length === 2) {
+        tiers.push({ label: tierLabels[0], range: generalRanges[0] });
+        tiers.push({ label: tierLabels[2], range: generalRanges[1] });
+      } else if (generalRanges.length === 1) {
+        // Single range - show as general range without tier labels
+        tiers.push({ label: 'Price Range', range: generalRanges[0] });
+      }
+      
       cards.push({
         market: currentLocation || 'Market',
         type: 'general-range',
         label: 'General Range',
-        data: generalRanges.length > 0 ? generalRanges.slice(0, 5) : ['$750 - $6,000'],
+        data: generalRanges.length === 0 ? ['$750 - $6,000'] : [],
+        tiers: tiers.length > 0 ? tiers : undefined,
         note: '*No specific data. Use general range.'
       });
     }
@@ -295,7 +314,7 @@ export function PricingPanel({
   return (
     <div 
       className="h-full flex flex-col transition-all duration-300"
-      style={{ maxWidth: activeTab === 'estimate' ? '400px' : '450px', width: '100%' }}
+      style={{ maxWidth: activeTab === 'estimate' ? '400px' : '400px', width: '100%' }}
     >
       <div className="bg-white rounded-xl p-4 h-full flex flex-col overflow-hidden">
         {/* Header Tabs */}
@@ -339,11 +358,32 @@ export function PricingPanel({
                     <div className="text-center py-3 border-l-2 border-r-2 border-black text-white font-bold text-xl" style={{ backgroundColor: colors.primary }}>
                       {card.label}
                     </div>
-                    {card.data.map((item, idx) => (
+                    
+                    {/* Render tiers for general-range type */}
+                    {card.tiers && card.tiers.map((tier, tierIdx) => (
+                      <div key={tierIdx}>
+                        <div 
+                          className="text-center py-2 border-l-2 border-r-2 border-black font-semibold text-sm"
+                          style={{ backgroundColor: '#f3f4f6', color: colors.text }}
+                        >
+                          {tier.label}
+                        </div>
+                        <div 
+                          className="text-center py-3 border-2 border-t-0 border-black font-bold text-2xl bg-white"
+                          style={{ color: colors.text }}
+                        >
+                          {tier.range}
+                        </div>
+                      </div>
+                    ))}
+                    
+                    {/* Render regular data items (for non-tiered cards) */}
+                    {!card.tiers && card.data.map((item, idx) => (
                       <div key={idx} className="text-center py-3 border-2 border-t-0 border-black font-bold text-2xl bg-white" style={{ color: colors.text }}>
                         {item}
                       </div>
                     ))}
+                    
                     {card.subtitle && (
                       <>
                         <div className="text-center text-xl py-2 border-l-2 border-r-2 border-black text-white font-bold mt-3" style={{ backgroundColor: colors.primary }}>

@@ -4,7 +4,6 @@ import { memo, useCallback } from "react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useFormStore, selectField, type BillboardFormData } from "@/stores/formStore";
-import { shallow } from "zustand/shallow";
 
 type FormFieldKey = keyof BillboardFormData;
 
@@ -100,7 +99,7 @@ export const FieldTextarea = memo(function FieldTextarea({
 });
 
 // ============================================================================
-// PHONE INPUT - Special handling for Twilio pre-fill
+// PHONE INPUT - Special handling for Twilio pre-fill and verification
 // ============================================================================
 
 export const PhoneInput = memo(function PhoneInput({ 
@@ -110,40 +109,54 @@ export const PhoneInput = memo(function PhoneInput({
   const phone = useFormStore(selectField('phone'));
   const twilioPhone = useFormStore((s) => s.twilioPhone);
   const twilioPhonePreFilled = useFormStore((s) => s.twilioPhonePreFilled);
+  const phoneVerified = useFormStore((s) => s.phoneVerified);
   const userEditedFields = useFormStore((s) => s.userEditedFields);
   const updateField = useFormStore((s) => s.updateField);
   const setTwilioPhonePreFilled = useFormStore((s) => s.setTwilioPhonePreFilled);
+  const setPhoneVerified = useFormStore((s) => s.setPhoneVerified);
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setTwilioPhonePreFilled(false);
+    setPhoneVerified(false); // Clear verification when manually editing
     updateField('phone', e.target.value);
-  }, [updateField, setTwilioPhonePreFilled]);
+  }, [updateField, setTwilioPhonePreFilled, setPhoneVerified]);
 
   // Determine phone input color
+  // Priority: Verified (bright green) > Manual edit (green) > Twilio pre-fill (yellow) > Empty (red)
   let colorClass = 'bg-red-100 border-black';
   
   if (phone && phone.trim() !== "") {
-    const wasManuallyEdited = userEditedFields.has('phone');
-    
-    if (wasManuallyEdited && !twilioPhonePreFilled) {
-      colorClass = 'bg-green-50 border-green-500 focus:border-green-600 focus:ring-green-500';
-    } else if (twilioPhonePreFilled && phone === twilioPhone) {
+    if (phoneVerified) {
+      // ✅ VERIFIED: AI extracted phone matches Twilio caller ID
+      colorClass = 'bg-green-200 border-green-600 ring-2 ring-green-400 focus:border-green-700 focus:ring-green-500';
+    } else if (twilioPhonePreFilled) {
+      // ⏳ PENDING: Twilio pre-filled, waiting for verification
       colorClass = 'bg-yellow-100 border-yellow-500 focus:border-yellow-600 focus:ring-yellow-500';
-    } else if (twilioPhone && phone === twilioPhone && !twilioPhonePreFilled) {
+    } else if (userEditedFields.has('phone')) {
+      // ✏️ MANUAL: User typed this in
       colorClass = 'bg-green-50 border-green-500 focus:border-green-600 focus:ring-green-500';
-    } else if (twilioPhone && phone !== twilioPhone) {
-      colorClass = 'bg-yellow-100 border-yellow-500 focus:border-yellow-600 focus:ring-yellow-500';
     } else {
+      // Default filled state
       colorClass = 'bg-green-50 border-green-500 focus:border-green-600 focus:ring-green-500';
     }
   }
 
   return (
-    <Input
-      value={phone ?? ""}
-      onChange={handleChange}
-      className={`${baseClassName} ${colorClass} ${className}`}
-    />
+    <div className="relative">
+      <Input
+        value={phone ?? ""}
+        onChange={handleChange}
+        className={`${baseClassName} ${colorClass} ${className} ${phoneVerified ? 'pr-8' : ''}`}
+      />
+      {phoneVerified && (
+        <span 
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-green-600 text-lg font-bold"
+          title="Phone verified - caller's number matches"
+        >
+          ✓
+        </span>
+      )}
+    </div>
   );
 });
 
