@@ -95,7 +95,7 @@ const billboardLeadSchema = z.object({
   position: z.string().nullable()
     .describe("Job title or position at the company"),
   phone: z.string().nullable()
-  .describe("Phone number - format as (XXX) XXX-XXXX for US numbers. Example: (555) 123-4567"),
+  .describe("Phone number - Extract ANY phone number mentioned by the CALLER (not the sales rep). Format as (XXX) XXX-XXXX for US numbers. Listen for: 'my number is...', 'you can reach me at...', 'call me at...', the caller spelling out digits, or any 10-digit number the caller provides. Example: (555) 123-4567. If caller says 'five five five, one two three, four five six seven' → (555) 123-4567"),
   email: z.string().nullable()
     .describe("Email address - MUST include @ symbol and domain (e.g., 'john@company.com'). If caller spells it out like 'john at company dot com', convert to proper format 'john@company.com'. Return null if no email mentioned."),
   
@@ -399,8 +399,16 @@ NAME:
 POSITION:
 - Job title: "Owner", "Marketing Director", "Manager", "CEO", "President"
 
-PHONE:
-- Any phone number mentioned
+PHONE NUMBER EXTRACTION (CRITICAL):
+- Listen carefully for ANY phone number the CALLER mentions
+- The caller may give their number in various ways:
+  * "My number is 555-123-4567"
+  * "You can reach me at five five five, one two three, four five six seven"
+  * "Call me at 555.123.4567"
+  * "The best number is area code 555, 123-4567"
+- Always format as (XXX) XXX-XXXX
+- The caller's phone number is IMPORTANT for verification against the inbound call
+- If the caller gives a phone number that sounds like the same one calling in, capture it!
 
 EMAIL:
 - Email address if provided

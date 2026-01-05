@@ -107,7 +107,6 @@ export const PhoneInput = memo(function PhoneInput({
   baseClassName = "h-10 text-sm border-2 rounded transition-colors"
 }: { className?: string; baseClassName?: string }) {
   const phone = useFormStore(selectField('phone'));
-  const twilioPhone = useFormStore((s) => s.twilioPhone);
   const twilioPhonePreFilled = useFormStore((s) => s.twilioPhonePreFilled);
   const phoneVerified = useFormStore((s) => s.phoneVerified);
   const userEditedFields = useFormStore((s) => s.userEditedFields);
@@ -117,7 +116,7 @@ export const PhoneInput = memo(function PhoneInput({
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setTwilioPhonePreFilled(false);
-    setPhoneVerified(false); // Clear verification when manually editing
+    setPhoneVerified(false);
     updateField('phone', e.target.value);
   }, [updateField, setTwilioPhonePreFilled, setPhoneVerified]);
 
@@ -142,24 +141,13 @@ export const PhoneInput = memo(function PhoneInput({
   }
 
   return (
-    <div className="relative">
-      <Input
-        value={phone ?? ""}
-        onChange={handleChange}
-        className={`${baseClassName} ${colorClass} ${className} ${phoneVerified ? 'pr-8' : ''}`}
-      />
-      {phoneVerified && (
-        <span 
-          className="absolute right-2 top-1/2 -translate-y-1/2 text-green-600 text-lg font-bold"
-          title="Phone verified - caller's number matches"
-        >
-          ✓
-        </span>
-      )}
-    </div>
+    <Input
+      value={phone ?? ""}
+      onChange={handleChange}
+      className={`${baseClassName} ${colorClass} ${className}`}
+    />
   );
 });
-
 // ============================================================================
 // CONTACT FIELD INPUT - For additional contacts
 // ============================================================================
