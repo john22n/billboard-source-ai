@@ -1,6 +1,6 @@
 /**
  * TaskRouter Event Callback
- * 
+ *
  * Handles TaskRouter events, particularly when a task enters the Voicemail queue.
  * When no agents answer or none are available, redirects the call to voicemail.
  */
@@ -67,12 +67,6 @@ export async function POST(req: Request) {
       console.log(`✅ Reservation accepted by worker: ${workerSid}`);
     }
 
-    // Handle task entering Voicemail queue
-    // The voicemail worker will handle the redirect via the assignment callback
-    if (eventType === 'task-queue.entered' && taskQueueName === 'Voicemail') {
-      console.log('📨 Task entered Voicemail queue - waiting for voicemail worker assignment');
-    }
-
     // Handle reservation timeout (for logging)
     if (eventType === 'reservation.timeout') {
       const workerSid = formData.get('WorkerSid') as string;
@@ -87,32 +81,12 @@ export async function POST(req: Request) {
       console.log('📞 TaskRouter routing to next available worker');
     }
 
-    // Handle task canceled - redirect call to voicemail
+    // Handle task canceled - just log, don't redirect
     if (eventType === 'task.canceled') {
-      console.log('🗑️ Task canceled - redirecting to voicemail');
-
-      try {
-        const attrs = JSON.parse(taskAttributes || '{}');
-        const callSid = attrs.call_sid;
-
-        if (callSid) {
-          const appUrl = getAppUrl(req);
-          const voicemailUrl = `${appUrl}/api/taskrouter/voicemail?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
-
-          console.log(`📞 Redirecting call ${callSid} to voicemail`);
-
-          await client.calls(callSid).update({
-            url: voicemailUrl,
-            method: 'POST',
-          });
-
-          console.log('✅ Call redirected to voicemail');
-        } else {
-          console.log('⚠️ No call_sid in task attributes');
-        }
-      } catch (error) {
-        console.error('❌ Failed to redirect to voicemail:', error);
-      }
+      const taskCanceledReason = formData.get('TaskCanceledReason') as string;
+      console.log('🗑️ Task canceled');
+      console.log('Reason:', taskCanceledReason);
+      // Voicemail is handled by enqueue-complete, not here
     }
 
     return new Response(null, { status: 204 });
