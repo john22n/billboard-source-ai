@@ -40,6 +40,9 @@ export default function SalesCallTranscriber() {
   const [nutshellStatus, setNutshellStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [nutshellMessage, setNutshellMessage] = useState('');
   const [resetTrigger, setResetTrigger] = useState(0);
+  
+  // ✅ NEW: Store caller's phone number separately so it persists after call is accepted
+  const [callerPhone, setCallerPhone] = useState<string>("");
 
   // ✅ Get store actions (STABLE - won't cause re-renders)
   const updateFromAI = useFormStore((s) => s.updateFromAI);
@@ -81,12 +84,23 @@ export default function SalesCallTranscriber() {
     onCallDisconnected,
   } = useTwilioContext();
 
+  // ✅ NEW: Capture caller's phone number as soon as incoming call arrives
+  // This runs BEFORE the call is accepted, so we capture the number while it's still available
+  useEffect(() => {
+    if (incomingCall?.parameters?.From) {
+      const fromNumber = incomingCall.parameters.From;
+      console.log('📞 Captured caller phone from Twilio:', fromNumber);
+      setCallerPhone(fromNumber);
+    }
+  }, [incomingCall]);
+
   // Register callbacks for call events
   useEffect(() => {
     onCallAccepted((call) => startTranscription(call));
     onCallDisconnected(() => {
       stopTranscription();
       resetStatus();
+      // Note: We don't clear callerPhone here so it persists for the form
     });
   }, [onCallAccepted, onCallDisconnected, startTranscription, stopTranscription, resetStatus]);
 
@@ -115,6 +129,7 @@ export default function SalesCallTranscriber() {
     setBillboardContext("");
     resetExtraction();
     resetForm(); // Reset Zustand store
+    setCallerPhone(""); // ✅ Clear caller phone on reset
     setResetTrigger(prev => prev + 1);
   }, [clearTranscripts, resetExtraction, resetForm]);
 
@@ -382,6 +397,13 @@ export default function SalesCallTranscriber() {
                 </div>
               )}
 
+              {/* ✅ NEW: Show captured caller phone for debugging (can remove later) */}
+              {callerPhone && !incomingCall && (
+                <div className="px-2 py-1 bg-blue-500/30 backdrop-blur-sm border border-blue-300/30 rounded text-xs">
+                  <span className="text-white font-medium">📱 Caller: {callerPhone}</span>
+                </div>
+              )}
+
               {/* Status Indicators */}
               <div className="flex flex-wrap gap-1.5">
                 {isExtracting && (
@@ -470,7 +492,7 @@ export default function SalesCallTranscriber() {
                   <LeadForm
                     key={resetTrigger}
                     resetTrigger={resetTrigger}
-                    inboundPhone={incomingCall?.parameters?.From}
+                    inboundPhone={callerPhone}  // ✅ Use stored callerPhone instead of incomingCall
                   />
                   <PricingPanel
                     key={`pricing-${activeMarketIndex}-${additionalMarkets.length}`}
