@@ -69,7 +69,6 @@ export function useBillboardFormExtraction() {
     },
     onFinish: () => {
       console.log("✅ Extraction completed successfully");
-      console.log("📊 Final extracted data:", object);
       setExtractionError(null);
       setRetryCount(0);
       setIsCleared(false);

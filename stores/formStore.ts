@@ -38,9 +38,6 @@ interface FormStore {
   // ✅ Track which fields just changed (for animations/effects)
   recentlyChangedFields: Set<string>;
   
-  // ✅ Track which fields came from AI extraction (prevents re-overwrite on new extractions)
-  aiExtractedFields: Set<string>;
-  
   // ✅ Additional contacts and markets
   additionalContacts: ContactData[];
   additionalMarkets: MarketData[];
@@ -159,7 +156,6 @@ export const useFormStore = create<FormStore>()((set, get) => ({
     fields: { ...INITIAL_FIELDS },
     userEditedFields: new Set<string>(),
     recentlyChangedFields: new Set<string>(),
-    aiExtractedFields: new Set<string>(),
     additionalContacts: [],
     additionalMarkets: [],
     activeContactIndex: 0,
@@ -183,50 +179,30 @@ export const useFormStore = create<FormStore>()((set, get) => ({
       }));
     },
 
-    // ✅ Update from AI - only updates empty fields and respects user edits
-    // ✅ PROTECTION LAYERS:
-    //   1. Never overwrite user-edited fields
-    //   2. Never overwrite Twilio-prefilled phone
-    //   3. Never re-overwrite fields that came from previous AI extraction
+    // ✅ Update from AI - only updates fields NOT edited by user
+    // ✅ Special handling for phone verification
     updateFromAI: (data) => {
-      const { userEditedFields, fields, twilioPhone, twilioPhonePreFilled, aiExtractedFields } = get();
+      const { userEditedFields, fields, twilioPhone, twilioPhonePreFilled } = get();
       const newFields = { ...fields };
       const changed = new Set<string>();
-      const newlyExtracted = new Set<string>();
 
       // Helper to normalize phone numbers for comparison (last 10 digits only)
       const normalizePhone = (phone: string | null | undefined): string => 
         phone?.replace(/\D/g, '').slice(-10) || '';
 
-      console.log('📥 updateFromAI received data:', data);
-
       for (const [key, value] of Object.entries(data)) {
         // Skip 'confidence' field - it's not part of the form
         if (key === 'confidence') continue;
         
-        console.log(`  Processing ${key}: "${value}" (type: ${typeof value})`);
-        
         // Skip if user has edited this field
-        if (userEditedFields.has(key)) {
-          console.log(`    → Skipped: user edited`);
-          continue;
-        }
+        if (userEditedFields.has(key)) continue;
         
         // Skip if value is undefined or null
-        if (value === null || value === undefined) {
-          console.log(`    → Skipped: null/undefined`);
-          continue;
-        }
+        if (value === null || value === undefined) continue;
         
         // Skip empty strings and arrays
-        if (typeof value === 'string' && value.trim() === '') {
-          console.log(`    → Skipped: empty string`);
-          continue;
-        }
-        if (Array.isArray(value) && value.length === 0) {
-          console.log(`    → Skipped: empty array`);
-          continue;
-        }
+        if (typeof value === 'string' && value.trim() === '') continue;
+        if (Array.isArray(value) && value.length === 0) continue;
 
         // =========================================================================
         // PHONE FIELD SPECIAL HANDLING
@@ -234,7 +210,6 @@ export const useFormStore = create<FormStore>()((set, get) => ({
         if (key === 'phone') {
           // If Twilio phone is prefilled, NEVER overwrite it with AI extraction
           if (twilioPhonePreFilled) {
-            console.log(`    → Skipped: Twilio prefilled. Checking verification...`);
             // But still check for verification if AI extracted a valid phone
             if (value && typeof value === 'string' && value.trim()) {
               const extractedNormalized = normalizePhone(value);
@@ -242,53 +217,22 @@ export const useFormStore = create<FormStore>()((set, get) => ({
               
               if (twilioNormalized && extractedNormalized) {
                 if (extractedNormalized === twilioNormalized) {
-                  console.log('✅ Phone VERIFIED! AI extraction matches Twilio caller ID');
-                  console.log(`   Twilio: ${twilioNormalized}, Extracted: ${extractedNormalized}`);
                   set({ phoneVerified: true });
-                } else {
-                  console.log('⚠️ Phone MISMATCH - AI extracted different number');
-                  console.log(`   Twilio: ${twilioNormalized}, Extracted: ${extractedNormalized}`);
                 }
               }
             }
             // ALWAYS skip updating the phone field when Twilio prefilled
             continue;
           }
-          
-          // For audio uploads, allow AI to update phone
-          console.log(`    → Phone field will be updated from AI extraction`);
         }
 
-        // =========================================================================
-        // PREVENT RE-OVERWRITING PREVIOUS AI EXTRACTIONS
-        // =========================================================================
-        // If this field already came from a previous AI extraction, skip it
-        // (Unless user has since edited it, which we already checked above)
-        if (aiExtractedFields.has(key)) {
-          console.log(`    → Skipped: already came from previous AI extraction`);
-          continue;
-        }
-
-        // Update the field (for all non-user-edited, non-ai-extracted fields)
-        console.log(`    → Updated to: "${value}"`);
+        // Update the field
         (newFields as Record<string, unknown>)[key] = value;
         changed.add(key);
-        newlyExtracted.add(key); // Track this was extracted
       }
 
       if (changed.size > 0) {
-        console.log('🤖 AI updated fields:', Array.from(changed));
-        console.log('📋 New fields state:', newFields);
-        // Add newly extracted fields to the tracking set
-        const updatedAiExtracted = new Set(aiExtractedFields);
-        newlyExtracted.forEach(f => updatedAiExtracted.add(f));
-        set({ 
-          fields: newFields, 
-          recentlyChangedFields: changed,
-          aiExtractedFields: updatedAiExtracted,
-        });
-      } else {
-        console.log('⚠️ No fields were updated by AI');
+        set({ fields: newFields, recentlyChangedFields: changed });
       }
     },
 
@@ -494,7 +438,6 @@ export const useFormStore = create<FormStore>()((set, get) => ({
         fields: { ...INITIAL_FIELDS },
         userEditedFields: new Set<string>(),
         recentlyChangedFields: new Set<string>(),
-        aiExtractedFields: new Set<string>(),
         additionalContacts: [],
         additionalMarkets: [],
         activeContactIndex: 0,

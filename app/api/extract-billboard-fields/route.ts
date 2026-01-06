@@ -67,7 +67,7 @@ const billboardLeadSchema = z.object({
   
   // Notes field (form uses 'notes', not 'proposalNotes')
   notes: z.string().nullable()
-    .describe("Purpose recap and additional notes - write as a paragraph summary (not bullet points), 2-3 sentences max. Summarize main goals, timeline, and important context. Example: 'Looking to launch a new product line with billboard advertising. Wants quick turnaround (ASAP) across I-35 corridor in Austin. First time using billboards, interested in comparing 3-month and 6-month options.'"),
+    .describe("Purpose recap and additional notes - bullet point summary, can include condensed info from above, important conversation details"),
   
   // Location fields - ACTIVE MARKET DATA
   targetCity: z.string().nullable()
@@ -340,10 +340,9 @@ WEBSITE (CRITICAL - Use "No" when no website):
 
 NOTES (Not proposalNotes - just 'notes'):
 - notes: This is "Purpose Recap & Additional Notes" on the form
-- Write as a PARAGRAPH SUMMARY (not bullet points) - 2-3 sentences max
-- Summarize the main goals, timeline, and any important context from the conversation
-- Can include condensed info about purpose, timeline, and key details
-- Example: "Looking to launch a new product line with billboard advertising. Wants quick turnaround (ASAP) across I-35 corridor in Austin. First time using billboards, interested in comparing 3-month and 6-month options."
+- Bullet point summary of conversation
+- Can include condensed info from above
+- Any important conversation details
 - CRITICAL: Extract this - it's a key field for sales reps
 
 LOCATION (3 SEPARATE FIELDS):
