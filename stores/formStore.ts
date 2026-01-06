@@ -181,6 +181,7 @@ export const useFormStore = create<FormStore>()((set, get) => ({
 
     // ✅ Update from AI - only updates fields NOT edited by user
     // ✅ FIXED: Now properly protects Twilio-prefilled phone numbers
+    // ✅ FIXED: Won't overwrite fields that already have values
     updateFromAI: (data) => {
       const { userEditedFields, fields, twilioPhone, twilioPhonePreFilled } = get();
       const newFields = { ...fields };
@@ -190,14 +191,32 @@ export const useFormStore = create<FormStore>()((set, get) => ({
       const normalizePhone = (phone: string | null | undefined): string => 
         phone?.replace(/\D/g, '').slice(-10) || '';
 
+      // Helper to check if a field already has a meaningful value
+      const hasExistingValue = (val: unknown): boolean => {
+        if (val === null || val === undefined) return false;
+        if (typeof val === 'string' && val.trim() === '') return false;
+        if (Array.isArray(val) && val.length === 0) return false;
+        return true;
+      };
+
       for (const [key, value] of Object.entries(data)) {
         // Skip 'confidence' field - it's not part of the form
         if (key === 'confidence') continue;
         // Skip if user has edited this field
         if (userEditedFields.has(key)) continue;
-        // Skip if value is undefined or same as current
+        // Skip if value is undefined
         if (value === undefined) continue;
-        if (JSON.stringify(newFields[key as FormFieldKey]) === JSON.stringify(value)) continue;
+        // Skip if incoming value is null/empty (don't clear existing data)
+        if (!hasExistingValue(value)) continue;
+        
+        // ✅ NEW: Skip if field already has a value - don't overwrite existing data
+        const currentValue = newFields[key as FormFieldKey];
+        if (hasExistingValue(currentValue)) {
+          // Field already filled - skip (unless it's phone which needs verification check)
+          if (key !== 'phone') {
+            continue;
+          }
+        }
 
         // =========================================================================
         // PHONE FIELD SPECIAL HANDLING
@@ -223,12 +242,11 @@ export const useFormStore = create<FormStore>()((set, get) => ({
               }
             }
             // ALWAYS skip updating the phone field when Twilio prefilled
-            console.log('📞 Keeping Twilio phone, skipping AI extraction');
             continue;
           }
           
-          // If not Twilio prefilled, skip if AI sends null/empty (don't clear existing phone)
-          if (!value || (typeof value === 'string' && !value.trim())) {
+          // If phone already has a value (from previous AI extraction), skip
+          if (hasExistingValue(currentValue)) {
             continue;
           }
         }
