@@ -181,7 +181,7 @@ export const useFormStore = create<FormStore>()((set, get) => ({
 
     // ✅ Update from AI - only updates fields NOT edited by user
     // ✅ FIXED: Now properly protects Twilio-prefilled phone numbers
-    // ✅ FIXED: Won't overwrite fields that already have values
+    // ✅ FIXED: Won't overwrite fields that already have values or haven't been touched by user
     updateFromAI: (data) => {
       const { userEditedFields, fields, twilioPhone, twilioPhonePreFilled } = get();
       const newFields = { ...fields };
@@ -208,15 +208,6 @@ export const useFormStore = create<FormStore>()((set, get) => ({
         if (value === undefined) continue;
         // Skip if incoming value is null/empty (don't clear existing data)
         if (!hasExistingValue(value)) continue;
-        
-        // ✅ NEW: Skip if field already has a value - don't overwrite existing data
-        const currentValue = newFields[key as FormFieldKey];
-        if (hasExistingValue(currentValue)) {
-          // Field already filled - skip (unless it's phone which needs verification check)
-          if (key !== 'phone') {
-            continue;
-          }
-        }
 
         // =========================================================================
         // PHONE FIELD SPECIAL HANDLING
@@ -245,14 +236,26 @@ export const useFormStore = create<FormStore>()((set, get) => ({
             continue;
           }
           
-          // If phone already has a value (from previous AI extraction), skip
-          if (hasExistingValue(currentValue)) {
+          // If phone already has a value (from previous AI extraction or any source), skip
+          const currentPhoneValue = newFields[key as FormFieldKey];
+          if (hasExistingValue(currentPhoneValue)) {
+            // Phone already filled - skip to avoid overwrite
             continue;
           }
         }
         // =========================================================================
         // END PHONE FIELD SPECIAL HANDLING
         // =========================================================================
+
+        // =========================================================================
+        // ALL OTHER FIELDS
+        // =========================================================================
+        // Skip if field already has a value - don't overwrite existing data
+        const currentValue = newFields[key as FormFieldKey];
+        if (hasExistingValue(currentValue)) {
+          // Field already filled - skip to avoid overwrite
+          continue;
+        }
 
         (newFields as Record<string, unknown>)[key] = value;
         changed.add(key);
