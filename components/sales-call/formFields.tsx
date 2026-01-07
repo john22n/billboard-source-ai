@@ -104,10 +104,9 @@ export const FieldTextarea = memo(function FieldTextarea({
 
 export const PhoneInput = memo(function PhoneInput({ 
   className = "",
-  baseClassName = "h-10 text-sm border-2 rounded transition-colors"
+  baseClassName = "h-10 text-sm border-2 rounded transition-all"
 }: { className?: string; baseClassName?: string }) {
   const phone = useFormStore(selectField('phone'));
-  const twilioPhone = useFormStore((s) => s.twilioPhone);
   const twilioPhonePreFilled = useFormStore((s) => s.twilioPhonePreFilled);
   const phoneVerified = useFormStore((s) => s.phoneVerified);
   const userEditedFields = useFormStore((s) => s.userEditedFields);
@@ -117,21 +116,23 @@ export const PhoneInput = memo(function PhoneInput({
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setTwilioPhonePreFilled(false);
-    setPhoneVerified(false); // Clear verification when manually editing
+    setPhoneVerified(false);
     updateField('phone', e.target.value);
   }, [updateField, setTwilioPhonePreFilled, setPhoneVerified]);
 
-  // Determine phone input color
-  // Priority: Verified (bright green) > Manual edit (green) > Twilio pre-fill (yellow) > Empty (red)
+  // Determine phone input color and styling
+  // Priority: Verified (bright green with glow) > Manual edit (green) > Twilio pre-fill (yellow) > Empty (red)
   let colorClass = 'bg-red-100 border-black';
+  let wrapperClass = '';
   
   if (phone && phone.trim() !== "") {
     if (phoneVerified) {
       // ✅ VERIFIED: AI extracted phone matches Twilio caller ID
-      colorClass = 'bg-green-200 border-green-600 ring-2 ring-green-400 focus:border-green-700 focus:ring-green-500';
+      colorClass = 'bg-green-100 border-green-600 shadow-lg ring-2 ring-green-400 focus:border-green-700 focus:ring-green-500 focus:ring-offset-1';
+      wrapperClass = 'relative';
     } else if (twilioPhonePreFilled) {
       // ⏳ PENDING: Twilio pre-filled, waiting for verification
-      colorClass = 'bg-yellow-100 border-yellow-500 focus:border-yellow-600 focus:ring-yellow-500';
+      colorClass = 'bg-yellow-50 border-yellow-500 focus:border-yellow-600 focus:ring-yellow-400';
     } else if (userEditedFields.has('phone')) {
       // ✏️ MANUAL: User typed this in
       colorClass = 'bg-green-50 border-green-500 focus:border-green-600 focus:ring-green-500';
@@ -142,24 +143,20 @@ export const PhoneInput = memo(function PhoneInput({
   }
 
   return (
-    <div className="relative">
+    <div className={wrapperClass}>
       <Input
         value={phone ?? ""}
         onChange={handleChange}
-        className={`${baseClassName} ${colorClass} ${className} ${phoneVerified ? 'pr-8' : ''}`}
+        className={`${baseClassName} ${colorClass} ${className}`}
       />
       {phoneVerified && (
-        <span 
-          className="absolute right-2 top-1/2 -translate-y-1/2 text-green-600 text-lg font-bold"
-          title="Phone verified - caller's number matches"
-        >
-          ✓
-        </span>
+        <div className="absolute right-2 top-1/2 transform -translate-y-1/2 flex items-center gap-1">
+          <span className="text-xs font-semibold text-green-700">✓</span>
+        </div>
       )}
     </div>
   );
 });
-
 // ============================================================================
 // CONTACT FIELD INPUT - For additional contacts
 // ============================================================================
