@@ -2,13 +2,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
 import { sql } from 'drizzle-orm';
-import { embed, generateText } from 'ai';
+import { generateText } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { getSession } from '@/lib/auth';
+import OpenAI from 'openai';
 
 export const dynamic = 'force-dynamic';
 
-const embeddingModel = openai.embedding('text-embedding-3-small');
+// ⭐ Use OpenAI SDK directly for 512-dimension embeddings
+const openaiClient = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 export async function POST(req: NextRequest) {
   try {
@@ -61,11 +65,13 @@ Transcript: ${transcript}`,
     console.log('🏙️ Parsed - City:', city, 'State:', state);
     console.log('🔍 Location parts array:', locationParts);
 
-    // Generate embedding for the EXTRACTED LOCATION
-    const { embedding } = await embed({
-      model: embeddingModel,
-      value: extractedLocation,
+    // ⭐ Generate 512-dimension embedding using OpenAI SDK directly
+    const embeddingResponse = await openaiClient.embeddings.create({
+      model: 'text-embedding-3-small',
+      input: extractedLocation,
+      dimensions: 512,
     });
+    const embedding = embeddingResponse.data[0].embedding;
 
     // ✅ First, let's check what we have in the database for this city/state
     const debugResults = await db.execute(sql`
