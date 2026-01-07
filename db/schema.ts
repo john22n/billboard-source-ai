@@ -11,6 +11,7 @@ export const user = pgTable('User', {
   taskRouterWorkerSid: varchar('taskrouter_worker_sid', { length: 34 }),
   workerActivity: varchar('worker_activity', { length: 20 }).default('offline'),
 })
+
 export type User = InferSelectModel<typeof user>;
 
 // Passkey credentials for WebAuthn authentication
@@ -25,6 +26,7 @@ export const passkey = pgTable('Passkey', {
   name: varchar('name', { length: 64 }).default('Passkey'), // User-friendly name
   createdAt: timestamp('created_at').defaultNow().notNull(),
 })
+
 export type Passkey = InferSelectModel<typeof passkey>;
 
 export const openaiLogs = pgTable("openai_logs", {
@@ -40,8 +42,7 @@ export const openaiLogs = pgTable("openai_logs", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-// ADD THIS NEW TABLE FOR BILLBOARD DATA
-// db/schema-updated.ts
+// BILLBOARD DATA TABLE - UPDATED TO 512 DIMENSIONS
 export const billboardLocations = pgTable(
   "billboard_locations",
   {
@@ -49,15 +50,15 @@ export const billboardLocations = pgTable(
     city: text("city").notNull(),
     state: text("state").notNull(),
     county: text("county"),
-    
+
     // New pricing structure fields
-    avgDailyViews: text("avg_daily_views"), // Can be empty
-    fourWeekRange: text("four_week_range"), // Format: "$X,XXX-$X,XXX"
-    market: text("market"), // Market name (e.g., "Phoenix", "DFW")
-    marketRange: text("market_range"), // Market-specific range
-    generalRange: text("general_range"), // General pricing tiers
-    details: text("details"), // Street-specific rates and misc info
-    
+    avgDailyViews: text("avg_daily_views"),
+    fourWeekRange: text("four_week_range"),
+    market: text("market"),
+    marketRange: text("market_range"),
+    generalRange: text("general_range"),
+    details: text("details"),
+
     // Average prices per month
     avgBullPricePerMonth: integer("avg_bull_price_per_month").default(0),
     avgStatBullViewsPerWeek: integer("avg_stat_bull_views_per_week").default(0),
@@ -66,9 +67,9 @@ export const billboardLocations = pgTable(
     avgDigitalPricePerMonth: integer("avg_digital_price_per_month").default(0),
     avgDigitalViewsPerWeek: integer("avg_digital_views_per_week").default(0),
     avgViewsPerPeriod: text("avg_views_per_period"),
-    
-    // Vector embedding for semantic search
-    embedding: vector("embedding", { dimensions: 1536 }),
+
+    // ⭐ CHANGED: Vector embedding - now 512 dimensions (was 1536)
+    embedding: vector("embedding", { dimensions: 512 }),
   },
   (table) => ({
     embeddingIndex: index("embedding_index").using(

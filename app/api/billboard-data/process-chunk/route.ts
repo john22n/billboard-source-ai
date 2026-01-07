@@ -1,10 +1,9 @@
 // app/api/billboard-data/process-chunk/route.ts
-// UPDATED VERSION - Filters out empty rows to save space
+// UPDATED VERSION - 512 dimensions using OpenAI SDK directly
 
 import { NextRequest, NextResponse } from 'next/server';
 import { parse } from 'csv-parse/sync';
-import { embedMany } from 'ai';
-import { openai } from '@ai-sdk/openai';
+import OpenAI from 'openai';
 import { db } from '@/db';
 import { billboardLocations } from '@/db/schema';
 import { getSession } from '@/lib/auth';
@@ -13,7 +12,10 @@ import { getCurrentUser } from '@/lib/dal';
 export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
 
-const embeddingModel = openai.embedding('text-embedding-3-small');
+// ⭐ Use OpenAI SDK directly for 512-dimension embeddings
+const openaiClient = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 interface CSVRow {
   City: string;
@@ -34,19 +36,21 @@ interface CSVRow {
   'Avg Views/Period': string;
 }
 
-// ⭐ NEW: Filter function to only keep rows with useful data
+// ⭐ FIXED: Filter function now includes General Range check
 function hasUsefulData(record: CSVRow): boolean {
   // Keep if it has ANY of these:
   const hasViews = record['Avg Daily Views'] && record['Avg Daily Views'].trim() !== '';
   const hasFourWeekRange = record['4-Wk Range'] && record['4-Wk Range'].trim() !== '';
   const hasMarket = record.Market && record.Market.trim() !== '';
   const hasDetails = record.Details && record.Details.trim() !== '';
+  const hasGeneralRange = record['General Range'] && record['General Range'].trim() !== ''; // ⭐ NEW
+  const hasMarketRange = record['Market Range'] && record['Market Range'].trim() !== ''; // ⭐ NEW
   const hasPricing = 
     parseInt(record['Avg Bull Price/Mo'] || '0') > 0 ||
     parseInt(record['Avg Poster Price/Mo'] || '0') > 0 ||
     parseInt(record['Avg Digital Price/Mo'] || '0') > 0;
   
-  return hasViews || hasFourWeekRange || hasMarket || hasDetails || hasPricing;
+  return hasViews || hasFourWeekRange || hasMarket || hasDetails || hasGeneralRange || hasMarketRange || hasPricing;
 }
 
 function createEmbeddingText(record: CSVRow): string {
@@ -98,6 +102,20 @@ function createEmbeddingText(record: CSVRow): string {
   return parts.join('. ');
 }
 
+// ⭐ Helper function to generate embeddings in batches using OpenAI SDK
+async function generateEmbeddings(texts: string[]): Promise<number[][]> {
+  const response = await openaiClient.embeddings.create({
+    model: 'text-embedding-3-small',
+    input: texts,
+    dimensions: 512,
+  });
+  
+  // Sort by index to ensure order matches input
+  return response.data
+    .sort((a, b) => a.index - b.index)
+    .map(item => item.embedding);
+}
+
 export async function POST(req: NextRequest) {
   try {
     // Verify user is authenticated and has admin role
@@ -129,7 +147,7 @@ export async function POST(req: NextRequest) {
     const endIndex = Math.min(startIndex + chunkSize, allRecords.length);
     const chunk = allRecords.slice(startIndex, endIndex);
 
-    // ⭐ FILTER OUT EMPTY ROWS
+    // ⭐ FILTER OUT EMPTY ROWS (now properly checks General Range)
     const filteredChunk = chunk.filter(hasUsefulData);
     const skipped = chunk.length - filteredChunk.length;
     
@@ -152,11 +170,10 @@ export async function POST(req: NextRequest) {
       const batch = filteredChunk.slice(i, i + EMBEDDING_BATCH_SIZE);
       const textsToEmbed = batch.map(r => createEmbeddingText(r));
 
-      console.log(`🤖 Generating ${textsToEmbed.length} embeddings...`);
-      const { embeddings } = await embedMany({
-        model: embeddingModel,
-        values: textsToEmbed,
-      });
+      console.log(`🤖 Generating ${textsToEmbed.length} embeddings (512 dimensions)...`);
+      
+      // ⭐ Use our helper function for 512-dimension embeddings
+      const embeddings = await generateEmbeddings(textsToEmbed);
 
       const dataWithEmbeddings = batch.map((record, idx) => ({
         city: record.City || '',
