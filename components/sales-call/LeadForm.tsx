@@ -51,7 +51,6 @@ export function LeadForm({ resetTrigger, inboundPhone }: LeadFormProps) {
   const additionalContacts = useFormStore((s) => s.additionalContacts);
 
   // Actions
-  const reset = useFormStore((s) => s.reset);
   const prefillPhoneFromTwilio = useFormStore((s) => s.prefillPhoneFromTwilio);
   const setActiveMarketIndex = useFormStore((s) => s.setActiveMarketIndex);
   const setActiveContactIndex = useFormStore((s) => s.setActiveContactIndex);
@@ -67,12 +66,9 @@ export function LeadForm({ resetTrigger, inboundPhone }: LeadFormProps) {
     }
   }, [inboundPhone, prefillPhoneFromTwilio]);
 
-  // ✅ Handle reset
-  useEffect(() => {
-    if (resetTrigger !== undefined && resetTrigger > 0) {
-      reset();
-    }
-  }, [resetTrigger, reset]);
+  // Note: Reset is handled by resetForm() in parent's clearAll().
+  // The key prop change causes this component to remount with fresh state.
+  // No additional reset needed here to avoid double-reset issues.
 
   const canAddMoreMarkets = additionalMarkets.length < MAX_ADDITIONAL_MARKETS;
   const canAddMoreContacts = additionalContacts.length < MAX_ADDITIONAL_CONTACTS;

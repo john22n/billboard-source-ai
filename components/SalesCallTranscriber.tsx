@@ -487,7 +487,7 @@ export default function SalesCallTranscriber() {
               </TabsList>
 
               {/* Form + Pricing Tab */}
-              <TabsContent value="form" className="mt-0 flex-1 overflow-hidden flex flex-col">
+              <TabsContent value="form" className="mt-0 flex-1 overflow-hidden flex flex-col" asChild>
                 <div className="flex flex-col lg:flex-row gap-1 flex-1 overflow-hidden">
                   <LeadForm
                     key={resetTrigger}
@@ -495,7 +495,6 @@ export default function SalesCallTranscriber() {
                     inboundPhone={callerPhone}  // ✅ Use stored callerPhone instead of incomingCall
                   />
                   <PricingPanel
-                    key={`pricing-${activeMarketIndex}-${additionalMarkets.length}`}
                     isLoading={isLoadingBillboard}
                     billboardContext={billboardContext}
                     hasTranscripts={transcripts.length > 0}
@@ -511,21 +510,21 @@ export default function SalesCallTranscriber() {
               </TabsContent>
 
               {/* Map Tab */}
-              <TabsContent value="map" className="mt-0 flex-1 overflow-hidden">
+              <TabsContent value="map" className="mt-0 flex-1 overflow-hidden" asChild>
                 <GoogleMapPanel
                   initialLocation={currentMarketLocation}
                 />
               </TabsContent>
 
               {/* ArcGIS Map Tab */}
-              <TabsContent value="arcgis" className="mt-0 flex-1 overflow-hidden">
+              <TabsContent value="arcgis" className="mt-0 flex-1 overflow-hidden" asChild>
                 <ArcGISMapPanel
                   initialLocation={currentMarketLocation}
                 />
               </TabsContent>
 
               {/* Transcript Tab */}
-              <TabsContent value="transcript" className="mt-0 flex-1 overflow-hidden">
+              <TabsContent value="transcript" className="mt-0 flex-1 overflow-hidden" asChild>
                 <TranscriptView
                   ref={scrollRef}
                   transcripts={transcripts}
