@@ -314,7 +314,7 @@ export function PricingPanel({
   return (
     <div 
       className="h-full flex flex-col transition-all duration-300"
-      style={{ maxWidth: activeTab === 'estimate' ? '400px' : '400px', width: '100%' }}
+      style={{ maxWidth: '400px', width: '100%' }}
     >
       <div className="bg-white rounded-xl p-4 h-full flex flex-col overflow-hidden">
         {/* Header Tabs */}
@@ -451,8 +451,8 @@ export function PricingPanel({
           )}
         </div>
 
-        {/* Nutshell Button */}
-        <div className="flex flex-col items-center gap-2 pt-3 border-t border-slate-200 mt-3 flex-shrink-0">
+        {/* Nutshell Button - pushed to bottom with mt-auto */}
+        <div className="flex flex-col items-center gap-2 pt-3 border-t border-slate-200 mt-auto flex-shrink-0">
           {nutshellStatus !== 'idle' && (
             <span className={`text-xs font-medium ${nutshellStatus === 'success' ? 'text-green-600' : 'text-red-600'}`}>{nutshellMessage}</span>
           )}
