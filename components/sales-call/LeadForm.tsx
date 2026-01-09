@@ -74,14 +74,15 @@ export function LeadForm({ resetTrigger, inboundPhone }: LeadFormProps) {
   const canAddMoreContacts = additionalContacts.length < MAX_ADDITIONAL_CONTACTS;
 
   return (
-    <div className="lg:flex-[2] space-y-0 px-0.75 py-0.75 overflow-y-auto h-relative">
+    <div className="lg:flex-[2] flex flex-col overflow-y-auto h-relative p-1 m-1">
+      <div className="space-y-0">
       {/* INTRO Section */}
-      <div className="mb-0">
+      <div className="mb-0 px-4">
         <span className="inline-block bg-white border-2 border-b-0 border-black px-3.5 py-1.5 shadow-sm shadow-black text-md font-bold rounded-t-md">
           INTRO
         </span>
       </div>
-      <div className="bg-white border-2 border-black rounded-b-lg rounded-tr-lg p-4 shadow-sm shadow-black">
+      <div className="bg-white border-2 border-black rounded-b-lg rounded-tr-lg p-4 shadow-sm shadow-black mx-4">
         <div className="space-y-3">
           {/* Name and What do you want to advertise */}
           <div className="flex gap-8">
@@ -193,23 +194,33 @@ export function LeadForm({ resetTrigger, inboundPhone }: LeadFormProps) {
       </div>
 
       {/* Lead Type Bar */}
-      <div className="bg-gray-300 border-2 border-black shadow-sm shadow-black rounded-lg p-3.5 my-5 ml-35 -mb-7">
-        <div className="flex items-center justify-between">
-          <LeadTypeButtonGroup />
-          <div className="flex items-center gap-2">
-            <Label className="text-md font-bold whitespace-nowrap">Ballpark:</Label>
-            <BallparkInput />
+      <div className="flex gap-8 my-5 -mb-7 px-4">
+        {/* Left spacer - matches Name field width */}
+        <div className="w-60"></div>
+
+        {/* Right side - matches "What do you want to advertise" section */}
+        <div className="flex-1 bg-gray-300 border-2 border-black shadow-sm shadow-black rounded-lg p-3.5">
+          <div className="flex items-center gap-4">
+            {/* Left: Lead Type Buttons - takes up flex space */}
+            <div className="flex-1 min-w-0">
+              <LeadTypeButtonGroup />
+            </div>
+            {/* Right: Ballpark section - fixed width based on content */}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <Label className="text-md font-bold whitespace-nowrap">Ballpark:</Label>
+              <BallparkInput />
+            </div>
           </div>
         </div>
       </div>
 
       {/* PROPOSAL Section */}
-      <div className="mb-0 mt-3.5">
+      <div className="mb-0 mt-3.5 px-4">
         <span className="inline-block bg-white border-2 border-b-0 border-black shadow-sm shadow-black px-3.5 py-1.5 text-md font-bold rounded-t-md">
           PROPOSAL
         </span>
       </div>
-      <div className="bg-white border-2 border-black shadow-black rounded-b-lg rounded-tr-lg p-4 shadow-sm">
+      <div className="bg-white border-2 border-black shadow-black rounded-b-lg rounded-tr-lg p-4 shadow-sm mx-4">
         <div className="flex gap-5 h-full">
           {/* Left: Purpose Recap */}
           <div className="flex-1">
@@ -262,15 +273,15 @@ export function LeadForm({ resetTrigger, inboundPhone }: LeadFormProps) {
             </div>
 
             {/* Duration and Are you interested in */}
-            <div className="flex gap-4 flex-1">
-              {/* Duration */}
-              <div className="flex-2 flex flex-col">
+            <div className="flex gap-5 flex-1">
+              {/* Duration - matches City/State/Start column width */}
+              <div className="flex-[3] flex flex-col">
                 <Label className="text-blue-600 font-bold text-md mb-1 block">Duration</Label>
                 <DurationButtonGroup marketIndex={activeMarketIndex} />
               </div>
 
-              {/* Are you interested in */}
-              <div className="flex-1 mr-11">
+              {/* Are you interested in - matches Area column width */}
+              <div className="flex-[3] flex flex-col items-center">
                 <Label className="text-blue-600 text-center font-bold text-md mb-1 block">
                   Are you interested in?
                 </Label>
@@ -282,52 +293,63 @@ export function LeadForm({ resetTrigger, inboundPhone }: LeadFormProps) {
       </div>
 
       {/* Market Tabs */}
-      <div className="flex flex-wrap gap-1 mt-0 ml-172">
-        <button
-          onClick={() => setActiveMarketIndex(0)}
-          className={`inline-block border-2 ${
-            activeMarketIndex === 0 ? 'border-t-0 rounded-b-md' : 'bg-gray-300 text-gray-400 border-t-0 rounded-b-md'
-          } border-black shadow-sm shadow-black px-3.5 py-1.5 text-sm font-bold`}
-        >
-          Mkt #1
-        </button>
-        {additionalMarkets.map((_, index) => (
-          <button
-            key={index + 1}
-            onClick={() => setActiveMarketIndex(index + 1)}
-            className={`inline-block border-2 ${
-              activeMarketIndex === index + 1 ? 'border-t-0 rounded-b-md' : 'bg-gray-300 text-gray-400 border-t-0 rounded-b-md'
-            } border-black shadow-sm shadow-black px-3.5 py-1.5 text-sm font-bold relative group`}
-          >
-            <span>Mkt #{index + 2}</span>
-            <span
-              onClick={(e) => {
-                e.stopPropagation();
-                removeMarket(index + 1);
-              }}
-              className="ml-1.5 text-red-600 hover:text-red-800 cursor-pointer"
+      <div className="flex gap-5 mt-0 px-4">
+        {/* Left spacer - matches Purpose Recap width */}
+        <div className="flex-1"></div>
+
+        {/* Right side - matches Location & Duration width with nested structure */}
+        <div className="flex-1 flex gap-5">
+          {/* Tabs container - matches Duration position (flex-[3]) */}
+          <div className="flex-[3] flex flex-wrap gap-0.5 sm:gap-1 lg:gap-2">
+            <button
+              onClick={() => setActiveMarketIndex(0)}
+              className={`inline-block border-2 ${
+                activeMarketIndex === 0 ? 'border-t-0 rounded-b-md' : 'bg-gray-300 text-gray-400 border-t-0 rounded-b-md'
+              } border-black shadow-sm shadow-black px-1.5 py-0.5 sm:px-2.5 sm:py-1 lg:px-3.5 lg:py-1.5 text-[10px] sm:text-xs lg:text-sm font-bold`}
             >
-              ×
-            </span>
-          </button>
-        ))}
-        {canAddMoreMarkets && (
-          <button
-            onClick={addMarket}
-            className="inline-block text-gray-400 hover:text-black px-3.5 py-1.5 text-sm font-bold rounded-b-md transition-colors"
-          >
-            + Market
-          </button>
-        )}
+              Mkt #1
+            </button>
+            {additionalMarkets.map((_, index) => (
+              <button
+                key={index + 1}
+                onClick={() => setActiveMarketIndex(index + 1)}
+                className={`inline-block border-2 ${
+                  activeMarketIndex === index + 1 ? 'border-t-0 rounded-b-md' : 'bg-gray-300 text-gray-400 border-t-0 rounded-b-md'
+                } border-black shadow-sm shadow-black px-1.5 py-0.5 sm:px-2.5 sm:py-1 lg:px-3.5 lg:py-1.5 text-[10px] sm:text-xs lg:text-sm font-bold relative group`}
+              >
+                <span>Mkt #{index + 2}</span>
+                <span
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeMarket(index + 1);
+                  }}
+                  className="ml-1 sm:ml-1.5 text-red-600 hover:text-red-800 cursor-pointer"
+                >
+                  ×
+                </span>
+              </button>
+            ))}
+            {canAddMoreMarkets && (
+              <button
+                onClick={addMarket}
+                className="inline-block text-gray-400 hover:text-black px-1.5 py-0.5 sm:px-2.5 sm:py-1 lg:px-3.5 lg:py-1.5 text-[10px] sm:text-xs lg:text-sm font-bold rounded-b-md transition-colors"
+              >
+                + Market
+              </button>
+            )}
+          </div>
+          {/* Right spacer - matches "Are you interested in" position (flex-[3] mr-11) */}
+          <div className="flex-[3] mr-11"></div>
+        </div>
       </div>
 
       {/* Contact Tabs */}
-      <div className="flex flex-wrap gap-1 mt-2">
+      <div className="flex flex-wrap gap-0.5 sm:gap-1 lg:gap-2 mt-2 px-4">
         <button
           onClick={() => setActiveContactIndex(0)}
           className={`inline-block border-2 ${
             activeContactIndex === 0 ? 'border-b-0 rounded-t-md bg-gray-300' : 'bg-white text-gray-400 border-b-0 rounded-t-md'
-          } border-black shadow-sm shadow-black px-3.5 py-1.5 text-md font-bold`}
+          } border-black shadow-sm shadow-black px-1.5 py-0.5 sm:px-2.5 sm:py-1 lg:px-3.5 lg:py-1.5 text-[10px] sm:text-xs lg:text-md font-bold`}
         >
           CONTACT INFO
         </button>
@@ -337,7 +359,7 @@ export function LeadForm({ resetTrigger, inboundPhone }: LeadFormProps) {
             onClick={() => setActiveContactIndex(index + 1)}
             className={`inline-block border-2 ${
               activeContactIndex === index + 1 ? 'border-b-0 rounded-t-md bg-gray-300' : 'bg-white text-gray-400 border-b-0 rounded-t-md'
-            } border-black shadow-sm shadow-black px-3.5 py-1.5 text-md font-bold relative group`}
+            } border-black shadow-sm shadow-black px-1.5 py-0.5 sm:px-2.5 sm:py-1 lg:px-3.5 lg:py-1.5 text-[10px] sm:text-xs lg:text-md font-bold relative group`}
           >
             <span>CONTACT #{index + 2}</span>
             <span
@@ -345,7 +367,7 @@ export function LeadForm({ resetTrigger, inboundPhone }: LeadFormProps) {
                 e.stopPropagation();
                 removeContact(index + 1);
               }}
-              className="ml-1.5 text-red-600 hover:text-red-800 cursor-pointer"
+              className="ml-1 sm:ml-1.5 text-red-600 hover:text-red-800 cursor-pointer"
             >
               ×
             </span>
@@ -354,7 +376,7 @@ export function LeadForm({ resetTrigger, inboundPhone }: LeadFormProps) {
         {canAddMoreContacts && (
           <button
             onClick={addContact}
-            className="inline-block text-gray-400 hover:text-black px-3.5 py-1.5 text-sm font-bold rounded-t-md transition-colors"
+            className="inline-block text-gray-400 hover:text-black px-1.5 py-0.5 sm:px-2.5 sm:py-1 lg:px-3.5 lg:py-1.5 text-[10px] sm:text-xs lg:text-sm font-bold rounded-t-md transition-colors"
           >
             + Contact
           </button>
@@ -362,7 +384,7 @@ export function LeadForm({ resetTrigger, inboundPhone }: LeadFormProps) {
       </div>
 
       {/* Active Contact */}
-      <div className="bg-gray-300 border-2 border-black shadow-black rounded-b-lg rounded-tr-lg p-4 shadow-sm">
+      <div className="bg-gray-300 border-2 border-black shadow-black rounded-b-lg rounded-tr-lg p-4 shadow-sm mx-4">
         <div className="space-y-3">
           {/* Name, Position, Phone, Email */}
           <div className="grid grid-cols-4 gap-2.5">
@@ -402,6 +424,7 @@ export function LeadForm({ resetTrigger, inboundPhone }: LeadFormProps) {
             </div>
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

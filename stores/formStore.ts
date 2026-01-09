@@ -521,7 +521,7 @@ export const selectCurrentContact = (state: FormStore) => {
       phone: state.fields.phone ?? '',
       email: state.fields.email ?? '',
       decisionMaker: state.fields.decisionMaker ?? '',
-      sendOver: (state.fields.sendOver ?? []).filter((s): s is "Avails" | "Panel Info" | "Planning Rates" => s !== undefined),
+      sendOver: (Array.isArray(state.fields.sendOver) ? state.fields.sendOver : []).filter((s): s is "Avails" | "Panel Info" | "Planning Rates" => s !== undefined),
     };
   }
   return state.additionalContacts[state.activeContactIndex - 1] ?? {

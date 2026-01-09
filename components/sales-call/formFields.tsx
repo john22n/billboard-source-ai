@@ -468,7 +468,7 @@ export const DecisionMakerButtonGroup = memo(function DecisionMakerButtonGroup({
   }, [contactIndex, updateContactField, setConfirmedDecisionMaker]);
 
   return (
-    <div className={`flex gap-3 ${className}`}>
+    <div className={`flex gap-1 sm:gap-2 lg:gap-3 flex-wrap lg:flex-nowrap ${className}`}>
       {options.map((option) => {
         let bgClass = 'bg-red-100 border-black';
         if (confirmedValue === option.value) {
@@ -481,7 +481,7 @@ export const DecisionMakerButtonGroup = memo(function DecisionMakerButtonGroup({
           <button
             key={option.value}
             onClick={() => handleClick(option.value)}
-            className={`font-bold border-2 rounded transition-colors px-3.5 py-2 text-md ${bgClass}`}
+            className={`font-bold border-2 rounded transition-colors px-2 sm:px-2.5 lg:px-3.5 py-1 sm:py-1.5 lg:py-2 text-xs sm:text-sm lg:text-md whitespace-nowrap ${bgClass}`}
           >
             {option.label}
           </button>
@@ -515,9 +515,9 @@ export const BoardTypeButtonGroup = memo(function BoardTypeButtonGroup({
   });
 
   const options = [
-    { value: "Static", label: "Static" },
-    { value: "Digital", label: "Digital" },
-    { value: "Both", label: "Both" },
+    { value: "Static", label: "Static", short: "Sta" },
+    { value: "Digital", label: "Digital", short: "Dig" },
+    { value: "Both", label: "Both", short: "Bot" },
   ];
 
   const handleClick = useCallback((value: string) => {
@@ -526,7 +526,7 @@ export const BoardTypeButtonGroup = memo(function BoardTypeButtonGroup({
   }, [marketIndex, updateMarketField, setConfirmedBoardType]);
 
   return (
-    <div className={`flex gap-1.5 ${className}`}>
+    <div className={`flex gap-0.5 sm:gap-1 lg:gap-1.5 justify-center min-w-0 overflow-hidden ${className}`}>
       {options.map((option) => {
         let bgClass = 'bg-red-100 border-black';
         if (confirmedValue === option.value) {
@@ -539,9 +539,10 @@ export const BoardTypeButtonGroup = memo(function BoardTypeButtonGroup({
           <button
             key={option.value}
             onClick={() => handleClick(option.value)}
-            className={`font-bold border-2 rounded transition-colors px-2.5 py-1.5 text-md xl:text-sm flex-1 ${bgClass}`}
+            className={`font-bold border-2 rounded transition-colors px-1 sm:px-1.5 lg:px-3 py-0.5 sm:py-1 lg:py-1.5 text-xs sm:text-sm whitespace-nowrap flex-1 min-w-0 ${bgClass}`}
           >
-            {option.label}
+            <span className="sm:hidden">{option.short}</span>
+            <span className="hidden sm:inline">{option.label}</span>
           </button>
         );
       })}
@@ -605,7 +606,7 @@ export const DurationButtonGroup = memo(function DurationButtonGroup({
   }, [confirmedSelections, marketIndex, setConfirmedDuration, updateMarketField]);
 
   return (
-    <div className={`flex gap-2 ${className}`}>
+    <div className={`flex gap-0.5 sm:gap-1 lg:gap-1.5 max-w-full min-w-0 overflow-hidden ${className}`}>
       {options.map((option) => {
         const isConfirmed = confirmedSelections.includes(option.value);
         const isAISuggested = aiSuggestions.includes(option.value);
@@ -618,15 +619,15 @@ export const DurationButtonGroup = memo(function DurationButtonGroup({
         }
 
         return (
-          <div key={option.value} className="flex flex-col items-center">
+          <div key={option.value} className="flex flex-col items-center flex-1 min-w-0">
             <button
               onClick={() => handleClick(option.value)}
-              className={`font-bold border-2 rounded transition-colors px-2.5 py-1.5 text-sm text-nowrap lg:text-xs ${bgClass}`}
+              className={`font-bold border-2 rounded transition-colors px-1 py-0.5 sm:px-1.5 sm:py-1 lg:px-2 lg:py-1 text-nowrap text-[10px] sm:text-xs lg:text-sm w-full truncate ${bgClass}`}
             >
               {option.label}
             </button>
             {subtexts[option.value] && (
-              <span className="text-[10px] text-gray-500 font-normal">
+              <span className="text-[6px] sm:text-[8px] lg:text-[10px] text-gray-500 font-normal">
                 {subtexts[option.value]}
               </span>
             )}
@@ -657,11 +658,12 @@ export const SendOverButtonGroup = memo(function SendOverButtonGroup({
   const setConfirmedSendOver = useFormStore((s) => s.setConfirmedSendOver);
   const updateField = useFormStore((s) => s.updateField);
 
-  // ✅ Fix: Get raw value, handle array operations outside
+  // ✅ Fix: Get raw value, handle array operations outside (matching DurationButtonGroup pattern)
   const sendOverRaw = useFormStore((s) => contactIndex === 0 ? s.fields.sendOver : null);
   const aiSuggestions = (() => {
     if (contactIndex !== 0 || !sendOverRaw) return [];
-    return sendOverRaw.filter((s): s is "Avails" | "Panel Info" | "Planning Rates" => s !== undefined);
+    if (Array.isArray(sendOverRaw)) return sendOverRaw.flat() as string[];
+    return [sendOverRaw as string];
   })();
 
   const options = [
@@ -683,7 +685,7 @@ export const SendOverButtonGroup = memo(function SendOverButtonGroup({
   }, [confirmedSelections, contactIndex, setConfirmedSendOver, updateField]);
 
   return (
-    <div className={`flex gap-3 ${className}`}>
+    <div className={`flex gap-1 sm:gap-2 lg:gap-3 flex-wrap lg:flex-nowrap ${className}`}>
       {options.map((option) => {
         const isConfirmed = confirmedSelections.includes(option.value);
         const isAISuggested = aiSuggestions.includes(option.value as "Avails" | "Panel Info" | "Planning Rates");
@@ -699,7 +701,7 @@ export const SendOverButtonGroup = memo(function SendOverButtonGroup({
           <button
             key={option.value}
             onClick={() => handleClick(option.value)}
-            className={`font-bold border-2 rounded transition-colors px-3.5 py-2 text-md ${bgClass}`}
+            className={`font-bold border-2 rounded transition-colors px-2 sm:px-2.5 lg:px-3.5 py-1 sm:py-1.5 lg:py-2 text-xs sm:text-sm lg:text-md whitespace-nowrap ${bgClass}`}
           >
             {option.label}
           </button>
@@ -733,7 +735,7 @@ export const LeadTypeButtonGroup = memo(function LeadTypeButtonGroup({
   }, [updateField, setConfirmedLeadType]);
 
   return (
-    <div className={`flex gap-25 ${className}`}>
+    <div className={`flex flex-wrap gap-2 sm:gap-4 lg:gap-12 ${className}`}>
       {options.map((option) => {
         let bgClass = 'bg-red-100 border-black';
         if (confirmedValue === option.value) {
@@ -746,7 +748,7 @@ export const LeadTypeButtonGroup = memo(function LeadTypeButtonGroup({
           <button
             key={option.value}
             onClick={() => handleClick(option.value)}
-            className={`font-bold border-2 rounded transition-colors px-10 py-2.5 text-md ${bgClass}`}
+            className={`font-bold border-2 rounded transition-colors px-2 sm:px-3 lg:px-4 py-1 sm:py-1.5 lg:py-2 text-xs sm:text-sm lg:text-md whitespace-nowrap ${bgClass}`}
           >
             {option.label}
           </button>

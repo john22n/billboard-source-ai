@@ -19,7 +19,7 @@ interface PricingPanelProps {
 
 interface PricingCard {
   market: string;
-  type: 'market-range' | 'general-range' | 'avg-views';
+  type: 'market-range' | 'general-range' | 'avg-views' | 'four-week-only';
   label: string;
   data: string[];
   note?: string;
@@ -237,19 +237,44 @@ export function PricingPanel({
     const marketRangeMatch = contextToUse.match(/Market\s*Range:\s*([^\n.]+)/i);
     const hasGeneralPricing = /General\s*Pricing:/i.test(contextToUse);
     
-    // PRIORITY 1: BLUE - has Average Daily Views
-    if (avgViewsMatch?.[1]) {
+    // Extract market name from context (e.g., "Market: Phoenix" or "Market Name: Phx")
+    const marketNameMatch = contextToUse.match(/Market(?:\s*Name)?:\s*([^,\n]+)/i);
+    const dbMarketName = marketNameMatch?.[1]?.trim() || '';
+    
+    // PRIORITY 1: BLUE - has BOTH Average Daily Views AND 4-Week Range
+    if (avgViewsMatch?.[1] && fourWeekMatch?.[1]) {
       cards.push({
         market: currentLocation || 'Market',
         type: 'avg-views',
         label: 'Avg Daily Views',
         data: [avgViewsMatch[1]],
         subtitle: '4-Wk Range',
-        subtitleData: fourWeekMatch?.[1] || '$2,000-$6,000',
+        subtitleData: fourWeekMatch[1],
         note: '*Rates vary by location.'
       });
     }
-    // PRIORITY 2: BLACK - has General Pricing with market size tiers
+    // PRIORITY 2: GREEN - has 4-Week Range only (no avg views)
+    else if (fourWeekMatch?.[1]) {
+      cards.push({
+        market: currentLocation || 'Market',
+        type: 'four-week-only',
+        label: '4-Week Range',
+        data: [fourWeekMatch[1]],
+        note: '*Rates vary by location.'
+      });
+    }
+    // PRIORITY 3: PURPLE - has Market Range
+    else if (marketRangeMatch?.[1]) {
+      cards.push({
+        market: currentLocation || 'Market',
+        type: 'market-range',
+        label: 'Market Range',
+        data: [marketRangeMatch[1].trim()],
+        subtitle: dbMarketName || undefined,  // Market name from DB (e.g., "Phx")
+        note: '*No city boards, but in market.'
+      });
+    }
+    // PRIORITY 4: BLACK - has General Pricing with market size tiers
     else if (hasGeneralPricing) {
       const priceRangePattern = /\$[\d,]+\s*-\s*\$[\d,]+/g;
       const generalPricingIndex = contextToUse.toLowerCase().indexOf('general pricing:');
@@ -262,7 +287,6 @@ export function PricingPanel({
       const tiers: { label: string; range: string }[] = [];
       
       if (generalRanges.length >= 3) {
-        // Use first 3 ranges for small/medium/large
         tiers.push({ label: tierLabels[0], range: generalRanges[0] });
         tiers.push({ label: tierLabels[1], range: generalRanges[1] });
         tiers.push({ label: tierLabels[2], range: generalRanges[2] });
@@ -270,7 +294,6 @@ export function PricingPanel({
         tiers.push({ label: tierLabels[0], range: generalRanges[0] });
         tiers.push({ label: tierLabels[2], range: generalRanges[1] });
       } else if (generalRanges.length === 1) {
-        // Single range - show as general range without tier labels
         tiers.push({ label: 'Price Range', range: generalRanges[0] });
       }
       
@@ -283,16 +306,7 @@ export function PricingPanel({
         note: '*No specific data. Use general range.'
       });
     }
-    // PRIORITY 3: PURPLE - has Market Range
-    else if (marketRangeMatch?.[1]) {
-      cards.push({
-        market: currentLocation || 'Market',
-        type: 'market-range',
-        label: 'Market Range',
-        data: [marketRangeMatch[1].trim()],
-        note: '*No city boards, but in market.'
-      });
-    }
+    // PRIORITY 5: No pricing cards - will fall back to details display
     
     return cards;
   };
@@ -302,8 +316,10 @@ export function PricingPanel({
   
   const getCardColors = (type: PricingCard['type']) => {
     switch (type) {
-      case 'market-range': return { primary: '#7c3aed', text: '#7c3aed' };
-      case 'avg-views': return { primary: '#2563eb', text: '#2563eb' };
+      case 'avg-views': return { primary: '#2563eb', text: '#2563eb' };        // Blue
+      case 'four-week-only': return { primary: '#16a34a', text: '#16a34a' };   // Green
+      case 'market-range': return { primary: '#7c3aed', text: '#7c3aed' };     // Purple
+      case 'general-range': return { primary: '#000000', text: '#000000' };    // Black
       default: return { primary: '#000000', text: '#000000' };
     }
   };
@@ -314,7 +330,7 @@ export function PricingPanel({
   return (
     <div 
       className="h-full flex flex-col transition-all duration-300"
-      style={{ maxWidth: activeTab === 'estimate' ? '400px' : '400px', width: '100%' }}
+      style={{ maxWidth: '400px', width: '100%' }}
     >
       <div className="bg-white rounded-xl p-4 h-full flex flex-col overflow-hidden">
         {/* Header Tabs */}
@@ -359,6 +375,16 @@ export function PricingPanel({
                       {card.label}
                     </div>
                     
+                    {/* For market-range: show market name from DB between header and price */}
+                    {card.type === 'market-range' && card.subtitle && (
+                      <div 
+                        className="text-center py-2 border-l-2 border-r-2 border-b-2 border-black font-bold text-xl bg-white"
+                        style={{ color: colors.text }}
+                      >
+                        {card.subtitle}
+                      </div>
+                    )}
+                    
                     {/* Render tiers for general-range type */}
                     {card.tiers && card.tiers.map((tier, tierIdx) => (
                       <div key={tierIdx}>
@@ -384,7 +410,8 @@ export function PricingPanel({
                       </div>
                     ))}
                     
-                    {card.subtitle && (
+                    {/* For avg-views type: show subtitle (4-Wk Range) AFTER the data */}
+                    {card.type === 'avg-views' && card.subtitle && (
                       <>
                         <div className="text-center text-xl py-2 border-l-2 border-r-2 border-black text-white font-bold mt-3" style={{ backgroundColor: colors.primary }}>
                           {card.subtitle}
@@ -451,8 +478,8 @@ export function PricingPanel({
           )}
         </div>
 
-        {/* Nutshell Button */}
-        <div className="flex flex-col items-center gap-2 pt-3 border-t border-slate-200 mt-3 flex-shrink-0">
+        {/* Nutshell Button - pushed to bottom with mt-auto */}
+        <div className="flex flex-col items-center gap-2 pt-3 border-t border-slate-200 mt-auto flex-shrink-0">
           {nutshellStatus !== 'idle' && (
             <span className={`text-xs font-medium ${nutshellStatus === 'success' ? 'text-green-600' : 'text-red-600'}`}>{nutshellMessage}</span>
           )}

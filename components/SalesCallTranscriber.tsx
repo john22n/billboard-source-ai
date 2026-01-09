@@ -457,7 +457,7 @@ export default function SalesCallTranscriber() {
             </div>
           </CardHeader>
 
-          <CardContent className="p-4 flex-1 overflow-hidden flex flex-col">
+          <CardContent className="p-4 flex-1 overflow-hidden flex flex-col min-h-0">
             <Tabs defaultValue="form" className="w-full h-full flex flex-col">
               <TabsList className="grid w-full grid-cols-4 mb-4 bg-slate-100 p-1 rounded-lg h-9">
                 <TabsTrigger
