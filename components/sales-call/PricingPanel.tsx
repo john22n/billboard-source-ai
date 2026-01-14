@@ -328,11 +328,11 @@ export function PricingPanel({
   const isLoadingData = isLoadingMarket;
 
   return (
-    <div 
-      className="h-full flex flex-col transition-all duration-300"
-      style={{ maxWidth: '400px', width: '100%' }}
+    <div
+      className="flex flex-col transition-all duration-300 max-h-[calc(100vh-280px)] overflow-hidden"
+      style={{ maxWidth: '400px', width: '100%'}}
     >
-      <div className="bg-white rounded-xl p-4 h-full flex flex-col overflow-hidden">
+      <div className="bg-white rounded-xl p-4 flex-1 flex flex-col min-h-0 overflow-hidden">
         {/* Header Tabs */}
         <div className="flex mb-3 flex-shrink-0 justify-center">
           <button 
@@ -354,7 +354,7 @@ export function PricingPanel({
         </div>
 
         {/* Content Area */}
-        <div className="flex-1 overflow-y-auto space-y-4 min-h-0">
+        <div className="space-y-4 flex-1 overflow-y-auto min-h-0">
           {activeTab === 'estimate' && (
             <>
               {isLoadingData && (
@@ -455,8 +455,8 @@ export function PricingPanel({
           )}
 
           {activeTab === 'details' && (
-            <div className="bg-white rounded-lg p-3">
-              <h3 className="text-2xl font-black text-slate-800 mb-3 border-b-2 border-slate-200 pb-2">Pricing Details</h3>
+            <>
+              <h3 className="text-2xl font-black text-slate-800 mb-3 border-b-2 border-slate-200 pb-1 sticky top-0 bg-white">Pricing Details</h3>
               {parsedDetails.length > 0 ? (
                 <div className="space-y-2">
                   {parsedDetails.map((field, idx) => (
@@ -474,12 +474,12 @@ export function PricingPanel({
                   <p className="text-slate-500 text-sm font-medium">No details available yet</p>
                 </div>
               )}
-            </div>
+            </>
           )}
         </div>
 
         {/* Nutshell Button - pushed to bottom with mt-auto */}
-        <div className="flex flex-col items-center gap-2 pt-3 border-t border-slate-200 mt-auto flex-shrink-0">
+        <div className="flex flex-col items-center gap-2 pt-3 border-t border-slate-200 bg-white rounded-b-xl flex-shrink-0">
           {nutshellStatus !== 'idle' && (
             <span className={`text-xs font-medium ${nutshellStatus === 'success' ? 'text-green-600' : 'text-red-600'}`}>{nutshellMessage}</span>
           )}

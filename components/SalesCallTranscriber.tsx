@@ -302,9 +302,9 @@ export default function SalesCallTranscriber() {
   // ✅ PricingPanel will subscribe to fields directly, no need to pass them
 
   return (
-    <div className="h-full overflow-hidden">
-      <div className="h-full max-w-[1800px] mx-auto flex flex-col">
-        <Card className="shadow-2xl border-0 overflow-hidden flex flex-col h-full py-1">
+    <div className="h-full overflow-hidden flex items-center justify-center m-0 p-0">
+      <div className="max-w-[1800px] w-full flex flex-col">
+        <Card className="shadow-lg border-0 flex flex-col">
           {/* Header */}
           <CardHeader className="bg-gradient-to-r from-blue-600 via-indigo-600 to-primary text-white py-3 px-4">
             <div className="flex flex-col gap-2">
@@ -457,7 +457,7 @@ export default function SalesCallTranscriber() {
             </div>
           </CardHeader>
 
-          <CardContent className="p-4 flex-1 overflow-hidden flex flex-col min-h-0">
+          <CardContent className="p-2 flex flex-col">
             <Tabs defaultValue="form" className="w-full h-full flex flex-col">
               <TabsList className="grid w-full grid-cols-4 mb-4 bg-slate-100 p-1 rounded-lg h-9">
                 <TabsTrigger
@@ -487,8 +487,8 @@ export default function SalesCallTranscriber() {
               </TabsList>
 
               {/* Form + Pricing Tab */}
-              <TabsContent value="form" className="mt-0 flex-1 overflow-hidden flex flex-col" asChild>
-                <div className="flex flex-col lg:flex-row gap-1 flex-1 overflow-hidden">
+              <TabsContent value="form" className="mt-0" asChild>
+                <div className="flex flex-col lg:flex-row lg:items-stretch gap-1 ">
                   <LeadForm
                     key={resetTrigger}
                     resetTrigger={resetTrigger}
@@ -510,21 +510,26 @@ export default function SalesCallTranscriber() {
               </TabsContent>
 
               {/* Map Tab */}
-              <TabsContent value="map" className="mt-0 flex-1 overflow-hidden" asChild>
+              <TabsContent value="map" className="mt-0">
+                <div className="h-[calc(100vh-280px)] overflow-hidden">
                 <GoogleMapPanel
                   initialLocation={currentMarketLocation}
                 />
+                </div>
               </TabsContent>
 
               {/* ArcGIS Map Tab */}
-              <TabsContent value="arcgis" className="mt-0 flex-1 overflow-hidden" asChild>
+              <TabsContent value="arcgis" className="mt-0">
+                <div className="h-[calc(100vh-280px)] overflow-hidden">
                 <ArcGISMapPanel
                   initialLocation={currentMarketLocation}
                 />
+                </div>
               </TabsContent>
 
               {/* Transcript Tab */}
-              <TabsContent value="transcript" className="mt-0 flex-1 overflow-hidden" asChild>
+              <TabsContent value="transcript" className="mt-0">
+                <div className="h-[calc(100vh-280px)] overflow-hidden">
                 <TranscriptView
                   ref={scrollRef}
                   transcripts={transcripts}
@@ -532,6 +537,7 @@ export default function SalesCallTranscriber() {
                   interimSpeaker={interimSpeaker}
                   twilioReady={twilioReady}
                 />
+                </div>
               </TabsContent>
             </Tabs>
           </CardContent>
