@@ -74,7 +74,7 @@ export function LeadForm({ resetTrigger, inboundPhone }: LeadFormProps) {
   const canAddMoreContacts = additionalContacts.length < MAX_ADDITIONAL_CONTACTS;
 
   return (
-    <div className="@container lg:flex-[2] flex flex-col overflow-y-auto max-h-[calc(100vh-300px)] p-1">
+    <div className="@container lg:flex-[2] flex flex-col overflow-y-auto max-h-[calc(100vh-280px)] p-1">
       <div className="space-y-0">
       {/* INTRO Section */}
       <div className="mb-0 px-4">
