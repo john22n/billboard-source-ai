@@ -302,9 +302,9 @@ export default function SalesCallTranscriber() {
   // ✅ PricingPanel will subscribe to fields directly, no need to pass them
 
   return (
-    <div className="h-full overflow-hidden">
-      <div className="max-w-[1800px] mx-auto flex flex-col">
-        <Card className="shadow-2xl border-0 flex flex-col  py-1">
+    <div className="h-full overflow-hidden flex items-center justify-center m-0 p-0">
+      <div className="max-w-[1800px] w-full flex flex-col">
+        <Card className="shadow-lg border-0 flex flex-col">
           {/* Header */}
           <CardHeader className="bg-gradient-to-r from-blue-600 via-indigo-600 to-primary text-white py-3 px-4">
             <div className="flex flex-col gap-2">
@@ -488,7 +488,7 @@ export default function SalesCallTranscriber() {
 
               {/* Form + Pricing Tab */}
               <TabsContent value="form" className="mt-0" asChild>
-                <div className="flex flex-col lg:flex-row lg:items-stretch gap-1">
+                <div className="flex flex-col lg:flex-row lg:items-stretch ">
                   <LeadForm
                     key={resetTrigger}
                     resetTrigger={resetTrigger}
