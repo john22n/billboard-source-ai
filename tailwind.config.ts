@@ -80,7 +80,10 @@ const config: Config = {
       },
     },
   },
-  plugins: [require('tw-animate-css')],
+  plugins: [
+    require('tw-animate-css'),
+    require('@tailwindcss/container-queries'),
+  ],
 };
 
 export default config;

@@ -328,11 +328,11 @@ export function PricingPanel({
   const isLoadingData = isLoadingMarket;
 
   return (
-    <div 
-      className="h-full flex flex-col transition-all duration-300"
-      style={{ maxWidth: '400px', width: '100%' }}
+    <div
+      className="flex flex-col transition-all duration-300"
+      style={{ maxWidth: '400px', width: '100%'}}
     >
-      <div className="bg-white rounded-xl p-4 h-full flex flex-col overflow-hidden">
+      <div className="bg-white rounded-xl p-4 flex-1 flex flex-col">
         {/* Header Tabs */}
         <div className="flex mb-3 flex-shrink-0 justify-center">
           <button 
@@ -354,7 +354,7 @@ export function PricingPanel({
         </div>
 
         {/* Content Area */}
-        <div className="flex-1 overflow-y-auto space-y-4 min-h-0">
+        <div className="space-y-4">
           {activeTab === 'estimate' && (
             <>
               {isLoadingData && (
@@ -479,7 +479,7 @@ export function PricingPanel({
         </div>
 
         {/* Nutshell Button - pushed to bottom with mt-auto */}
-        <div className="flex flex-col items-center gap-2 pt-3 border-t border-slate-200 mt-auto flex-shrink-0">
+        <div className="flex flex-col items-center gap-2 pt-3 border-t mt-auto border-slate-200 sticky bottom-4 bg-white rounded-b-xl">
           {nutshellStatus !== 'idle' && (
             <span className={`text-xs font-medium ${nutshellStatus === 'success' ? 'text-green-600' : 'text-red-600'}`}>{nutshellMessage}</span>
           )}

@@ -56,7 +56,7 @@ export default async function Page() {
       />
       <SidebarInset className="flex flex-col h-dvh min-h-0 overflow-hidden bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
         <SiteHeader />
-        <div className="flex-1 min-h-0 overflow-hidden p-2 lg:p-4">
+        <div className="flex-1 min-h-0 overflow-hidden">
           <Suspense fallback={<DashboardSkeleton />}>
             <SalesCallTranscriber />
           </Suspense>
