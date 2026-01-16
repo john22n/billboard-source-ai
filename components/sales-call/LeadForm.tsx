@@ -16,6 +16,7 @@ import {
   BoardTypeButtonGroup,
   DurationButtonGroup,
   SendOverButtonGroup,
+  FirstNameInput,  // ✅ NEW: Import FirstNameInput for INTRO section
 } from "./formFields";
 
 // ============================================================================
@@ -88,7 +89,8 @@ export function LeadForm({ resetTrigger, inboundPhone }: LeadFormProps) {
           <div className="flex gap-8">
             <div className="w-60">
               <Label className="text-blue-600 font-bold text-md mb-1 block">Name</Label>
-              <FieldInput field="name" />
+              {/* ✅ CHANGED: Use FirstNameInput for INTRO section (first name only) */}
+              <FirstNameInput />
             </div>
             <div className="flex-1">
               <Label className="text-blue-600 font-bold text-md mb-1 block">
@@ -390,6 +392,7 @@ export function LeadForm({ resetTrigger, inboundPhone }: LeadFormProps) {
           <div className="grid grid-cols-4 gap-2.5">
             <div className="flex-1">
               <Label className="text-blue-600 font-bold text-md mb-1.5 block">Name</Label>
+              {/* ✅ This uses ContactFieldInput which now requires first + last name for green */}
               <ContactFieldInput contactIndex={activeContactIndex} field="name" />
             </div>
             <div className="flex-1">

@@ -19,6 +19,23 @@ const getInputClass = (value: string | null | undefined, baseClass: string = "")
 };
 
 // ============================================================================
+// HELPER: Get input styling for full name (requires first AND last name)
+// ============================================================================
+
+const getFullNameInputClass = (value: string | null | undefined, baseClass: string = "") => {
+  if (value && value.trim() !== "") {
+    const nameParts = value.trim().split(/\s+/).filter(part => part.length > 0);
+    // Green only if there are at least 2 name parts (first + last)
+    if (nameParts.length >= 2) {
+      return `${baseClass} bg-green-50 border-green-500 focus:border-green-600 focus:ring-green-500`;
+    }
+    // Yellow if only first name (partial completion)
+    return `${baseClass} bg-yellow-50 border-yellow-500`;
+  }
+  return `${baseClass} bg-red-100`;
+};
+
+// ============================================================================
 // FIELD INPUT - Subscribes to ONE field only
 // ============================================================================
 
@@ -60,6 +77,56 @@ export const FieldInput = memo(function FieldInput({
       value={value ?? ""}
       onChange={handleChange}
       placeholder={placeholder}
+      className={`${inputClass} ${className}`}
+    />
+  );
+});
+
+// ============================================================================
+// FIRST NAME INPUT - For INTRO section, shows/edits only first name
+// ============================================================================
+
+interface FirstNameInputProps {
+  className?: string;
+  baseClassName?: string;
+}
+
+export const FirstNameInput = memo(function FirstNameInput({
+  className = "",
+  baseClassName = "h-10 text-sm border-2 border-black rounded transition-colors"
+}: FirstNameInputProps) {
+  const fullName = useFormStore(selectField('name'));
+  const updateField = useFormStore((s) => s.updateField);
+
+  // 🔍 Performance monitoring (only in development)
+  if (process.env.NODE_ENV === 'development') {
+    console.log(`🔄 Re-render: FirstNameInput`);
+  }
+
+  // Extract first name from full name
+  const firstName = fullName?.split(' ')[0] ?? '';
+  
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const newFirstName = e.target.value;
+    // Get the rest of the name (last name, middle name, etc.)
+    const nameParts = fullName?.split(' ') ?? [];
+    const restOfName = nameParts.slice(1).join(' ');
+    
+    // Combine new first name with rest of name
+    const newFullName = restOfName 
+      ? `${newFirstName} ${restOfName}`
+      : newFirstName;
+    
+    updateField('name', newFullName);
+  }, [fullName, updateField]);
+
+  // Green if first name exists (any non-empty value)
+  const inputClass = getInputClass(firstName, baseClassName);
+
+  return (
+    <Input
+      value={firstName}
+      onChange={handleChange}
       className={`${inputClass} ${className}`}
     />
   );
@@ -157,6 +224,7 @@ export const PhoneInput = memo(function PhoneInput({
     </div>
   );
 });
+
 // ============================================================================
 // CONTACT FIELD INPUT - For additional contacts
 // ============================================================================
@@ -188,12 +256,16 @@ export const ContactFieldInput = memo(function ContactFieldInput({
     updateContactField(contactIndex, field, e.target.value);
   }, [contactIndex, field, updateContactField]);
 
-  const inputClass = getInputClass(value, "h-10 text-sm border-2 border-black rounded transition-colors");
-
   // Special case: primary contact phone uses PhoneInput
   if (contactIndex === 0 && field === 'phone') {
     return <PhoneInput className={className} />;
   }
+
+  // ✅ Special case: name field requires BOTH first AND last name for green
+  const baseClassName = "h-10 text-sm border-2 border-black rounded transition-colors";
+  const inputClass = field === 'name' 
+    ? getFullNameInputClass(value, baseClassName)
+    : getInputClass(value, baseClassName);
 
   return (
     <Input
