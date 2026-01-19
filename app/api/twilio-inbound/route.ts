@@ -88,7 +88,7 @@ export async function POST(req: Request) {
     const taskAttributes = JSON.stringify({
       call_sid: CallSid,
       from: From,
-      to: To,
+      callTo: To,        // 🔑 used by workflow (matches workflow expression)
       callType,          // 🔑 used by workflow
       phoneNumber,       // 🔑 used by direct queues
       primary_owner: primaryOwner,

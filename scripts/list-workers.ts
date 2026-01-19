@@ -39,14 +39,15 @@ async function listWorkers() {
 
   workers.forEach((worker, index) => {
     const attrs = JSON.parse(worker.attributes || '{}');
-    
+
     console.log(`${index + 1}. ${worker.friendlyName}`);
     console.log(`   SID: ${worker.sid}`);
     console.log(`   Activity: ${worker.activityName}`);
     console.log(`   Available: ${worker.available ? '✅ Yes' : '❌ No'}`);
+    console.log(`   Attrs.available: ${attrs.available ? '✅ Yes' : '❌ No'}`);
     console.log(`   Email: ${attrs.email || 'N/A'}`);
     console.log(`   Contact URI: ${attrs.contact_uri || 'N/A'}`);
-    console.log(`   Phone: ${attrs.phone || 'N/A'}`);
+    console.log(`   Phone Number: ${attrs.phoneNumber || 'N/A'}`);
     console.log('');
   });
 

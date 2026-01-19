@@ -305,10 +305,8 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
 
       incomingCall.on('accept', () => {
         console.log('✅ Call accept event - call is connected');
-        setTimeout(() => {
-          console.log('🎤 Triggering onCallAccepted callback');
-          onCallAcceptedRef.current?.(incomingCall);
-        }, 500);
+        console.log('🎤 Triggering onCallAccepted callback');
+        onCallAcceptedRef.current?.(incomingCall);
       });
 
       console.log('Calling incomingCall.accept()...');

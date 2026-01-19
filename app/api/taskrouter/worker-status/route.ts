@@ -100,7 +100,8 @@ export async function POST(req: Request) {
           attributes: JSON.stringify({
             email: currentUser.email,
             contact_uri: `client:${currentUser.email}`,
-            phone: currentUser.twilioPhoneNumber,
+            phoneNumber: currentUser.twilioPhoneNumber,
+            available: effectiveStatus === 'available',
           }),
         });
 
@@ -115,6 +116,12 @@ export async function POST(req: Request) {
         .workers(workerSid)
         .update({
           activitySid: ACTIVITY_SIDS[effectiveStatus],
+          attributes: JSON.stringify({
+            email: currentUser.email,
+            contact_uri: `client:${currentUser.email}`,
+            phoneNumber: currentUser.twilioPhoneNumber,
+            available: effectiveStatus === 'available',
+          }),
         });
 
       console.log(`✅ Worker ${currentUser.email} status updated to: ${effectiveStatus}`);
