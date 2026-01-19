@@ -12,21 +12,28 @@ async function sendVoicemailEmail(
   from: string,
   recordingUrl: string,
   transcription: string,
-  duration?: string
+  duration?: string,
+  transcriptionStatus?: string
 ) {
   if (!RESEND_API_KEY) {
     console.warn('⚠️ RESEND_API_KEY not set - skipping email notification');
     return;
   }
 
+  const transcriptionNote =
+    transcriptionStatus !== 'completed'
+      ? `<p><strong>Transcription Status:</strong> ${transcriptionStatus || 'Unknown'} (may be incomplete)</p>`
+      : '';
+
   const emailBody = `
     <h2>New Voicemail Received</h2>
     <p><strong>From:</strong> ${from}</p>
     ${duration ? `<p><strong>Duration:</strong> ${duration} seconds</p>` : ''}
     <p><strong>Recording:</strong> <a href="${recordingUrl}.mp3">Listen to Recording</a></p>
+    ${transcriptionNote}
     <p><strong>Transcription:</strong></p>
     <blockquote style="background: #f5f5f5; padding: 12px; border-left: 4px solid #ccc; margin: 8px 0;">
-      ${transcription}
+      ${transcription || '(Transcription unavailable)'}
     </blockquote>
     <br/>
     <p>— Billboard Source AI</p>
@@ -50,8 +57,8 @@ async function sendVoicemailEmail(
     if (response.ok) {
       console.log('✅ Voicemail email sent to', VOICEMAIL_EMAIL);
     } else {
-      const error = await response.text();
-      console.error('❌ Failed to send email:', error);
+      const errorText = await response.text();
+      console.error('❌ Failed to send voicemail email:', response.status, errorText);
     }
   } catch (error) {
     console.error('❌ Email send error:', error);
@@ -78,12 +85,12 @@ export async function POST(req: Request) {
     console.log('Transcription:', transcriptionText);
     console.log('═══════════════════════════════════════════');
 
-    // Send email with transcription (or note if transcription failed)
     await sendVoicemailEmail(
       from || 'Unknown',
       recordingUrl || '',
-      transcriptionText || '(Transcription unavailable)',
-      recordingDuration
+      transcriptionText || '',
+      recordingDuration,
+      transcriptionStatus
     );
 
     return new Response('OK', { status: 200 });
@@ -92,3 +99,4 @@ export async function POST(req: Request) {
     return new Response('Error', { status: 500 });
   }
 }
+

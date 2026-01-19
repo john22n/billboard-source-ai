@@ -15,52 +15,66 @@ export async function POST(req: Request) {
     console.log('From:', from);
     console.log('═══════════════════════════════════════════');
 
+    // ─────────────────────────────────────────────
+    // CALL SUCCESSFULLY CONNECTED
+    // ─────────────────────────────────────────────
     if (queueResult === 'bridged') {
       console.log('✅ Call was bridged to worker');
-      return new Response('<Response/>', {
-        status: 200,
-        headers: { 'Content-Type': 'text/xml' },
-      });
+      return new Response(
+        '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+        { status: 200, headers: { 'Content-Type': 'text/xml' } }
+      );
     }
 
+    // ─────────────────────────────────────────────
+    // CALLER HUNG UP
+    // ─────────────────────────────────────────────
     if (queueResult === 'hangup') {
       console.log('📞 Caller hung up while waiting');
-      return new Response('<Response><Hangup/></Response>', {
-        status: 200,
-        headers: { 'Content-Type': 'text/xml' },
-      });
+      return new Response(
+        '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>',
+        { status: 200, headers: { 'Content-Type': 'text/xml' } }
+      );
     }
 
-    // All other cases → voicemail
-    console.log(`📨 QueueResult="${queueResult}" - playing voicemail`);
+    // ─────────────────────────────────────────────
+    // TIMEOUT / NO AGENTS / REJECTED → VOICEMAIL
+    // ─────────────────────────────────────────────
+    console.log(`📨 QueueResult="${queueResult}" → voicemail`);
 
     const url = new URL(req.url);
     const appUrl = `${url.protocol}//${url.host}`;
 
-    // Pass caller info to voicemail-complete
-    const voicemailCompleteUrl = new URL(`${appUrl}/api/taskrouter/voicemail-complete`);
+    const voicemailCompleteUrl = new URL(
+      `${appUrl}/api/taskrouter/voicemail-complete`
+    );
     voicemailCompleteUrl.searchParams.set('from', from || '');
     voicemailCompleteUrl.searchParams.set('to', to || '');
     voicemailCompleteUrl.searchParams.set('callSid', callSid || '');
     voicemailCompleteUrl.searchParams.set('queueTime', queueTime || '');
 
-    const transcriptionUrl = new URL(`${appUrl}/api/taskrouter/voicemail-transcription`);
+    const transcriptionUrl = new URL(
+      `${appUrl}/api/taskrouter/voicemail-transcription`
+    );
     transcriptionUrl.searchParams.set('from', from || '');
     transcriptionUrl.searchParams.set('to', to || '');
     transcriptionUrl.searchParams.set('callSid', callSid || '');
 
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="Polly.Matthew">We're sorry, no one is available to take your call. Please leave a message after the beep.</Say>
+  <Say voice="Polly.Matthew">
+    We're sorry, no one is available to take your call.
+    Please leave a message after the beep.
+  </Say>
   <Record
     maxLength="120"
     playBeep="true"
     transcribe="true"
-    transcribeCallback="${transcriptionUrl.toString()}"
-    action="${voicemailCompleteUrl.toString()}"
+    transcribeCallback="${transcriptionUrl}"
+    action="${voicemailCompleteUrl}"
     method="POST"
   />
-  <Say voice="Polly.Matthew">We did not receive a recording. Goodbye.</Say>
+  <Say voice="Polly.Matthew">Goodbye.</Say>
   <Hangup/>
 </Response>`;
 
@@ -70,9 +84,10 @@ export async function POST(req: Request) {
     });
   } catch (error) {
     console.error('❌ Enqueue complete error:', error);
-    return new Response('<Response><Hangup/></Response>', {
-      status: 200,
-      headers: { 'Content-Type': 'text/xml' },
-    });
+    return new Response(
+      '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>',
+      { status: 200, headers: { 'Content-Type': 'text/xml' } }
+    );
   }
 }
+

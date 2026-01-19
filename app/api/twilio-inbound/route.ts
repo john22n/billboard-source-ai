@@ -1,5 +1,6 @@
 // app/api/twilio-inbound/route.ts
 // Handles incoming Twilio calls and enqueues them into TaskRouter
+
 import twilio from 'twilio';
 import { db } from '@/db';
 import { user } from '@/db/schema';
@@ -8,21 +9,18 @@ import { eq } from 'drizzle-orm';
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 const WORKFLOW_SID = process.env.TASKROUTER_WORKFLOW_SID;
 
+const MAIN_ROUTING_NUMBER = '+18338547126';
+
 export async function POST(req: Request) {
   try {
-    // Clone request to read body twice (once for validation, once for parsing)
     const clonedReq = req.clone();
     const bodyText = await clonedReq.text();
     const formData = await req.formData();
 
-    // Validate Twilio request signature in production
+    // Validate Twilio signature
     if (TWILIO_AUTH_TOKEN) {
       const twilioSignature = req.headers.get('X-Twilio-Signature') || '';
       const url = new URL(req.url);
-      // Use the full URL as Twilio sends it
-      const webhookUrl = url.toString();
-
-      // Parse body params for validation
       const params: Record<string, string> = {};
       const searchParams = new URLSearchParams(bodyText);
       searchParams.forEach((value, key) => {
@@ -32,99 +30,93 @@ export async function POST(req: Request) {
       const isValid = twilio.validateRequest(
         TWILIO_AUTH_TOKEN,
         twilioSignature,
-        webhookUrl,
+        url.toString(),
         params
       );
 
       if (!isValid) {
-        console.error('❌ Invalid Twilio signature');
         return new Response('Forbidden', { status: 403 });
       }
-    } else {
-      console.warn('⚠️ TWILIO_AUTH_TOKEN not set - skipping signature validation');
     }
 
-    // Parse call data
     const CallSid = formData.get('CallSid');
     const From = formData.get('From');
     const To = formData.get('To') as string;
 
-    console.log(`📞 Webhook received from ${From} to ${To}`);
-    console.log(`✅ Verified incoming call from ${From} to ${To}, CallSid: ${CallSid}`);
-
-    // Look up user by Twilio phone number
-    // Twilio sends number as +18338547126, DB may store as 833-854-7126
-    const normalizedTo = To?.replace(/\D/g, '').slice(-10); // Get last 10 digits
-
-    const matchedUser = await db
-      .select({ email: user.email })
-      .from(user)
-      .where(eq(user.twilioPhoneNumber, To))
-      .limit(1)
-      .then(rows => rows[0]);
-
-    // Fallback: try matching normalized number if exact match fails
-    let clientIdentity: string | undefined = matchedUser?.email;
-    if (!clientIdentity && normalizedTo) {
-      const users = await db.select({ email: user.email, phone: user.twilioPhoneNumber }).from(user);
-      const match = users.find(u => u.phone?.replace(/\D/g, '').slice(-10) === normalizedTo);
-      clientIdentity = match?.email ?? undefined;
-    }
-
-    if (!clientIdentity) {
-      console.error(`❌ No user found for phone number: ${To}`);
-      const errorTwiml = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Say>Sorry, this number is not configured. Goodbye.</Say>
-  <Hangup/>
-</Response>`;
-      return new Response(errorTwiml, {
-        status: 200,
-        headers: { 'Content-Type': 'text/xml' },
-      });
-    }
-
     if (!WORKFLOW_SID) {
-      console.error('❌ TASKROUTER_WORKFLOW_SID not set');
-      return new Response('Server config error', { status: 500 });
+      return new Response('Workflow not configured', { status: 500 });
     }
 
-    console.log(`📲 Enqueuing call to TaskRouter for: ${clientIdentity}`);
+    let callType: 'main' | 'direct';
+    let phoneNumber: string | null = null;
+    let primaryOwner: string | null = null;
 
-    // Build task attributes for TaskRouter
-    // call_sid is auto-added by Twilio for <Enqueue>, but we include it explicitly
+    // ─────────────────────────────────────────────
+    // MAIN NUMBER → RANDOM AGENTS
+    // ─────────────────────────────────────────────
+    if (To === MAIN_ROUTING_NUMBER) {
+      callType = 'main';
+    } else {
+      // ─────────────────────────────────────────────
+      // DIRECT NUMBER → SINGLE AGENT
+      // ─────────────────────────────────────────────
+      callType = 'direct';
+      phoneNumber = To;
+
+      const matchedUser = await db
+        .select()
+        .from(user)
+        .where(eq(user.twilioPhoneNumber, To))
+        .limit(1)
+        .then(rows => rows[0]);
+
+      if (!matchedUser) {
+        const errorTwiml = `<?xml version="1.0" encoding="UTF-8"?>
+        <Response>
+          <Say>This number is not configured.</Say>
+          <Hangup/>
+        </Response>`;
+        return new Response(errorTwiml, {
+          status: 200,
+          headers: { 'Content-Type': 'text/xml' },
+        });
+      }
+
+      primaryOwner = matchedUser.email;
+    }
+
     const taskAttributes = JSON.stringify({
       call_sid: CallSid,
       from: From,
       to: To,
-      primary_owner: clientIdentity,
+      callType,          // 🔑 used by workflow
+      phoneNumber,       // 🔑 used by direct queues
+      primary_owner: primaryOwner,
     });
 
-    // Build URLs for Enqueue
     const url = new URL(req.url);
     const appUrl = `${url.protocol}//${url.host}`;
     const enqueueActionUrl = `${appUrl}/api/taskrouter/enqueue-complete`;
     const waitUrl = `${appUrl}/api/taskrouter/wait`;
 
-    // Enqueue call into TaskRouter workflow
-    // - action: called when Enqueue ends (bridged, hangup, leave, error)
-    // - waitUrl: plays hold music while waiting for worker
-    // If not bridged, enqueue-complete will redirect to voicemail
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Enqueue workflowSid="${WORKFLOW_SID}" action="${enqueueActionUrl}" method="POST" waitUrl="${waitUrl}" waitUrlMethod="POST">
-    <Task>${taskAttributes}</Task>
-  </Enqueue>
-</Response>`;
+                    <Response>
+                    <Enqueue workflowSid="${WORKFLOW_SID}"
+                    action="${enqueueActionUrl}"
+                    method="POST"
+                    waitUrl="${waitUrl}"
+                    waitUrlMethod="POST">
+                    <Task>${taskAttributes}</Task>
+                    </Enqueue>
+                    </Response>`;
 
     return new Response(twiml, {
       status: 200,
-      headers: {
-        'Content-Type': 'text/xml',
-      },
+      headers: { 'Content-Type': 'text/xml' },
     });
-  } catch (error) {
-    console.error('Twilio inbound error:', error);
-    return new Response('Error processing call', { status: 500 });
+  } catch (err) {
+    console.error('Inbound error:', err);
+    return new Response('Error', { status: 500 });
   }
 }
+

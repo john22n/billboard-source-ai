@@ -1,10 +1,14 @@
 /**
  * Sync Workers Script
- * 
- * Creates TaskRouter workers for all users with Twilio phone numbers.
- * Run after setup-taskrouter.ts
- * 
- * Run with: npx dotenv -e .env.dev -- tsx scripts/sync-workers.ts
+ *
+ * Creates or updates TaskRouter workers for users
+ * that have a Twilio phone number.
+ *
+ * Safe to re-run:
+ * - Updates existing workers
+ * - Creates missing workers
+ * - Avoids duplicates
+ * - Adds rate-limit protection
  */
 
 import twilio from 'twilio';
@@ -19,46 +23,76 @@ const ACTIVITY_OFFLINE_SID = process.env.TASKROUTER_ACTIVITY_OFFLINE_SID!;
 
 if (!ACCOUNT_SID || !AUTH_TOKEN || !WORKSPACE_SID || !ACTIVITY_OFFLINE_SID) {
   console.error('❌ Missing required environment variables');
-  console.error('Required: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TASKROUTER_WORKSPACE_SID, TASKROUTER_ACTIVITY_OFFLINE_SID');
   process.exit(1);
 }
 
 const client = twilio(ACCOUNT_SID, AUTH_TOKEN);
 
+/** Main routing number user */
+const MAIN_ROUTING_NUMBER = '+18338547126';
+const MAIN_ROUTING_EMAIL = 'tech@billboardsource.com';
+
+/** Sleep helper (rate-limit protection) */
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 async function syncWorkers() {
   console.log('═══════════════════════════════════════════');
-  console.log('🔄 SYNCING WORKERS');
+  console.log('🔄 SYNCING TASKROUTER WORKERS');
   console.log('═══════════════════════════════════════════');
 
-  // Fetch existing workers from TaskRouter
+  /** ------------------------------------------------------------------ */
+  /** Fetch existing workers                                             */
+  /** ------------------------------------------------------------------ */
   const existingWorkers = await client.taskrouter.v1
     .workspaces(WORKSPACE_SID)
-    .workers.list();
+    .workers.list({ limit: 200 });
 
-  const workersByEmail = new Map(existingWorkers.map(w => [w.friendlyName, w]));
-  console.log(`\nFound ${existingWorkers.length} existing workers in TaskRouter`);
+  const workersByEmail = new Map(
+    existingWorkers.map(w => [w.friendlyName, w])
+  );
 
-  // Get all users with Twilio phone numbers
+  /** ------------------------------------------------------------------ */
+  /** Fetch users with Twilio numbers                                    */
+  /** ------------------------------------------------------------------ */
   const users = await db
     .select()
     .from(user)
     .where(isNotNull(user.twilioPhoneNumber));
 
-  console.log(`Found ${users.length} users with Twilio phone numbers\n`);
+  console.log(`👥 Found ${users.length} users with Twilio numbers\n`);
 
+  /** ------------------------------------------------------------------ */
+  /** Sync each user                                                     */
+  /** ------------------------------------------------------------------ */
   for (const u of users) {
-    console.log(`Processing: ${u.email}`);
+    console.log(`👤 ${u.email}`);
 
-    // Check if worker SID already in DB
-    if (u.taskRouterWorkerSid) {
-      console.log(`  ⚠️ Already synced: ${u.taskRouterWorkerSid}`);
-      continue;
-    }
+    const isMainRoutingUser =
+      u.twilioPhoneNumber === MAIN_ROUTING_NUMBER &&
+      u.email === MAIN_ROUTING_EMAIL;
 
-    // Check if worker exists in TaskRouter
+    const workerAttributes = {
+      userId: u.id,
+      email: u.email,
+      phoneNumber: u.twilioPhoneNumber,
+      available: false, // controlled by presence / UI
+      contact_uri: `client:${u.email}`,
+      role: isMainRoutingUser ? 'main-routing' : 'agent',
+    };
+
     const existingWorker = workersByEmail.get(u.email);
+
     if (existingWorker) {
-      console.log(`  📎 Found existing worker: ${existingWorker.sid}`);
+      console.log(`  🔁 Updating worker ${existingWorker.sid}`);
+
+      await client.taskrouter.v1
+        .workspaces(WORKSPACE_SID)
+        .workers(existingWorker.sid)
+        .update({
+          attributes: JSON.stringify(workerAttributes),
+          activitySid: ACTIVITY_OFFLINE_SID,
+        });
+
       await db
         .update(user)
         .set({
@@ -66,39 +100,33 @@ async function syncWorkers() {
           workerActivity: 'offline',
         })
         .where(eq(user.id, u.id));
-      console.log(`  ✅ Updated database`);
+
+      await sleep(300);
       continue;
     }
 
-    try {
-      // Create new worker in TaskRouter
-      const worker = await client.taskrouter.v1
-        .workspaces(WORKSPACE_SID)
-        .workers.create({
-          friendlyName: u.email,
-          activitySid: ACTIVITY_OFFLINE_SID,
-          attributes: JSON.stringify({
-            email: u.email,
-            contact_uri: `client:${u.email}`,
-            phone: u.twilioPhoneNumber,
-          }),
-        });
+    /** ------------------------------------------------------------------ */
+    /** Create new worker                                                  */
+    /** ------------------------------------------------------------------ */
+    const worker = await client.taskrouter.v1
+      .workspaces(WORKSPACE_SID)
+      .workers.create({
+        friendlyName: u.email,
+        activitySid: ACTIVITY_OFFLINE_SID,
+        attributes: JSON.stringify(workerAttributes),
+      });
 
-      console.log(`  ✅ Created worker: ${worker.sid}`);
+    console.log(`  ✅ Created worker ${worker.sid}`);
 
-      // Update user in database
-      await db
-        .update(user)
-        .set({
-          taskRouterWorkerSid: worker.sid,
-          workerActivity: 'offline',
-        })
-        .where(eq(user.id, u.id));
+    await db
+      .update(user)
+      .set({
+        taskRouterWorkerSid: worker.sid,
+        workerActivity: 'offline',
+      })
+      .where(eq(user.id, u.id));
 
-      console.log(`  ✅ Updated database`);
-    } catch (error) {
-      console.error(`  ❌ Failed to create worker:`, error);
-    }
+    await sleep(300);
   }
 
   console.log('\n═══════════════════════════════════════════');
@@ -106,12 +134,16 @@ async function syncWorkers() {
   console.log('═══════════════════════════════════════════');
 }
 
+/** ------------------------------------------------------------------ */
+/** RUN                                                                */
+/** ------------------------------------------------------------------ */
 syncWorkers()
   .then(() => {
     console.log('\n🎉 Sync completed successfully!');
     process.exit(0);
   })
-  .catch((error) => {
-    console.error('\n❌ Sync failed:', error);
+  .catch(err => {
+    console.error('\n❌ Sync failed:', err);
     process.exit(1);
   });
+

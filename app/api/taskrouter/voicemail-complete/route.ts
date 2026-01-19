@@ -14,31 +14,48 @@ export async function POST(req: Request) {
     const queueTime = url.searchParams.get('queueTime');
 
     const formData = await req.formData();
-    const recordingUrl = formData.get('RecordingUrl') as string;
-    const recordingSid = formData.get('RecordingSid') as string;
-    const recordingDuration = formData.get('RecordingDuration') as string;
+    const recordingSid = formData.get('RecordingSid') as string | null;
+    const recordingDuration = formData.get('RecordingDuration') as string | null;
+    const recordingUrlRaw = formData.get('RecordingUrl') as string | null;
+
+    const durationSeconds = parseInt(recordingDuration || '0', 10);
+    const recordingUrl = recordingUrlRaw
+      ? `${recordingUrlRaw}.mp3`
+      : null;
 
     console.log('═══════════════════════════════════════════');
     console.log('📼 VOICEMAIL COMPLETE');
-    console.log('═══════════════════════════════════════════');
     console.log('From:', from);
     console.log('To:', to);
     console.log('CallSid:', callSid);
     console.log('QueueTime:', queueTime, 'seconds');
     console.log('RecordingSid:', recordingSid);
     console.log('RecordingUrl:', recordingUrl);
-    console.log('Duration:', recordingDuration, 'seconds');
+    console.log('Duration:', durationSeconds, 'seconds');
     console.log('═══════════════════════════════════════════');
 
-    // TODO: Save voicemail to database
+    // ─────────────────────────────────────────────
+    // NO MESSAGE LEFT
+    // ─────────────────────────────────────────────
+    if (!recordingSid || durationSeconds === 0) {
+      console.log('⚠️ No voicemail recorded');
+      return new Response(
+        '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>',
+        { status: 200, headers: { 'Content-Type': 'text/xml' } }
+      );
+    }
+
+    // ─────────────────────────────────────────────
+    // SAVE / PROCESS VOICEMAIL
+    // ─────────────────────────────────────────────
     // await db.insert(voicemails).values({
     //   callSid,
     //   from,
     //   to,
     //   recordingUrl,
     //   recordingSid,
-    //   duration: parseInt(recordingDuration || '0'),
-    //   queueTime: parseInt(queueTime || '0'),
+    //   duration: durationSeconds,
+    //   queueTime: parseInt(queueTime || '0', 10),
     //   createdAt: new Date(),
     // });
 
@@ -56,9 +73,10 @@ export async function POST(req: Request) {
     });
   } catch (error) {
     console.error('❌ Voicemail complete error:', error);
-    return new Response('<Response><Hangup/></Response>', {
-      status: 200,
-      headers: { 'Content-Type': 'text/xml' },
-    });
+    return new Response(
+      '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>',
+      { status: 200, headers: { 'Content-Type': 'text/xml' } }
+    );
   }
 }
+
