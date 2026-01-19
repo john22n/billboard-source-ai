@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { useFormStore } from "@/stores/formStore";
+import { ChevronDown, ChevronUp } from "lucide-react";
 
 interface PricingPanelProps {
   isLoading: boolean;
@@ -48,6 +49,9 @@ export function PricingPanel({
   const targetArea = useFormStore((s) => s.fields.targetArea);
 
   const [activeTab, setActiveTab] = useState<'estimate' | 'details'>('estimate');
+  
+  // ✅ Collapsible state for mobile - starts collapsed
+  const [isCollapsed, setIsCollapsed] = useState(true);
 
   // ✅ Use our own loading state, independent of parent
   const [isLoadingMarket, setIsLoadingMarket] = useState(false);
@@ -150,7 +154,6 @@ export function PricingPanel({
   }, [billboardContext, activeMarketIndex]);
 
   // ✅ MAIN EFFECT: Watch for location changes and fetch
-  // Use JSON.stringify to detect deep changes in additionalMarkets
   const additionalMarketsJson = JSON.stringify(
     additionalMarkets.map(m => ({ city: m.targetCity, state: m.state, area: m.targetArea }))
   );
@@ -237,7 +240,6 @@ export function PricingPanel({
     const marketRangeMatch = contextToUse.match(/Market\s*Range:\s*([^\n.]+)/i);
     const hasGeneralPricing = /General\s*Pricing:/i.test(contextToUse);
     
-    // Extract market name from context (e.g., "Market: Phoenix" or "Market Name: Phx")
     const marketNameMatch = contextToUse.match(/Market(?:\s*Name)?:\s*([^,\n]+)/i);
     const dbMarketName = marketNameMatch?.[1]?.trim() || '';
     
@@ -270,7 +272,7 @@ export function PricingPanel({
         type: 'market-range',
         label: 'Market Range',
         data: [marketRangeMatch[1].trim()],
-        subtitle: dbMarketName || undefined,  // Market name from DB (e.g., "Phx")
+        subtitle: dbMarketName || undefined,
         note: '*No city boards, but in market.'
       });
     }
@@ -282,7 +284,6 @@ export function PricingPanel({
       const rangesAfterGeneral = textAfterGeneral.match(priceRangePattern);
       const generalRanges = rangesAfterGeneral ? [...new Set(rangesAfterGeneral)] : [];
       
-      // Build tiers from extracted price ranges
       const tierLabels = ['Small Market', 'Medium Market', 'Large Market'];
       const tiers: { label: string; range: string }[] = [];
       
@@ -306,7 +307,6 @@ export function PricingPanel({
         note: '*No specific data. Use general range.'
       });
     }
-    // PRIORITY 5: No pricing cards - will fall back to details display
     
     return cards;
   };
@@ -316,28 +316,73 @@ export function PricingPanel({
   
   const getCardColors = (type: PricingCard['type']) => {
     switch (type) {
-      case 'avg-views': return { primary: '#2563eb', text: '#2563eb' };        // Blue
-      case 'four-week-only': return { primary: '#16a34a', text: '#16a34a' };   // Green
-      case 'market-range': return { primary: '#7c3aed', text: '#7c3aed' };     // Purple
-      case 'general-range': return { primary: '#000000', text: '#000000' };    // Black
+      case 'avg-views': return { primary: '#2563eb', text: '#2563eb' };
+      case 'four-week-only': return { primary: '#16a34a', text: '#16a34a' };
+      case 'market-range': return { primary: '#7c3aed', text: '#7c3aed' };
+      case 'general-range': return { primary: '#000000', text: '#000000' };
       default: return { primary: '#000000', text: '#000000' };
     }
   };
 
-  // ✅ Use our own loading state, not parent's
   const isLoadingData = isLoadingMarket;
 
+  // Get a preview of the pricing for collapsed state
+  const getPricingPreview = () => {
+    if (isLoadingData) return "Loading...";
+    if (pricingCards.length > 0) {
+      const card = pricingCards[0];
+      if (card.subtitleData) return card.subtitleData;
+      if (card.data.length > 0) return card.data[0];
+      if (card.tiers && card.tiers.length > 0) return card.tiers[0].range;
+    }
+    if (currentLocation) return "No data";
+    return "Enter location";
+  };
+
   return (
-    <div
-      className="flex flex-col transition-all duration-300 max-h-[calc(100vh-280px)] overflow-hidden"
-      style={{ maxWidth: '400px', width: '100%'}}
-    >
-      <div className="bg-white rounded-xl p-4 flex-1 flex flex-col min-h-0 overflow-hidden">
+    <div className={`
+      flex flex-col transition-all duration-300 w-full 
+      xl:w-[400px] xl:flex-shrink-0 xl:h-full
+      ${isCollapsed ? 'flex-shrink-0' : 'min-h-[350px] sm:min-h-[400px]'}
+      xl:min-h-0 overflow-visible xl:overflow-hidden
+    `}>
+      {/* Mobile Collapsible Header - Only shows on mobile/tablet */}
+      <button
+        onClick={() => setIsCollapsed(!isCollapsed)}
+        className="xl:hidden flex items-center justify-between w-full py-3 px-4 bg-gradient-to-r from-orange-500 to-indigo-600 text-white rounded-lg shadow-md active:scale-[0.98] transition-transform"
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-lg flex-shrink-0">💰</span>
+          <span className="font-bold text-sm flex-shrink-0">Pricing</span>
+          {currentLocation && (
+            <span className="text-xs opacity-80 truncate">
+              • {currentLocation}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <span className="text-xs font-bold bg-white/20 px-2 py-0.5 rounded whitespace-nowrap">
+            {getPricingPreview()}
+          </span>
+          {isCollapsed ? (
+            <ChevronDown className="w-5 h-5" />
+          ) : (
+            <ChevronUp className="w-5 h-5" />
+          )}
+        </div>
+      </button>
+
+      {/* Content Container - Hidden when collapsed on mobile, always visible on xl+ */}
+      <div className={`
+        bg-white rounded-xl p-3 sm:p-4 flex flex-col min-h-0 overflow-hidden
+        ${isCollapsed ? 'hidden xl:flex xl:h-full' : 'flex flex-1 mt-2 xl:mt-0 max-h-[60vh] xl:max-h-none'}
+        xl:rounded-xl
+      `}>
         {/* Header Tabs */}
         <div className="flex mb-3 flex-shrink-0 justify-center">
           <button 
             onClick={() => setActiveTab('estimate')}
-            className={`px-4 py-2 border-black font-bold text-sm shadow-sm transition-colors ${
+            className={`px-3 sm:px-4 py-1.5 sm:py-2 border-black font-bold text-xs sm:text-sm shadow-sm transition-colors ${
               activeTab === 'estimate' ? 'bg-white text-black border-2' : 'bg-white text-black border-b-2 hover:bg-gray-100'
             }`}
           >
@@ -345,7 +390,7 @@ export function PricingPanel({
           </button>
           <button 
             onClick={() => setActiveTab('details')}
-            className={`px-4 py-2 border-black font-bold text-sm shadow-sm transition-colors ${
+            className={`px-3 sm:px-4 py-1.5 sm:py-2 border-black font-bold text-xs sm:text-sm shadow-sm transition-colors ${
               activeTab === 'details' ? 'bg-white text-black border-2' : 'bg-white text-black border-b-2 hover:bg-gray-100'
             }`}
           >
@@ -354,13 +399,13 @@ export function PricingPanel({
         </div>
 
         {/* Content Area */}
-        <div className="space-y-4 flex-1 overflow-y-auto min-h-0">
+        <div className="flex-1 overflow-y-auto min-h-0 space-y-3 sm:space-y-4">
           {activeTab === 'estimate' && (
             <>
               {isLoadingData && (
-                <div className="flex flex-col items-center justify-center py-12">
-                  <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
-                  <p className="text-slate-600 font-medium mt-4 text-xs text-center">Loading pricing data...</p>
+                <div className="flex flex-col items-center justify-center py-6 sm:py-12">
+                  <div className="w-8 h-8 sm:w-12 sm:h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
+                  <p className="text-slate-600 font-medium mt-2 sm:mt-4 text-xs text-center">Loading pricing data...</p>
                 </div>
               )}
 
@@ -368,34 +413,32 @@ export function PricingPanel({
                 const colors = getCardColors(card.type);
                 return (
                   <div key={index}>
-                    <div className="text-center py-3 border-b-2 border-black">
-                      <h2 className="text-3xl font-bold" style={{ color: colors.text }}>{card.market}</h2>
+                    <div className="text-center py-2 sm:py-3 border-b-2 border-black">
+                      <h2 className="text-lg sm:text-2xl xl:text-3xl font-bold" style={{ color: colors.text }}>{card.market}</h2>
                     </div>
-                    <div className="text-center py-3 border-l-2 border-r-2 border-black text-white font-bold text-xl" style={{ backgroundColor: colors.primary }}>
+                    <div className="text-center py-1.5 sm:py-3 border-l-2 border-r-2 border-black text-white font-bold text-sm sm:text-lg xl:text-xl" style={{ backgroundColor: colors.primary }}>
                       {card.label}
                     </div>
                     
-                    {/* For market-range: show market name from DB between header and price */}
                     {card.type === 'market-range' && card.subtitle && (
                       <div 
-                        className="text-center py-2 border-l-2 border-r-2 border-b-2 border-black font-bold text-xl bg-white"
+                        className="text-center py-1 sm:py-2 border-l-2 border-r-2 border-b-2 border-black font-bold text-sm sm:text-lg xl:text-xl bg-white"
                         style={{ color: colors.text }}
                       >
                         {card.subtitle}
                       </div>
                     )}
                     
-                    {/* Render tiers for general-range type */}
                     {card.tiers && card.tiers.map((tier, tierIdx) => (
                       <div key={tierIdx}>
                         <div 
-                          className="text-center py-2 border-l-2 border-r-2 border-black font-semibold text-sm"
+                          className="text-center py-1 sm:py-2 border-l-2 border-r-2 border-black font-semibold text-xs sm:text-sm"
                           style={{ backgroundColor: '#f3f4f6', color: colors.text }}
                         >
                           {tier.label}
                         </div>
                         <div 
-                          className="text-center py-3 border-2 border-t-0 border-black font-bold text-2xl bg-white"
+                          className="text-center py-1.5 sm:py-3 border-2 border-t-0 border-black font-bold text-base sm:text-xl xl:text-2xl bg-white"
                           style={{ color: colors.text }}
                         >
                           {tier.range}
@@ -403,27 +446,25 @@ export function PricingPanel({
                       </div>
                     ))}
                     
-                    {/* Render regular data items (for non-tiered cards) */}
                     {!card.tiers && card.data.map((item, idx) => (
-                      <div key={idx} className="text-center py-3 border-2 border-t-0 border-black font-bold text-2xl bg-white" style={{ color: colors.text }}>
+                      <div key={idx} className="text-center py-1.5 sm:py-3 border-2 border-t-0 border-black font-bold text-base sm:text-xl xl:text-2xl bg-white" style={{ color: colors.text }}>
                         {item}
                       </div>
                     ))}
                     
-                    {/* For avg-views type: show subtitle (4-Wk Range) AFTER the data */}
                     {card.type === 'avg-views' && card.subtitle && (
                       <>
-                        <div className="text-center text-xl py-2 border-l-2 border-r-2 border-black text-white font-bold mt-3" style={{ backgroundColor: colors.primary }}>
+                        <div className="text-center text-sm sm:text-lg xl:text-xl py-1 sm:py-2 border-l-2 border-r-2 border-black text-white font-bold mt-1.5 sm:mt-3" style={{ backgroundColor: colors.primary }}>
                           {card.subtitle}
                         </div>
-                        <div className="text-center text-3xl py-5 border-2 border-t-0 border-black font-bold bg-white" style={{ color: colors.text }}>
+                        <div className="text-center text-lg sm:text-2xl xl:text-3xl py-2 sm:py-5 border-2 border-t-0 border-black font-bold bg-white" style={{ color: colors.text }}>
                           {card.subtitleData}
                         </div>
                       </>
                     )}
                     {card.note && (
-                      <div className="px-3 pt-2 pb-3 text-center">
-                        <p className="text-xs italic font-medium" style={{ color: colors.text }}>{card.note}</p>
+                      <div className="px-2 sm:px-3 pt-1 sm:pt-2 pb-1.5 sm:pb-3 text-center">
+                        <p className="text-[9px] sm:text-xs italic font-medium" style={{ color: colors.text }}>{card.note}</p>
                       </div>
                     )}
                   </div>
@@ -431,24 +472,24 @@ export function PricingPanel({
               })}
 
               {!isLoadingData && currentMarketContext && pricingCards.length === 0 && (
-                <div className="bg-white rounded-lg p-4 shadow-sm border border-slate-200">
-                  <pre className="whitespace-pre-wrap font-sans text-slate-700 leading-relaxed text-xs">{currentMarketContext}</pre>
+                <div className="bg-white rounded-lg p-3 sm:p-4 shadow-sm border border-slate-200">
+                  <pre className="whitespace-pre-wrap font-sans text-slate-700 leading-relaxed text-[10px] sm:text-xs">{currentMarketContext}</pre>
                 </div>
               )}
 
               {!isLoadingData && !currentMarketContext && currentLocation && (
-                <div className="flex flex-col items-center justify-center py-12 text-center">
-                  <div className="text-4xl mb-2">🔍</div>
+                <div className="flex flex-col items-center justify-center py-6 sm:py-12 text-center">
+                  <div className="text-2xl sm:text-4xl mb-2">🔍</div>
                   <p className="text-slate-500 font-medium text-xs">No pricing data found</p>
-                  <p className="text-slate-400 text-xs mt-1">for {currentLocation}</p>
+                  <p className="text-slate-400 text-[10px] sm:text-xs mt-1">for {currentLocation}</p>
                 </div>
               )}
 
               {!isLoadingData && !currentMarketContext && !currentLocation && (
-                <div className="flex flex-col items-center justify-center py-12 text-center">
-                  <div className="text-4xl mb-2">📊</div>
+                <div className="flex flex-col items-center justify-center py-6 sm:py-12 text-center">
+                  <div className="text-2xl sm:text-4xl mb-2">📊</div>
                   <p className="text-slate-400 text-xs font-medium">Enter a city and state</p>
-                  <p className="text-slate-300 text-xs mt-1">Pricing will auto-load as you type</p>
+                  <p className="text-slate-300 text-[10px] sm:text-xs mt-1">Pricing will auto-load</p>
                 </div>
               )}
             </>
@@ -456,34 +497,34 @@ export function PricingPanel({
 
           {activeTab === 'details' && (
             <>
-              <h3 className="text-2xl font-black text-slate-800 mb-3 border-b-2 border-slate-200 pb-1 sticky top-0 bg-white">Pricing Details</h3>
+              <h3 className="text-lg sm:text-2xl font-black text-slate-800 mb-2 sm:mb-3 border-b-2 border-slate-200 pb-1 sticky top-0 bg-white">Pricing Details</h3>
               {parsedDetails.length > 0 ? (
-                <div className="space-y-2">
+                <div className="space-y-1 sm:space-y-2">
                   {parsedDetails.map((field, idx) => (
-                    <div key={idx} className="py-1.5 border-b border-slate-100 last:border-b-0">
-                      <span className="font-bold text-slate-800 text-sm">{field.label}</span>
-                      <span className="font-semibold text-blue-600 text-sm ml-1">{field.value}</span>
+                    <div key={idx} className="py-0.5 sm:py-1.5 border-b border-slate-100 last:border-b-0">
+                      <span className="font-bold text-slate-800 text-[10px] sm:text-sm">{field.label}</span>
+                      <span className="font-semibold text-blue-600 text-[10px] sm:text-sm ml-1">{field.value}</span>
                     </div>
                   ))}
                 </div>
               ) : currentMarketContext ? (
-                <p className="font-medium text-slate-700 text-sm leading-relaxed">{currentMarketContext.replace(/\n+/g, ' ').trim()}</p>
+                <p className="font-medium text-slate-700 text-xs sm:text-sm leading-relaxed">{currentMarketContext.replace(/\n+/g, ' ').trim()}</p>
               ) : (
-                <div className="text-center py-8">
-                  <div className="text-4xl mb-2">📋</div>
-                  <p className="text-slate-500 text-sm font-medium">No details available yet</p>
+                <div className="text-center py-4 sm:py-8">
+                  <div className="text-2xl sm:text-4xl mb-2">📋</div>
+                  <p className="text-slate-500 text-xs sm:text-sm font-medium">No details available yet</p>
                 </div>
               )}
             </>
           )}
         </div>
 
-        {/* Nutshell Button - pushed to bottom with mt-auto */}
-        <div className="flex flex-col items-center gap-2 pt-3 border-t border-slate-200 bg-white rounded-b-xl flex-shrink-0">
+        {/* Nutshell Button */}
+        <div className="flex flex-col items-center gap-1 sm:gap-2 pt-2 sm:pt-3 border-t border-slate-200 bg-white rounded-b-xl flex-shrink-0">
           {nutshellStatus !== 'idle' && (
-            <span className={`text-xs font-medium ${nutshellStatus === 'success' ? 'text-green-600' : 'text-red-600'}`}>{nutshellMessage}</span>
+            <span className={`text-[10px] sm:text-xs font-medium ${nutshellStatus === 'success' ? 'text-green-600' : 'text-red-600'}`}>{nutshellMessage}</span>
           )}
-          <Button onClick={onNutshellSubmit} disabled={isSubmittingNutshell} className="bg-orange-500 hover:bg-orange-600 text-white font-semibold shadow-lg hover:shadow-xl transition-all duration-200 h-9 px-6">
+          <Button onClick={onNutshellSubmit} disabled={isSubmittingNutshell} className="bg-orange-500 hover:bg-orange-600 text-white font-semibold shadow-lg hover:shadow-xl transition-all duration-200 h-7 sm:h-9 px-3 sm:px-6 text-xs sm:text-sm">
             {isSubmittingNutshell ? 'Submitting...' : 'Nutshell'}
           </Button>
         </div>
