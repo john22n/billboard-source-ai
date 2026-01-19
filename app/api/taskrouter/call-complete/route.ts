@@ -40,15 +40,24 @@ export async function POST(req: Request) {
     // Complete the task when the call ends
     if (['completed', 'busy', 'failed', 'no-answer', 'canceled'].includes(callStatus)) {
       try {
-        await client.taskrouter.v1
+        // Check task status first - only complete if assigned
+        const task = await client.taskrouter.v1
           .workspaces(workspaceSid)
           .tasks(taskSid)
-          .update({
-            assignmentStatus: 'completed',
-            reason: `Call ${callStatus}`,
-          });
+          .fetch();
 
-        console.log(`✅ Task ${taskSid} completed - worker released`);
+        if (task.assignmentStatus === 'assigned') {
+          await client.taskrouter.v1
+            .workspaces(workspaceSid)
+            .tasks(taskSid)
+            .update({
+              assignmentStatus: 'completed',
+              reason: `Call ${callStatus}`,
+            });
+          console.log(`✅ Task ${taskSid} completed - worker released`);
+        } else {
+          console.log(`ℹ️ Task ${taskSid} is ${task.assignmentStatus}, not completing`);
+        }
       } catch (error) {
         console.error('❌ Failed to complete task:', error);
       }

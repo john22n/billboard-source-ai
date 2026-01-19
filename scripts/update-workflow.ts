@@ -27,7 +27,6 @@ const DIRECT_NUMBERS = [
   '+13163953070',
   '+19783916647',
   '+17654396669',
-  MAIN_ROUTING_NUMBER,
 ];
 
 const client = twilio(ACCOUNT_SID, AUTH_TOKEN);
@@ -70,7 +69,7 @@ async function updateWorkflow() {
           expression: `callTo == "${num}"`,
           targets: [
             { queue: directQueues[num], timeout: 20 },
-            { queue: voicemailQueue.sid },
+            { queue: voicemailQueue.sid, timeout: 120 },
           ],
         })),
         // Main number
@@ -80,7 +79,7 @@ async function updateWorkflow() {
           targets: [
             { queue: mainQueue.sid, timeout: 20 },
             { queue: mainQueue.sid, timeout: 20 },
-            { queue: voicemailQueue.sid },
+            { queue: voicemailQueue.sid, timeout: 120 },
           ],
         },
       ],
@@ -98,7 +97,7 @@ async function updateWorkflow() {
       configuration: JSON.stringify(workflowConfig),
       assignmentCallbackUrl: `${APP_URL}/api/taskrouter/assignment`,
       fallbackAssignmentCallbackUrl: `${APP_URL}/api/taskrouter/assignment`,
-      taskReservationTimeout: 20,
+      taskReservationTimeout: 120,
     });
 
   console.log('✅ Workflow updated successfully');

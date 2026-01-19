@@ -37,7 +37,6 @@ const DIRECT_NUMBERS = [
   '+13163953070',
   '+19783916647',
   '+17654396669',
-  MAIN_ROUTING_NUMBER,
 ];
 
 /** Simple sleep helper */
@@ -141,7 +140,7 @@ async function setupTaskRouter() {
           expression: `callTo == "${num}"`,
           targets: [
             { queue: directQueues[num], timeout: 20 },
-            { queue: voicemailQueue.sid },
+            { queue: voicemailQueue.sid, timeout: 120 },
           ],
         })),
         // Main number
@@ -151,7 +150,7 @@ async function setupTaskRouter() {
           targets: [
             { queue: mainQueue.sid, timeout: 20 },
             { queue: mainQueue.sid, timeout: 20 },
-            { queue: voicemailQueue.sid },
+            { queue: voicemailQueue.sid, timeout: 120 },
           ],
         },
       ],
@@ -164,7 +163,7 @@ async function setupTaskRouter() {
     configuration: JSON.stringify(workflowConfig),
     assignmentCallbackUrl: `${APP_URL}/api/taskrouter/assignment`,
     fallbackAssignmentCallbackUrl: `${APP_URL}/api/taskrouter/assignment`,
-    taskReservationTimeout: 20,
+    taskReservationTimeout: 120,
   });
   console.log(`✅ Workflow created: ${workflow.sid}`);
   await sleep(500);
