@@ -25,11 +25,9 @@ const getInputClass = (value: string | null | undefined, baseClass: string = "")
 const getFullNameInputClass = (value: string | null | undefined, baseClass: string = "") => {
   if (value && value.trim() !== "") {
     const nameParts = value.trim().split(/\s+/).filter(part => part.length > 0);
-    // Green only if there are at least 2 name parts (first + last)
     if (nameParts.length >= 2) {
       return `${baseClass} bg-green-50 border-green-500 focus:border-green-600 focus:ring-green-500`;
     }
-    // Yellow if only first name (partial completion)
     return `${baseClass} bg-yellow-50 border-yellow-500`;
   }
   return `${baseClass} bg-red-100`;
@@ -50,18 +48,15 @@ export const FieldInput = memo(function FieldInput({
   field,
   placeholder,
   className = "",
-  baseClassName = "h-10 text-sm border-2 border-black rounded transition-colors"
+  baseClassName = "h-9 sm:h-10 text-xs sm:text-sm border-2 border-black rounded transition-colors"
 }: FieldInputProps) {
-  // ✅ Subscribe to ONLY this field
   const rawValue = useFormStore(selectField(field));
   const updateField = useFormStore((s) => s.updateField);
 
-  // 🔍 Performance monitoring (only in development)
   if (process.env.NODE_ENV === 'development') {
     console.log(`🔄 Re-render: FieldInput[${field}]`);
   }
 
-  // Convert boolean to string for display (for hasMediaExperience)
   const value = typeof rawValue === 'boolean'
     ? (rawValue ? 'Yes' : 'No')
     : (rawValue as string | null);
@@ -93,34 +88,27 @@ interface FirstNameInputProps {
 
 export const FirstNameInput = memo(function FirstNameInput({
   className = "",
-  baseClassName = "h-10 text-sm border-2 border-black rounded transition-colors"
+  baseClassName = "h-9 sm:h-10 text-xs sm:text-sm border-2 border-black rounded transition-colors"
 }: FirstNameInputProps) {
   const fullName = useFormStore(selectField('name'));
   const updateField = useFormStore((s) => s.updateField);
 
-  // 🔍 Performance monitoring (only in development)
   if (process.env.NODE_ENV === 'development') {
     console.log(`🔄 Re-render: FirstNameInput`);
   }
 
-  // Extract first name from full name
   const firstName = fullName?.split(' ')[0] ?? '';
   
   const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const newFirstName = e.target.value;
-    // Get the rest of the name (last name, middle name, etc.)
     const nameParts = fullName?.split(' ') ?? [];
     const restOfName = nameParts.slice(1).join(' ');
-    
-    // Combine new first name with rest of name
     const newFullName = restOfName 
       ? `${newFirstName} ${restOfName}`
       : newFirstName;
-    
     updateField('name', newFullName);
   }, [fullName, updateField]);
 
-  // Green if first name exists (any non-empty value)
   const inputClass = getInputClass(firstName, baseClassName);
 
   return (
@@ -145,7 +133,7 @@ interface FieldTextareaProps {
 export const FieldTextarea = memo(function FieldTextarea({ 
   field,
   className = "",
-  baseClassName = "text-sm resize-none border-2 border-black rounded transition-colors"
+  baseClassName = "text-xs sm:text-sm resize-none border-2 border-black rounded transition-colors"
 }: FieldTextareaProps) {
   const value = useFormStore(selectField(field)) as string | null;
   const updateField = useFormStore((s) => s.updateField);
@@ -171,7 +159,7 @@ export const FieldTextarea = memo(function FieldTextarea({
 
 export const PhoneInput = memo(function PhoneInput({ 
   className = "",
-  baseClassName = "h-10 text-sm border-2 rounded transition-all"
+  baseClassName = "h-9 sm:h-10 text-xs sm:text-sm border-2 rounded transition-all"
 }: { className?: string; baseClassName?: string }) {
   const phone = useFormStore(selectField('phone'));
   const twilioPhonePreFilled = useFormStore((s) => s.twilioPhonePreFilled);
@@ -187,24 +175,18 @@ export const PhoneInput = memo(function PhoneInput({
     updateField('phone', e.target.value);
   }, [updateField, setTwilioPhonePreFilled, setPhoneVerified]);
 
-  // Determine phone input color and styling
-  // Priority: Verified (bright green with glow) > Manual edit (green) > Twilio pre-fill (yellow) > Empty (red)
   let colorClass = 'bg-red-100 border-black';
   let wrapperClass = '';
   
   if (phone && phone.trim() !== "") {
     if (phoneVerified) {
-      // ✅ VERIFIED: AI extracted phone matches Twilio caller ID
       colorClass = 'bg-green-100 border-green-600 shadow-lg ring-2 ring-green-400 focus:border-green-700 focus:ring-green-500 focus:ring-offset-1';
       wrapperClass = 'relative';
     } else if (twilioPhonePreFilled) {
-      // ⏳ PENDING: Twilio pre-filled, waiting for verification
       colorClass = 'bg-yellow-50 border-yellow-500 focus:border-yellow-600 focus:ring-yellow-400';
     } else if (userEditedFields.has('phone')) {
-      // ✏️ MANUAL: User typed this in
       colorClass = 'bg-green-50 border-green-500 focus:border-green-600 focus:ring-green-500';
     } else {
-      // Default filled state
       colorClass = 'bg-green-50 border-green-500 focus:border-green-600 focus:ring-green-500';
     }
   }
@@ -240,8 +222,6 @@ export const ContactFieldInput = memo(function ContactFieldInput({
   field,
   className = ""
 }: ContactFieldInputProps) {
-  // For primary contact (index 0), use main form fields
-  // For additional contacts, use additionalContacts array
   const value = useFormStore((s) => {
     if (contactIndex === 0) {
       return s.fields[field] ?? '';
@@ -256,13 +236,11 @@ export const ContactFieldInput = memo(function ContactFieldInput({
     updateContactField(contactIndex, field, e.target.value);
   }, [contactIndex, field, updateContactField]);
 
-  // Special case: primary contact phone uses PhoneInput
   if (contactIndex === 0 && field === 'phone') {
     return <PhoneInput className={className} />;
   }
 
-  // ✅ Special case: name field requires BOTH first AND last name for green
-  const baseClassName = "h-10 text-sm border-2 border-black rounded transition-colors";
+  const baseClassName = "h-9 sm:h-10 text-xs sm:text-sm border-2 border-black rounded transition-colors";
   const inputClass = field === 'name' 
     ? getFullNameInputClass(value, baseClassName)
     : getInputClass(value, baseClassName);
@@ -307,7 +285,7 @@ export const MarketFieldInput = memo(function MarketFieldInput({
     updateMarketField(marketIndex, field, e.target.value);
   }, [marketIndex, field, updateMarketField]);
 
-  const inputClass = getInputClass(value, "h-10 text-sm border-2 border-black rounded transition-colors");
+  const inputClass = getInputClass(value, "h-9 sm:h-10 text-xs sm:text-sm border-2 border-black rounded transition-colors");
 
   return (
     <Input
@@ -346,7 +324,7 @@ export const MarketFieldTextarea = memo(function MarketFieldTextarea({
     updateMarketField(marketIndex, 'targetArea', e.target.value);
   }, [marketIndex, updateMarketField]);
 
-  const inputClass = getInputClass(value, "text-sm resize-none border-2 border-black rounded transition-colors");
+  const inputClass = getInputClass(value, "text-xs sm:text-sm resize-none border-2 border-black rounded transition-colors");
 
   return (
     <Textarea
@@ -381,7 +359,7 @@ export const ButtonGroup = memo(function ButtonGroup({
   confirmedValue,
   onConfirm,
   className = "",
-  buttonClassName = "px-3.5 py-2 text-md"
+  buttonClassName = "px-2 sm:px-3.5 py-2 sm:py-2 text-xs sm:text-md"
 }: ButtonGroupProps) {
   const aiValue = useFormStore(selectField(field)) as string | null;
   const updateField = useFormStore((s) => s.updateField);
@@ -392,7 +370,7 @@ export const ButtonGroup = memo(function ButtonGroup({
   }, [field, updateField, onConfirm]);
 
   return (
-    <div className={`flex gap-3 ${className}`}>
+    <div className={`flex gap-1 sm:gap-3 ${className}`}>
       {options.map((option) => {
         let bgClass = 'bg-red-100 border-black';
         if (confirmedValue === option.value) {
@@ -437,10 +415,9 @@ export const MultiSelectButtonGroup = memo(function MultiSelectButtonGroup({
   confirmedSelections,
   onToggle,
   className = "",
-  buttonClassName = "px-2.5 py-1.5 text-sm",
+  buttonClassName = "px-2 py-1 sm:px-2.5 sm:py-1.5 text-xs sm:text-sm",
   showSubtext = false
 }: MultiSelectButtonGroupProps) {
-  // ✅ Fix: Get raw value, handle array creation outside selector
   const fieldValueRaw = useFormStore((s) => marketOrContactIndex === 0 ? s.fields[field] : null);
   const aiSuggestions = (() => {
     if (marketOrContactIndex !== 0 || !fieldValueRaw) return [];
@@ -455,7 +432,6 @@ export const MultiSelectButtonGroup = memo(function MultiSelectButtonGroup({
       ? confirmedSelections.filter(v => v !== value)
       : [...confirmedSelections, value];
     
-    // Update the main form field if primary market/contact
     if (marketOrContactIndex === 0) {
       updateField(field, newSelections);
     }
@@ -471,7 +447,7 @@ export const MultiSelectButtonGroup = memo(function MultiSelectButtonGroup({
   };
 
   return (
-    <div className={`flex gap-2 ${className}`}>
+    <div className={`flex gap-1.5 sm:gap-2 ${className}`}>
       {options.map((option) => {
         const isConfirmed = confirmedSelections.includes(option.value);
         const isAISuggested = aiSuggestions.includes(option.value);
@@ -492,7 +468,7 @@ export const MultiSelectButtonGroup = memo(function MultiSelectButtonGroup({
               {option.label}
             </button>
             {showSubtext && subtexts[option.value] && (
-              <span className="text-[10px] text-gray-500 font-normal">
+              <span className="text-[8px] sm:text-[10px] text-gray-500 font-normal">
                 {subtexts[option.value]}
               </span>
             )}
@@ -520,7 +496,6 @@ export const DecisionMakerButtonGroup = memo(function DecisionMakerButtonGroup({
   const setConfirmedDecisionMaker = useFormStore((s) => s.setConfirmedDecisionMaker);
   const updateContactField = useFormStore((s) => s.updateContactField);
   
-  // Get AI value for primary contact
   const aiValue = useFormStore((s) => {
     if (contactIndex === 0) return s.fields.decisionMaker;
     const contact = s.additionalContacts[contactIndex - 1];
@@ -528,10 +503,10 @@ export const DecisionMakerButtonGroup = memo(function DecisionMakerButtonGroup({
   });
 
   const options = [
-    { value: "alone", label: "You Alone" },
-    { value: "boss", label: "My Boss" },
-    { value: "partners", label: "Partners" },
-    { value: "committee", label: "Committee" },
+    { value: "alone", label: "You Alone", short: "Alone" },
+    { value: "boss", label: "My Boss", short: "Boss" },
+    { value: "partners", label: "Partners", short: "Part" },
+    { value: "committee", label: "Committee", short: "Comm" },
   ];
 
   const handleClick = useCallback((value: string) => {
@@ -540,7 +515,7 @@ export const DecisionMakerButtonGroup = memo(function DecisionMakerButtonGroup({
   }, [contactIndex, updateContactField, setConfirmedDecisionMaker]);
 
   return (
-    <div className={`flex gap-1 @sm:gap-2 @lg:gap-3 flex-wrap @lg:flex-nowrap ${className}`}>
+    <div className={`flex gap-1 sm:gap-2 flex-wrap sm:flex-nowrap ${className}`}>
       {options.map((option) => {
         let bgClass = 'bg-red-100 border-black';
         if (confirmedValue === option.value) {
@@ -553,9 +528,10 @@ export const DecisionMakerButtonGroup = memo(function DecisionMakerButtonGroup({
           <button
             key={option.value}
             onClick={() => handleClick(option.value)}
-            className={`font-bold border-2 rounded transition-colors px-2 @sm:px-2.5 @lg:px-3.5 py-1 @sm:py-1.5 @lg:py-2 text-xs @5xl:text-sm whitespace-nowrap ${bgClass}`}
+            className={`font-bold border-2 rounded transition-colors px-1.5 sm:px-2 md:px-2.5 xl:px-3.5 py-2 sm:py-1.5 xl:py-2 text-[10px] sm:text-xs xl:text-sm whitespace-nowrap flex-1 sm:flex-initial ${bgClass}`}
           >
-            {option.label}
+            <span className="sm:hidden">{option.short}</span>
+            <span className="hidden sm:inline">{option.label}</span>
           </button>
         );
       })}
@@ -589,7 +565,7 @@ export const BoardTypeButtonGroup = memo(function BoardTypeButtonGroup({
   const options = [
     { value: "Static", label: "Static", short: "Sta" },
     { value: "Digital", label: "Digital", short: "Dig" },
-    { value: "Both", label: "Both", short: "Bot" },
+    { value: "Both", label: "Both", short: "Both" },
   ];
 
   const handleClick = useCallback((value: string) => {
@@ -598,7 +574,7 @@ export const BoardTypeButtonGroup = memo(function BoardTypeButtonGroup({
   }, [marketIndex, updateMarketField, setConfirmedBoardType]);
 
   return (
-    <div className={`flex gap-0.5 @sm:gap-1 @lg:gap-1.5 justify-center min-w-0 overflow-hidden ${className}`}>
+    <div className={`flex gap-1 sm:gap-1.5 w-full overflow-hidden ${className}`}>
       {options.map((option) => {
         let bgClass = 'bg-red-100 border-black';
         if (confirmedValue === option.value) {
@@ -611,10 +587,10 @@ export const BoardTypeButtonGroup = memo(function BoardTypeButtonGroup({
           <button
             key={option.value}
             onClick={() => handleClick(option.value)}
-            className={`font-bold border-2 rounded transition-colors px-1 @sm:px-1.5 @lg:px-3 py-0.5 @sm:py-1 @lg:py-1.5 text-xs @sm:text-sm whitespace-nowrap flex-1 min-w-0 ${bgClass}`}
+            className={`font-bold border-2 rounded transition-colors px-1 sm:px-3 py-2 sm:py-1.5 text-xs sm:text-sm whitespace-nowrap flex-1 min-w-0 ${bgClass}`}
           >
-            <span className="@sm:hidden">{option.short}</span>
-            <span className="hidden @sm:inline">{option.label}</span>
+            <span className="sm:hidden">{option.short}</span>
+            <span className="hidden sm:inline">{option.label}</span>
           </button>
         );
       })}
@@ -635,14 +611,12 @@ export const DurationButtonGroup = memo(function DurationButtonGroup({
   marketIndex,
   className = ""
 }: DurationButtonGroupProps) {
-  // ✅ Fix: Handle fallback outside selector to avoid new array reference
   const confirmedSelectionsRaw = useFormStore((s) => s.confirmedDurations[marketIndex]);
   const confirmedSelections = confirmedSelectionsRaw ?? [];
 
   const setConfirmedDuration = useFormStore((s) => s.setConfirmedDuration);
   const updateMarketField = useFormStore((s) => s.updateMarketField);
 
-  // ✅ Fix: Get raw value, handle array creation outside
   const campaignLengthRaw = useFormStore((s) => marketIndex === 0 ? s.fields.campaignLength : null);
   const aiSuggestions = (() => {
     if (marketIndex !== 0 || !campaignLengthRaw) return [];
@@ -678,7 +652,7 @@ export const DurationButtonGroup = memo(function DurationButtonGroup({
   }, [confirmedSelections, marketIndex, setConfirmedDuration, updateMarketField]);
 
   return (
-    <div className={`flex gap-0.5 @4xl:gap-1 @5xl:gap-1.5 max-w-full min-w-0 overflow-hidden ${className}`}>
+    <div className={`flex gap-0.5 sm:gap-1 max-w-full min-w-0 overflow-hidden ${className}`}>
       {options.map((option) => {
         const isConfirmed = confirmedSelections.includes(option.value);
         const isAISuggested = aiSuggestions.includes(option.value);
@@ -694,12 +668,12 @@ export const DurationButtonGroup = memo(function DurationButtonGroup({
           <div key={option.value} className="flex flex-col text-center items-center flex-1 min-w-0">
             <button
               onClick={() => handleClick(option.value)}
-              className={`font-bold border-2 rounded text-center transition-colors px-1 py-0.5 @sm:px-1.5 @sm:py-1 @lg:px-2 @lg:py-1 text-[10px] @sm:text-xs @5xl:text-sm w-full whitespace-nowrap ${bgClass}`}
+              className={`font-bold border-2 rounded text-center transition-colors py-2 sm:px-1.5 sm:py-1 text-[10px] sm:text-xs w-full whitespace-nowrap ${bgClass}`}
             >
               {option.label}
             </button>
             {subtexts[option.value] && (
-              <span className="text-[6px] @sm:text-[8px] @lg:text-[10px] text-gray-500 font-normal">
+              <span className="text-[6px] sm:text-[8px] xl:text-[10px] text-gray-500 font-normal">
                 {subtexts[option.value]}
               </span>
             )}
@@ -723,14 +697,12 @@ export const SendOverButtonGroup = memo(function SendOverButtonGroup({
   contactIndex,
   className = ""
 }: SendOverButtonGroupProps) {
-  // ✅ Fix: Handle fallback outside selector to avoid new array reference
   const confirmedSelectionsRaw = useFormStore((s) => s.confirmedSendOver[contactIndex]);
   const confirmedSelections = confirmedSelectionsRaw ?? [];
 
   const setConfirmedSendOver = useFormStore((s) => s.setConfirmedSendOver);
   const updateField = useFormStore((s) => s.updateField);
 
-  // ✅ Fix: Get raw value, handle array operations outside (matching DurationButtonGroup pattern)
   const sendOverRaw = useFormStore((s) => contactIndex === 0 ? s.fields.sendOver : null);
   const aiSuggestions = (() => {
     if (contactIndex !== 0 || !sendOverRaw) return [];
@@ -739,9 +711,9 @@ export const SendOverButtonGroup = memo(function SendOverButtonGroup({
   })();
 
   const options = [
-    { value: "Avails", label: "Avails" },
-    { value: "Panel Info", label: "Panel Info" },
-    { value: "Planning Rates", label: "Planning Rates" },
+    { value: "Avails", label: "Avails", short: "Avails" },
+    { value: "Panel Info", label: "Panel Info", short: "Panel" },
+    { value: "Planning Rates", label: "Planning Rates", short: "Rates" },
   ];
 
   const handleClick = useCallback((value: string) => {
@@ -757,7 +729,7 @@ export const SendOverButtonGroup = memo(function SendOverButtonGroup({
   }, [confirmedSelections, contactIndex, setConfirmedSendOver, updateField]);
 
   return (
-    <div className={`flex gap-1 @sm:gap-2 @lg:gap-3 flex-wrap @lg:flex-nowrap ${className}`}>
+    <div className={`flex gap-1 sm:gap-2 flex-wrap sm:flex-nowrap ${className}`}>
       {options.map((option) => {
         const isConfirmed = confirmedSelections.includes(option.value);
         const isAISuggested = aiSuggestions.includes(option.value as "Avails" | "Panel Info" | "Planning Rates");
@@ -773,9 +745,10 @@ export const SendOverButtonGroup = memo(function SendOverButtonGroup({
           <button
             key={option.value}
             onClick={() => handleClick(option.value)}
-            className={`font-bold border-2 rounded transition-colors px-2 @sm:px-2.5 @lg:px-3.5 py-1 @sm:py-1.5 @lg:py-2 text-xs @5xl:text-sm whitespace-nowrap ${bgClass}`}
+            className={`font-bold border-2 rounded transition-colors px-1.5 sm:px-2.5 xl:px-3.5 py-2 sm:py-1.5 xl:py-2 text-[10px] sm:text-xs xl:text-sm whitespace-nowrap flex-1 sm:flex-initial ${bgClass}`}
           >
-            {option.label}
+            <span className="sm:hidden">{option.short}</span>
+            <span className="hidden sm:inline">{option.label}</span>
           </button>
         );
       })}
@@ -796,9 +769,9 @@ export const LeadTypeButtonGroup = memo(function LeadTypeButtonGroup({
   const setConfirmedLeadType = useFormStore((s) => s.setConfirmedLeadType);
 
   const options = [
-    { value: "Availer", label: "Availer" },
-    { value: "Panel Requester", label: "Panel Requester" },
-    { value: "Tire Kicker", label: "Tire Kicker" },
+    { value: "Availer", label: "Availer", short: "Avail" },
+    { value: "Panel Requester", label: "Panel Requester", short: "Panel" },
+    { value: "Tire Kicker", label: "Tire Kicker", short: "Tire K" },
   ];
 
   const handleClick = useCallback((value: string) => {
@@ -807,7 +780,7 @@ export const LeadTypeButtonGroup = memo(function LeadTypeButtonGroup({
   }, [updateField, setConfirmedLeadType]);
 
   return (
-    <div className={`flex flex-nowrap gap-1.5 @3xl:gap-10 ${className}`}>
+    <div className={`flex flex-nowrap gap-1 sm:gap-1.5 xl:gap-10 ${className}`}>
       {options.map((option) => {
         let bgClass = 'bg-red-100 border-black';
         if (confirmedValue === option.value) {
@@ -820,9 +793,10 @@ export const LeadTypeButtonGroup = memo(function LeadTypeButtonGroup({
           <button
             key={option.value}
             onClick={() => handleClick(option.value)}
-            className={`font-bold border-2 rounded transition-colors px-1.5 @sm:px-2 @md:px-2 @lg:px-2.5 @xl:px-3 py-1 @sm:py-1.5 @lg:py-2 text-xs @sm:text-sm @lg:text-md whitespace-nowrap flex-1 ${bgClass}`}
+            className={`font-bold border-2 rounded transition-colors px-1.5 sm:px-2 xl:px-3 py-1 sm:py-1.5 xl:py-2 text-[10px] sm:text-xs xl:text-sm whitespace-nowrap flex-1 ${bgClass}`}
           >
-            {option.label}
+            <span className="sm:hidden">{option.short}</span>
+            <span className="hidden sm:inline">{option.label}</span>
           </button>
         );
       })}
@@ -844,7 +818,7 @@ export const BallparkInput = memo(function BallparkInput({
     setBallpark(e.target.value);
   }, [setBallpark]);
 
-  const inputClass = getInputClass(ballpark, "h-10 w-32 @sm:w-30 @md:w-40 @lg:w-44 @3xl:w-50 @5xl:w-64 text-sm border-2 border-black rounded transition-colors");
+  const inputClass = getInputClass(ballpark, "h-9 sm:h-10 flex-1 sm:w-32 md:w-40 xl:w-64 text-xs sm:text-sm border-2 border-black rounded transition-colors");
 
   return (
     <Input

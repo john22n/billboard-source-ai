@@ -1,5 +1,4 @@
 "use client";
-
 import { useWorkerStatus, type WorkerActivity } from "@/hooks/useWorkerStatus";
 import { cn } from "@/lib/utils";
 import {
@@ -12,11 +11,11 @@ import {
 
 const STATUS_CONFIG: Record<
   WorkerActivity,
-  { label: string; dot: string; blink: string }
+  { label: string; short: string; dot: string; blink: string }
 > = {
-  available: { label: "Available", dot: "bg-green-500", blink: "animate-pulse shadow-[0_0_8px_2px_rgba(34,197,94,0.6)]" },
-  unavailable: { label: "Away", dot: "bg-yellow-500", blink: "animate-pulse shadow-[0_0_8px_2px_rgba(234,179,8,0.6)]" },
-  offline: { label: "Offline", dot: "bg-gray-400", blink: "" },
+  available: { label: "Available", short: "Avail", dot: "bg-green-500", blink: "animate-pulse" },
+  unavailable: { label: "Away", short: "Away", dot: "bg-yellow-500", blink: "animate-pulse" },
+  offline: { label: "Offline", short: "Off", dot: "bg-gray-400", blink: "" },
 };
 
 interface WorkerStatusToggleProps {
@@ -35,43 +34,43 @@ export function WorkerStatusToggle({ className }: WorkerStatusToggleProps) {
   };
 
   return (
-    <div className={cn("flex items-center gap-2", className)}>
+    <div className={cn("flex items-center gap-1 sm:gap-2", className)}>
       <Select value={status} onValueChange={handleChange} disabled={isLoading}>
         <SelectTrigger className={cn(
-          "w-[130px] h-8 text-xs font-medium bg-transparent hover:bg-accent hover:text-accent-foreground",
+          "w-[85px] sm:w-[130px] h-7 sm:h-8 text-[10px] sm:text-xs font-medium bg-transparent hover:bg-accent hover:text-accent-foreground",
           isLoading && "opacity-50"
         )}>
           <SelectValue>
-            <span className="flex items-center gap-2">
-              <span className={cn("w-2 h-2 rounded-full", STATUS_CONFIG[status].dot, STATUS_CONFIG[status].blink)} />
-              {isLoading ? "..." : STATUS_CONFIG[status].label}
+            <span className="flex items-center gap-1.5 sm:gap-2">
+              <span className={cn("w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full", STATUS_CONFIG[status].dot, STATUS_CONFIG[status].blink)} />
+              <span className="sm:hidden">{isLoading ? "..." : STATUS_CONFIG[status].short}</span>
+              <span className="hidden sm:inline">{isLoading ? "..." : STATUS_CONFIG[status].label}</span>
             </span>
           </SelectValue>
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="available" className="text-xs">
-            <span className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-green-500" />
+          <SelectItem value="available" className="text-[10px] sm:text-xs">
+            <span className="flex items-center gap-1.5 sm:gap-2">
+              <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-green-500" />
               Available
             </span>
           </SelectItem>
-          <SelectItem value="unavailable" className="text-xs">
-            <span className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-yellow-500" />
+          <SelectItem value="unavailable" className="text-[10px] sm:text-xs">
+            <span className="flex items-center gap-1.5 sm:gap-2">
+              <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-yellow-500" />
               Away
             </span>
           </SelectItem>
-          <SelectItem value="offline" className="text-xs">
-            <span className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-gray-400" />
+          <SelectItem value="offline" className="text-[10px] sm:text-xs">
+            <span className="flex items-center gap-1.5 sm:gap-2">
+              <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-gray-400" />
               Offline
             </span>
           </SelectItem>
         </SelectContent>
       </Select>
-
       {error && (
-        <span className="text-xs text-destructive" title={error}>
+        <span className="text-[10px] sm:text-xs text-destructive" title={error}>
           !
         </span>
       )}

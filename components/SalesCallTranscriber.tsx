@@ -41,7 +41,7 @@ export default function SalesCallTranscriber() {
   const [nutshellMessage, setNutshellMessage] = useState('');
   const [resetTrigger, setResetTrigger] = useState(0);
   
-  // ✅ NEW: Store caller's phone number separately so it persists after call is accepted
+  // ✅ Store caller's phone number separately so it persists after call is accepted
   const [callerPhone, setCallerPhone] = useState<string>("");
 
   // ✅ Get store actions (STABLE - won't cause re-renders)
@@ -84,8 +84,7 @@ export default function SalesCallTranscriber() {
     onCallDisconnected,
   } = useTwilioContext();
 
-  // ✅ NEW: Capture caller's phone number as soon as incoming call arrives
-  // This runs BEFORE the call is accepted, so we capture the number while it's still available
+  // ✅ Capture caller's phone number as soon as incoming call arrives
   useEffect(() => {
     if (incomingCall?.parameters?.From) {
       const fromNumber = incomingCall.parameters.From;
@@ -100,7 +99,6 @@ export default function SalesCallTranscriber() {
     onCallDisconnected(() => {
       stopTranscription();
       resetStatus();
-      // Note: We don't clear callerPhone here so it persists for the form
     });
   }, [onCallAccepted, onCallDisconnected, startTranscription, stopTranscription, resetStatus]);
 
@@ -128,8 +126,8 @@ export default function SalesCallTranscriber() {
     clearTranscripts();
     setBillboardContext("");
     resetExtraction();
-    resetForm(); // Reset Zustand store
-    setCallerPhone(""); // ✅ Clear caller phone on reset
+    resetForm();
+    setCallerPhone("");
     setResetTrigger(prev => prev + 1);
   }, [clearTranscripts, resetExtraction, resetForm]);
 
@@ -160,10 +158,6 @@ export default function SalesCallTranscriber() {
       extractFields(fullTranscript);
     }
   }, [fullTranscript, extractFields, isExtracting]);
-
-  // ✅ Fetch billboard pricing data
-  // Billboard pricing is now handled exclusively by PricingPanel based on location field changes
-  // This prevents duplicate API calls when both transcript and location update simultaneously
 
   const handleFileSelect = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -223,7 +217,6 @@ export default function SalesCallTranscriber() {
     setNutshellStatus('idle');
     setNutshellMessage('');
 
-    // ✅ Get current form data from store
     const formData = getFormData();
 
     try {
@@ -299,43 +292,47 @@ export default function SalesCallTranscriber() {
     }
   }, [activeMarketIndex, targetCity, state, targetArea, additionalMarkets]);
 
-  // ✅ PricingPanel will subscribe to fields directly, no need to pass them
-
   return (
     <div className="h-full overflow-hidden flex items-center justify-center m-0 p-0">
-      <div className="max-w-[1800px] w-full flex flex-col">
-        <Card className="shadow-lg border-0 flex flex-col">
+      <div className="max-w-[1800px] xl:max-h-[1250px] w-full h-full flex flex-col px-2 sm:px-0">
+        <Card className="shadow-lg border-0 flex flex-col h-full overflow-hidden">
           {/* Header */}
-          <CardHeader className="bg-gradient-to-r from-blue-600 via-indigo-600 to-primary text-white py-3 px-4">
+          <CardHeader className="bg-gradient-to-r from-blue-600 via-indigo-600 to-primary rounded-sm text-white py-2 sm:py-3 px-3 sm:px-4 flex-shrink-0">
             <div className="flex flex-col gap-2">
+              {/* Title Row */}
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                <div>
-                  <CardTitle className="text-xl font-bold tracking-tight">
+                <div className="min-w-0">
+                  <CardTitle className="text-lg sm:text-xl font-bold tracking-tight truncate">
                     Billboard Lead Form
                     {userEmail && (
-                      <span className="text-xs font-normal ml-2 opacity-75">
+                      <span className="text-[10px] sm:text-xs font-normal ml-2 opacity-75 hidden sm:inline">
                         ({userEmail})
                       </span>
                     )}
                   </CardTitle>
-                  <p className="text-blue-100 text-xs mt-0.5">Real-time transcription & AI-powered data extraction</p>
+                  <p className="text-blue-100 text-[10px] sm:text-xs mt-0.5 hidden sm:block">Real-time transcription & AI-powered data extraction</p>
                 </div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <div className={`px-3 py-1.5 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 flex items-center gap-2 text-xs ${isProcessing ? "animate-pulse" : ""}`}>
+                
+                {/* Status and Buttons */}
+                <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                  {/* Status Badge */}
+                  <div className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs ${isProcessing ? "animate-pulse" : ""}`}>
                     {twilioReady && !callActive && (
-                      <span className="inline-block w-2 h-2 bg-green-400 rounded-full"></span>
+                      <span className="inline-block w-1.5 h-1.5 sm:w-2 sm:h-2 bg-green-400 rounded-full flex-shrink-0"></span>
                     )}
                     {callActive && (
-                      <span className="inline-block w-2 h-2 bg-red-400 rounded-full animate-pulse"></span>
+                      <span className="inline-block w-1.5 h-1.5 sm:w-2 sm:h-2 bg-red-400 rounded-full animate-pulse flex-shrink-0"></span>
                     )}
-                    <span className="font-medium">{status}</span>
+                    <span className="font-medium truncate max-w-[100px] sm:max-w-none">{status}</span>
                   </div>
-                  <div className="flex gap-2">
+                  
+                  {/* Action Buttons */}
+                  <div className="flex flex-1 sm:flex-initial gap-1 sm:gap-2">
                     {callActive && (
                       <Button
                         onClick={hangupCall}
                         size="sm"
-                        className="bg-red-500 hover:bg-red-600 text-white font-semibold shadow-lg hover:shadow-xl transition-all duration-200 h-8 text-xs"
+                        className="flex-1 sm:flex-initial bg-red-500 hover:bg-red-600 text-white font-semibold shadow-lg hover:shadow-xl transition-all duration-200 h-7 sm:h-8 text-[10px] sm:text-xs px-2 sm:px-3"
                       >
                         Hang Up
                       </Button>
@@ -344,10 +341,10 @@ export default function SalesCallTranscriber() {
                       onClick={clearAll}
                       size="sm"
                       variant="secondary"
-                      className="bg-white/20 hover:bg-white/30 text-white border border-white/30 font-semibold backdrop-blur-sm h-8 text-xs"
+                      className="flex-1 sm:flex-initial bg-white/20 hover:bg-white/30 text-white border border-white/30 font-semibold backdrop-blur-sm h-7 sm:h-8 text-[10px] sm:text-xs px-2 sm:px-3"
                       disabled={callActive}
                     >
-                      Clear All
+                      Clear
                     </Button>
                     <input
                       ref={fileInputRef}
@@ -361,9 +358,11 @@ export default function SalesCallTranscriber() {
                       onClick={handleUploadClick}
                       disabled={isUploading || callActive}
                       size="sm"
-                      className="bg-white/20 hover:bg-white/30 text-white border border-white/30 font-semibold backdrop-blur-sm h-8 text-xs"
+                      className="flex-1 sm:flex-initial bg-white/20 hover:bg-white/30 text-white border border-white/30 font-semibold backdrop-blur-sm h-7 sm:h-8 text-[10px] sm:text-xs px-2 sm:px-3"
                     >
-                      <span className="mr-1.5">📁</span> {isUploading ? "Uploading..." : "Upload"}
+                      <span className="mr-1 sm:mr-1.5">📁</span> 
+                      <span className="hidden sm:inline">{isUploading ? "Uploading..." : "Upload"}</span>
+                      <span className="sm:hidden">{isUploading ? "..." : "File"}</span>
                     </Button>
                   </div>
                 </div>
@@ -371,16 +370,16 @@ export default function SalesCallTranscriber() {
 
               {/* Incoming Call Alert */}
               {incomingCall && (
-                <div className="bg-green-500/30 border border-white/30 rounded px-3 py-2 animate-pulse">
-                  <div className="flex items-center justify-between">
-                    <p className="text-white text-sm font-semibold">
-                      📞 Incoming call from {incomingCall.parameters.From}
+                <div className="bg-green-500/30 border border-white/30 rounded px-2 sm:px-3 py-1.5 sm:py-2 animate-pulse">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1.5 sm:gap-2">
+                    <p className="text-white text-xs sm:text-sm font-semibold">
+                      📞 Incoming: {incomingCall.parameters.From}
                     </p>
-                    <div className="flex gap-2">
+                    <div className="flex gap-1.5 sm:gap-2">
                       <Button
                         onClick={acceptCall}
                         size="sm"
-                        className="bg-green-600 hover:bg-green-700 h-7 text-sm"
+                        className="bg-green-600 hover:bg-green-700 h-6 sm:h-7 text-xs px-2 sm:px-3"
                       >
                         Accept
                       </Button>
@@ -388,7 +387,7 @@ export default function SalesCallTranscriber() {
                         onClick={rejectCall}
                         size="sm"
                         variant="destructive"
-                        className="h-7 text-sm"
+                        className="h-6 sm:h-7 text-xs px-2 sm:px-3"
                       >
                         Reject
                       </Button>
@@ -397,41 +396,41 @@ export default function SalesCallTranscriber() {
                 </div>
               )}
 
-              {/* ✅ NEW: Show captured caller phone for debugging (can remove later) */}
+              {/* Caller Phone Badge */}
               {callerPhone && !incomingCall && (
-                <div className="px-2 py-1 bg-blue-500/30 backdrop-blur-sm border border-blue-300/30 rounded text-xs">
+                <div className="px-2 py-1 bg-blue-500/30 backdrop-blur-sm border border-blue-300/30 rounded text-[10px] sm:text-xs w-fit">
                   <span className="text-white font-medium">📱 Caller: {callerPhone}</span>
                 </div>
               )}
 
               {/* Status Indicators */}
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap gap-1 sm:gap-1.5">
                 {isExtracting && (
-                  <div className="px-2 py-1 bg-blue-500/30 backdrop-blur-sm border border-blue-300/30 rounded text-xs">
+                  <div className="px-1.5 sm:px-2 py-0.5 sm:py-1 bg-blue-500/30 backdrop-blur-sm border border-blue-300/30 rounded text-[10px] sm:text-xs">
                     <span className="text-white font-medium">🤖 Extracting...</span>
                   </div>
                 )}
                 {isLoadingBillboard && (
-                  <div className="px-2 py-1 bg-purple-500/30 backdrop-blur-sm border border-purple-300/30 rounded text-xs">
+                  <div className="px-1.5 sm:px-2 py-0.5 sm:py-1 bg-purple-500/30 backdrop-blur-sm border border-purple-300/30 rounded text-[10px] sm:text-xs">
                     <span className="text-white font-medium">📊 Loading pricing...</span>
                   </div>
                 )}
                 {billboardContext && !isLoadingBillboard && (
-                  <div className="px-2 py-1 bg-green-500/30 backdrop-blur-sm border border-green-300/30 rounded text-xs">
+                  <div className="px-1.5 sm:px-2 py-0.5 sm:py-1 bg-green-500/30 backdrop-blur-sm border border-green-300/30 rounded text-[10px] sm:text-xs">
                     <span className="text-white font-medium">✓ Pricing loaded</span>
                   </div>
                 )}
                 {extractionError && (
-                  <div className="flex-1 min-w-full px-2 py-1.5 bg-red-500/30 backdrop-blur-sm border border-red-300/30 rounded">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-white text-xs font-medium">{extractionError}</p>
-                      <div className="flex gap-1.5">
+                  <div className="flex-1 min-w-full px-1.5 sm:px-2 py-1 sm:py-1.5 bg-red-500/30 backdrop-blur-sm border border-red-300/30 rounded">
+                    <div className="flex items-center justify-between gap-1.5 sm:gap-2">
+                      <p className="text-white text-[10px] sm:text-xs font-medium truncate">{extractionError}</p>
+                      <div className="flex gap-1 sm:gap-1.5 flex-shrink-0">
                         {canRetry && (
                           <Button
                             size="sm"
                             variant="secondary"
                             onClick={handleRetryExtraction}
-                            className="h-6 text-xs px-2"
+                            className="h-5 sm:h-6 text-[10px] sm:text-xs px-1.5 sm:px-2"
                           >
                             Retry
                           </Button>
@@ -440,16 +439,16 @@ export default function SalesCallTranscriber() {
                           size="sm"
                           variant="ghost"
                           onClick={clearError}
-                          className="h-6 text-xs px-2 text-white hover:bg-white/20"
+                          className="h-5 sm:h-6 text-[10px] sm:text-xs px-1.5 sm:px-2 text-white hover:bg-white/20"
                         >
-                          Dismiss
+                          ✕
                         </Button>
                       </div>
                     </div>
                   </div>
                 )}
                 {overallConfidence > 0 && !isExtracting && !extractionError && (
-                  <div className="px-2 py-1 bg-green-500/30 backdrop-blur-sm border border-green-300/30 rounded text-xs">
+                  <div className="px-1.5 sm:px-2 py-0.5 sm:py-1 bg-green-500/30 backdrop-blur-sm border border-green-300/30 rounded text-[10px] sm:text-xs">
                     <span className="text-white font-medium">✓ Confidence: {overallConfidence}%</span>
                   </div>
                 )}
@@ -457,42 +456,47 @@ export default function SalesCallTranscriber() {
             </div>
           </CardHeader>
 
-          <CardContent className="p-2 flex flex-col">
-            <Tabs defaultValue="form" className="w-full h-full flex flex-col">
-              <TabsList className="grid w-full grid-cols-4 mb-4 bg-slate-100 p-1 rounded-lg h-9">
+          <CardContent className="p-1.5 sm:p-2 flex flex-col flex-1 min-h-0 overflow-hidden">
+            <Tabs defaultValue="form" className="w-full flex-1 flex flex-col min-h-0 overflow-hidden">
+              {/* Responsive Tab List */}
+              <TabsList className="grid w-full grid-cols-4 mb-2 sm:mb-4 bg-slate-100 p-0.5 sm:p-1 rounded-lg h-8 sm:h-9 flex-shrink-0">
                 <TabsTrigger
                   value="form"
-                  className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-xs"
+                  className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs"
                 >
-                  Lead Form & Pricing
+                  <span className="hidden sm:inline">Lead Form & Pricing</span>
+                  <span className="sm:hidden">Form</span>
                 </TabsTrigger>
                 <TabsTrigger
                   value="map"
-                  className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-xs"
+                  className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs"
                 >
-                  Google Map
+                  <span className="hidden sm:inline">Google Map</span>
+                  <span className="sm:hidden">Map</span>
                 </TabsTrigger>
                 <TabsTrigger
                   value="arcgis"
-                  className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-xs"
+                  className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs"
                 >
-                  BSI Map
+                  <span className="hidden sm:inline">BSI Map</span>
+                  <span className="sm:hidden">BSI</span>
                 </TabsTrigger>
                 <TabsTrigger
                   value="transcript"
-                  className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-xs"
+                  className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs"
                 >
-                  Transcript
+                  <span className="hidden sm:inline">Transcript</span>
+                  <span className="sm:hidden">Trans</span>
                 </TabsTrigger>
               </TabsList>
 
-              {/* Form + Pricing Tab */}
-              <TabsContent value="form" className="mt-0" asChild>
-                <div className="flex flex-col lg:flex-row lg:items-stretch gap-1 ">
+              {/* Form + Pricing Tab - Stack on mobile, side-by-side on xl+ */}
+              <TabsContent value="form" className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col">
+                <div className="flex flex-col xl:flex-row gap-2 sm:gap-1 h-full min-h-0 overflow-hidden">
                   <LeadForm
                     key={resetTrigger}
                     resetTrigger={resetTrigger}
-                    inboundPhone={callerPhone}  // ✅ Use stored callerPhone instead of incomingCall
+                    inboundPhone={callerPhone}
                   />
                   <PricingPanel
                     isLoading={isLoadingBillboard}
@@ -510,33 +514,33 @@ export default function SalesCallTranscriber() {
               </TabsContent>
 
               {/* Map Tab */}
-              <TabsContent value="map" className="mt-0">
-                <div className="h-[calc(100vh-280px)] overflow-hidden">
-                <GoogleMapPanel
-                  initialLocation={currentMarketLocation}
-                />
+              <TabsContent value="map" className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col">
+                <div className="h-full overflow-hidden">
+                  <GoogleMapPanel
+                    initialLocation={currentMarketLocation}
+                  />
                 </div>
               </TabsContent>
 
               {/* ArcGIS Map Tab */}
-              <TabsContent value="arcgis" className="mt-0">
-                <div className="h-[calc(100vh-280px)] overflow-hidden">
-                <ArcGISMapPanel
-                  initialLocation={currentMarketLocation}
-                />
+              <TabsContent value="arcgis" className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col">
+                <div className="h-full overflow-hidden">
+                  <ArcGISMapPanel
+                    initialLocation={currentMarketLocation}
+                  />
                 </div>
               </TabsContent>
 
               {/* Transcript Tab */}
-              <TabsContent value="transcript" className="mt-0">
-                <div className="h-[calc(100vh-280px)] overflow-hidden">
-                <TranscriptView
-                  ref={scrollRef}
-                  transcripts={transcripts}
-                  interimTranscript={interimTranscript}
-                  interimSpeaker={interimSpeaker}
-                  twilioReady={twilioReady}
-                />
+              <TabsContent value="transcript" className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col">
+                <div className="h-full overflow-hidden">
+                  <TranscriptView
+                    ref={scrollRef}
+                    transcripts={transcripts}
+                    interimTranscript={interimTranscript}
+                    interimSpeaker={interimSpeaker}
+                    twilioReady={twilioReady}
+                  />
                 </div>
               </TabsContent>
             </Tabs>
