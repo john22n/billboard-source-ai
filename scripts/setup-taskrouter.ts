@@ -107,11 +107,12 @@ async function setupTaskRouter() {
       reservationActivitySid: reservationSid,
       assignmentActivitySid: assignmentSid,
     });
-    await sleep(500);
+    await sleep(1500);
     return queue;
   }
 
   const mainQueue = await findOrCreateQueue('Main Random Queue', 'available == true', unavailable.sid, unavailable.sid);
+  await sleep(1000);
   const directQueues: Record<string, string> = {};
 
   for (const num of DIRECT_NUMBERS) {
@@ -197,4 +198,3 @@ setupTaskRouter()
     console.error('\n❌ Setup failed:', err);
     process.exit(1);
   });
-
