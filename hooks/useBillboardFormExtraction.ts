@@ -51,7 +51,14 @@ export interface BillboardFormData {
   notes: string | null;
 }
 
-export function useBillboardFormExtraction() {
+// ✅ NEW: Hook now accepts an optional callback for when extraction completes
+interface UseBillboardFormExtractionOptions {
+  onExtracted?: (data: Partial<BillboardFormData>) => void;
+}
+
+export function useBillboardFormExtraction(options: UseBillboardFormExtractionOptions = {}) {
+  const { onExtracted } = options;
+  
   const lastProcessedTranscriptRef = useRef<string>("");
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -59,9 +66,11 @@ export function useBillboardFormExtraction() {
   const [retryCount, setRetryCount] = useState(0);
   const [isCleared, setIsCleared] = useState(false);
   
-  // ✅ NEW: Store the final completed result separately from streaming partial
+  // Store the final completed result separately from streaming partial
   const [completedFormData, setCompletedFormData] = useState<Partial<BillboardFormData> | null>(null);
-  const prevIsLoadingRef = useRef<boolean>(false);
+  
+  // ✅ Track extraction count to force updates
+  const [extractionCount, setExtractionCount] = useState(0);
   
   const MAX_RETRIES = 3;
 
@@ -73,42 +82,36 @@ export function useBillboardFormExtraction() {
       setExtractionError(error.message || "Failed to extract fields");
     },
     onFinish: ({ object: finalObject }) => {
-      console.log("✅ Extraction completed successfully", finalObject);
+      console.log("✅ Extraction completed:", finalObject);
       setExtractionError(null);
       setRetryCount(0);
       setIsCleared(false);
       
-      // ✅ Store the FINAL complete object
       if (finalObject) {
-        setCompletedFormData(finalObject as Partial<BillboardFormData>);
+        const data = finalObject as Partial<BillboardFormData>;
+        setCompletedFormData(data);
+        setExtractionCount(prev => prev + 1);
+        
+        // ✅ Call the callback directly when extraction completes
+        // This is more reliable than using useEffect
+        if (onExtracted) {
+          console.log("📤 Calling onExtracted with:", data);
+          onExtracted(data);
+        }
       }
     },
   });
 
-  // ✅ NEW: Detect when loading completes and capture final object
-  // This is a backup in case onFinish doesn't fire properly
-  useEffect(() => {
-    // Detect transition from loading → not loading (stream completed)
-    if (prevIsLoadingRef.current && !isLoading && object) {
-      console.log("🏁 Stream completed, capturing final object");
-      setCompletedFormData(object as Partial<BillboardFormData>);
-    }
-    prevIsLoadingRef.current = isLoading;
-  }, [isLoading, object]);
-
   const extractFields = useCallback(
     (newTranscript: string) => {
-      // Use isLoading from the hook instead of manual ref
       if (isLoading) {
         console.log("⏳ Extraction already in progress, skipping...");
         return;
       }
 
-      // Prevent duplicate processing of same transcript
-      if (lastProcessedTranscriptRef.current === newTranscript) {
-        console.log("⏭️ Transcript already processed, skipping...");
-        return;
-      }
+      // ✅ REMOVED: Don't skip if transcript is the same
+      // This was preventing re-extraction when client corrects info
+      // The transcript WILL be different if client said something new
 
       // Validate transcript
       if (!newTranscript || newTranscript.trim().length < 10) {
@@ -134,11 +137,9 @@ export function useBillboardFormExtraction() {
       // Debounce the actual API call
       debounceTimerRef.current = setTimeout(() => {
         try {
-          console.log("🚀 Starting extraction...");
+          console.log("🚀 Starting extraction for transcript length:", newTranscript.length);
           lastProcessedTranscriptRef.current = newTranscript;
 
-          // Send only the full transcript - no previousContext needed
-          // The transcript already contains the full conversation
           submit({ transcript: newTranscript });
 
           setRetryCount((prev) => prev + 1);
@@ -157,23 +158,20 @@ export function useBillboardFormExtraction() {
   }, []);
 
   const reset = useCallback(() => {
-    // Stop any in-progress extraction
     stop();
 
-    // Clear timers
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
     }
 
-    // Reset state
     lastProcessedTranscriptRef.current = "";
     setExtractionError(null);
     setRetryCount(0);
     setIsCleared(true);
-    setCompletedFormData(null); // ✅ Clear completed data too
+    setCompletedFormData(null);
+    setExtractionCount(0);
   }, [stop]);
 
-  // Cleanup on unmount
   const cleanup = useCallback(() => {
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
@@ -182,13 +180,14 @@ export function useBillboardFormExtraction() {
   }, [stop]);
 
   return {
-    // ✅ CHANGED: Return completed data (final), not streaming partial
-    // This prevents partial values like "Plain" instead of "Plainfield"
+    // Return completed data (final), not streaming partial
     formData: isCleared ? null : completedFormData,
     
-    // ✅ NEW: Also expose streaming object if you want to show live preview
-    // (optional - use this for "typing" effect UI if desired)
+    // Also expose streaming object if you want to show live preview
     streamingFormData: isCleared ? null : object,
+    
+    // ✅ NEW: Extraction count - useful for triggering effects
+    extractionCount,
     
     isExtracting: isLoading,
     extractFields,

@@ -192,43 +192,52 @@ export const useFormStore = create<FormStore>()((set, get) => ({
         phone?.replace(/\D/g, '').slice(-10) || '';
 
       // Helper to check if new value is "better" than existing value
-      // This prevents partial streaming results from overwriting complete values
+      // Now that we only receive final results (not streaming partials), 
+      // we just need to check if the value is meaningfully different
       const isBetterValue = (existingValue: unknown, newValue: unknown): boolean => {
         // If no existing value, new value is always better
         if (existingValue === null || existingValue === undefined) return true;
-        if (typeof existingValue === 'string' && existingValue.trim() === '') return true;
-        if (Array.isArray(existingValue) && existingValue.length === 0) return true;
-
-        // For strings: new value must be at least as long AND not be a substring of existing
-        if (typeof existingValue === 'string' && typeof newValue === 'string') {
-          const existingTrimmed = existingValue.trim();
-          const newTrimmed = newValue.trim();
+        
+        // Handle string comparisons
+        if (typeof existingValue === 'string') {
+          // If existing is empty, accept new value
+          if (existingValue.trim() === '') return true;
           
-          // If new value is shorter, it's probably a partial stream result - reject it
-          if (newTrimmed.length < existingTrimmed.length) return false;
+          // If new value is not a string, accept the type change
+          if (typeof newValue !== 'string') return true;
           
-          // If existing value starts with new value, new is probably partial - reject
-          if (existingTrimmed.toLowerCase().startsWith(newTrimmed.toLowerCase()) && 
-              newTrimmed.length < existingTrimmed.length) return false;
+          // If new value is empty, don't replace existing with empty
+          if (newValue.trim() === '') return false;
           
-          // If new value is the same, no need to update
-          if (newTrimmed === existingTrimmed) return false;
-          
-          // New value is longer or different - accept it
-          return true;
+          // Accept if the values are different (allows corrections)
+          return existingValue.trim() !== newValue.trim();
         }
 
-        // For arrays: accept if new array has more items or different content
-        if (Array.isArray(existingValue) && Array.isArray(newValue)) {
-          if (newValue.length === 0) return false;
-          if (newValue.length < existingValue.length) return false;
-          // Check if arrays are identical
-          const existingStr = JSON.stringify(existingValue.sort());
-          const newStr = JSON.stringify(newValue.sort());
+        // Handle array comparisons
+        if (Array.isArray(existingValue)) {
+          if (!Array.isArray(newValue)) return true; // Type change, accept it
+          if (existingValue.length === 0) return true; // Empty array, accept new
+          if (newValue.length === 0) return false; // Don't replace with empty
+          
+          // Check if arrays are different
+          const existingStr = JSON.stringify([...existingValue].sort());
+          const newStr = JSON.stringify([...newValue].sort());
           return existingStr !== newStr;
         }
 
-        // For other types, accept if different
+        // Handle boolean comparisons
+        if (typeof existingValue === 'boolean') {
+          if (typeof newValue !== 'boolean') return true; // Type change, accept
+          return existingValue !== newValue; // Accept if different
+        }
+
+        // Handle number comparisons
+        if (typeof existingValue === 'number') {
+          if (typeof newValue !== 'number') return true; // Type change, accept
+          return existingValue !== newValue; // Accept if different
+        }
+
+        // For any other types, accept if different
         return existingValue !== newValue;
       };
 
