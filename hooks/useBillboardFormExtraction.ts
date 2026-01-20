@@ -51,14 +51,7 @@ export interface BillboardFormData {
   notes: string | null;
 }
 
-// ✅ NEW: Hook now accepts an optional callback for when extraction completes
-interface UseBillboardFormExtractionOptions {
-  onExtracted?: (data: Partial<BillboardFormData>) => void;
-}
-
-export function useBillboardFormExtraction(options: UseBillboardFormExtractionOptions = {}) {
-  const { onExtracted } = options;
-  
+export function useBillboardFormExtraction() {
   const lastProcessedTranscriptRef = useRef<string>("");
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -69,7 +62,10 @@ export function useBillboardFormExtraction(options: UseBillboardFormExtractionOp
   // Store the final completed result separately from streaming partial
   const [completedFormData, setCompletedFormData] = useState<Partial<BillboardFormData> | null>(null);
   
-  // ✅ Track extraction count to force updates
+  // Track previous loading state to detect completion
+  const prevIsLoadingRef = useRef<boolean>(false);
+  
+  // Track extraction count to force re-renders
   const [extractionCount, setExtractionCount] = useState(0);
   
   const MAX_RETRIES = 3;
@@ -77,12 +73,12 @@ export function useBillboardFormExtraction(options: UseBillboardFormExtractionOp
   const { object, submit, isLoading, error, stop } = useObject({
     api: "/api/extract-billboard-fields",
     schema: billboardLeadSchema,
-    onError: (error) => {
-      console.error("❌ Extraction error:", error);
-      setExtractionError(error.message || "Failed to extract fields");
+    onError: (err) => {
+      console.error("❌ Extraction error:", err);
+      setExtractionError(err.message || "Failed to extract fields");
     },
     onFinish: ({ object: finalObject }) => {
-      console.log("✅ Extraction completed:", finalObject);
+      console.log("✅ Extraction completed via onFinish:", finalObject);
       setExtractionError(null);
       setRetryCount(0);
       setIsCleared(false);
@@ -91,16 +87,23 @@ export function useBillboardFormExtraction(options: UseBillboardFormExtractionOp
         const data = finalObject as Partial<BillboardFormData>;
         setCompletedFormData(data);
         setExtractionCount(prev => prev + 1);
-        
-        // ✅ Call the callback directly when extraction completes
-        // This is more reliable than using useEffect
-        if (onExtracted) {
-          console.log("📤 Calling onExtracted with:", data);
-          onExtracted(data);
-        }
       }
     },
   });
+
+  // Backup: Detect when loading completes and capture final object
+  // This fires if onFinish doesn't work properly
+  useEffect(() => {
+    if (prevIsLoadingRef.current && !isLoading) {
+      // Transition from loading → not loading
+      if (object) {
+        console.log("🏁 Stream completed (backup detection):", object);
+        setCompletedFormData(object as Partial<BillboardFormData>);
+        setExtractionCount(prev => prev + 1);
+      }
+    }
+    prevIsLoadingRef.current = isLoading;
+  }, [isLoading, object]);
 
   const extractFields = useCallback(
     (newTranscript: string) => {
@@ -108,10 +111,6 @@ export function useBillboardFormExtraction(options: UseBillboardFormExtractionOp
         console.log("⏳ Extraction already in progress, skipping...");
         return;
       }
-
-      // ✅ REMOVED: Don't skip if transcript is the same
-      // This was preventing re-extraction when client corrects info
-      // The transcript WILL be different if client said something new
 
       // Validate transcript
       if (!newTranscript || newTranscript.trim().length < 10) {
@@ -137,7 +136,7 @@ export function useBillboardFormExtraction(options: UseBillboardFormExtractionOp
       // Debounce the actual API call
       debounceTimerRef.current = setTimeout(() => {
         try {
-          console.log("🚀 Starting extraction for transcript length:", newTranscript.length);
+          console.log("🚀 Starting extraction, transcript length:", newTranscript.length);
           lastProcessedTranscriptRef.current = newTranscript;
 
           submit({ transcript: newTranscript });
@@ -147,7 +146,7 @@ export function useBillboardFormExtraction(options: UseBillboardFormExtractionOp
           console.error("❌ Error submitting extraction:", err);
           setExtractionError(err instanceof Error ? err.message : "Unknown error");
         }
-      }, 500); // 500ms debounce
+      }, 500);
     },
     [submit, retryCount, isLoading, stop]
   );
@@ -180,15 +179,9 @@ export function useBillboardFormExtraction(options: UseBillboardFormExtractionOp
   }, [stop]);
 
   return {
-    // Return completed data (final), not streaming partial
     formData: isCleared ? null : completedFormData,
-    
-    // Also expose streaming object if you want to show live preview
     streamingFormData: isCleared ? null : object,
-    
-    // ✅ NEW: Extraction count - useful for triggering effects
     extractionCount,
-    
     isExtracting: isLoading,
     extractFields,
     error: extractionError || error?.message,

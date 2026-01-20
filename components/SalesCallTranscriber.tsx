@@ -113,14 +113,16 @@ export default function SalesCallTranscriber() {
     reset: resetExtraction,
     cleanup,
     canRetry,
+    extractionCount, // ✅ ADD THIS - tracks when extraction completes
   } = useBillboardFormExtraction();
 
-  // ✅ Push AI data to Zustand store when it changes
+  // ✅ Push AI data to Zustand store when extraction completes
   useEffect(() => {
     if (aiFormData) {
+      console.log("🎯 Applying extracted data to form:", aiFormData);
       updateFromAI(aiFormData);
     }
-  }, [aiFormData, updateFromAI]);
+  }, [aiFormData, extractionCount, updateFromAI]); // ✅ extractionCount forces re-run
 
   const clearAll = useCallback(() => {
     clearTranscripts();
