@@ -70,15 +70,19 @@ export async function POST(req: Request) {
             console.log('✅ Call redirected to voicemail');
             
             // Cancel the task (voicemail will be handled separately)
-            await client.taskrouter.v1
-              .workspaces(WORKSPACE_SID)
-              .tasks(taskSid)
-              .update({
-                assignmentStatus: 'canceled',
-                reason: 'Redirected to voicemail',
-              });
-            
-            console.log('✅ Task canceled after voicemail redirect');
+            try {
+              await client.taskrouter.v1
+                .workspaces(WORKSPACE_SID)
+                .tasks(taskSid)
+                .update({
+                  assignmentStatus: 'canceled',
+                  reason: 'Redirected to voicemail',
+                });
+              console.log('✅ Task canceled after voicemail redirect');
+            } catch {
+              // Task may already be canceled - that's fine
+              console.log('ℹ️ Task already canceled or completed');
+            }
           } catch (err) {
             console.error('❌ Failed to redirect to voicemail:', err);
           }
