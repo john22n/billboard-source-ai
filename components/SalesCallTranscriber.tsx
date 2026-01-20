@@ -86,21 +86,12 @@ export default function SalesCallTranscriber() {
 
   // ✅ Capture caller's phone number as soon as incoming call arrives
   useEffect(() => {
-  if (incomingCall) {
-    // Custom parameters from the 'call' instruction
-    const customParams = incomingCall.customParameters;
-    
-    // customParameters is a Map in the Twilio SDK
-    const callerNumber = customParams?.get('callerNumber');
-    
-    console.log('📞 Custom params:', Object.fromEntries(customParams || []));
-    console.log('📞 Caller number:', callerNumber);
-    
-    if (callerNumber && callerNumber !== 'Unknown') {
-      setCallerPhone(callerNumber);
+    if (incomingCall?.parameters?.From) {
+      const fromNumber = incomingCall.parameters.From;
+      console.log('📞 Captured caller phone from Twilio:', fromNumber);
+      setCallerPhone(fromNumber);
     }
-  }
-}, [incomingCall]);
+  }, [incomingCall]);
 
   // Register callbacks for call events
   useEffect(() => {
