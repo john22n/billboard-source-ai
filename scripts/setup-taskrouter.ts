@@ -124,7 +124,44 @@ async function setupTaskRouter() {
     directQueues[num] = queue.sid;
   }
 
-  const voicemailQueue = await findOrCreateQueue('Voicemail', '1==2', unavailable.sid, unavailable.sid);
+  const voicemailQueue = await findOrCreateQueue(
+    'Voicemail',
+    'role == "voicemail"',
+    unavailable.sid,
+    unavailable.sid
+  );
+
+  /** ------------------------------------------------------------------ */
+  /** 2.5️⃣ Voicemail Worker                                              */
+  /** ------------------------------------------------------------------ */
+  console.log('\n👤 Creating voicemail worker...');
+
+  const voicemailWorkerAttrs = {
+    email: 'voicemail@system',
+    role: 'voicemail',
+    contact_uri: 'client:voicemail',
+  };
+
+  // Check if voicemail worker exists
+  const existingWorkers = await client.taskrouter.v1
+    .workspaces(workspaceSid)
+    .workers.list({ friendlyName: 'Voicemail Worker' });
+
+  let voicemailWorker;
+  if (existingWorkers.length > 0) {
+    voicemailWorker = existingWorkers[0];
+    console.log(`ℹ️ Voicemail worker already exists: ${voicemailWorker.sid}`);
+  } else {
+    voicemailWorker = await client.taskrouter.v1
+      .workspaces(workspaceSid)
+      .workers.create({
+        friendlyName: 'Voicemail Worker',
+        activitySid: available.sid,
+        attributes: JSON.stringify(voicemailWorkerAttrs),
+      });
+    console.log(`✅ Created voicemail worker: ${voicemailWorker.sid}`);
+  }
+  await sleep(500);
 
   /** ------------------------------------------------------------------ */
   /** 3️⃣ Workflow                                                       */
