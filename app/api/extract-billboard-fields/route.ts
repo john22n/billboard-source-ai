@@ -208,7 +208,7 @@ ${transcript}
 Extract all relevant fields according to the schema.`;
 
     const result = await streamObject({
-      model: openai("gpt-4o-min"), // Upgraded from mini for better accuracy
+      model: openai("gpt-4o-mini"), // Upgraded from mini for better accuracy
       schema: billboardLeadSchema,
       system: SYSTEM_PROMPT,
       prompt,
