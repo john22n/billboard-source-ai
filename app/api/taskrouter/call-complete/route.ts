@@ -38,48 +38,32 @@ export async function POST(req: Request) {
       return new Response('Missing parameters', { status: 400 });
     }
 
-    try {
-      const task = await client.taskrouter.v1
-        .workspaces(workspaceSid)
-        .tasks(taskSid)
-        .fetch();
-
-      // Agent didn't answer - reject reservation so TaskRouter tries next target
-      if (['no-answer', 'busy', 'failed'].includes(callStatus)) {
-        if (task.assignmentStatus === 'reserved') {
-          // Find the pending reservation and reject it
-          const reservations = await client.taskrouter.v1
-            .workspaces(workspaceSid)
-            .tasks(taskSid)
-            .reservations.list({ reservationStatus: 'pending' });
-
-          for (const res of reservations) {
-            await client.taskrouter.v1
-              .workspaces(workspaceSid)
-              .tasks(taskSid)
-              .reservations(res.sid)
-              .update({ reservationStatus: 'rejected' });
-            console.log(`🚫 Rejected reservation ${res.sid} - agent ${callStatus}`);
-          }
-        } else {
-          console.log(`ℹ️ Task is ${task.assignmentStatus}, not rejecting`);
-        }
-        return new Response('OK', { status: 200 });
-      }
-
-      // Call completed normally - complete the task
-      if (callStatus === 'completed' && task.assignmentStatus === 'assigned') {
-        await client.taskrouter.v1
+    // Conference instruction handles reservation acceptance/rejection automatically
+    // We only need to complete the task when the call ends successfully
+    if (callStatus === 'completed') {
+      try {
+        const task = await client.taskrouter.v1
           .workspaces(workspaceSid)
           .tasks(taskSid)
-          .update({
-            assignmentStatus: 'completed',
-            reason: 'Call completed',
-          });
-        console.log(`✅ Task ${taskSid} completed`);
+          .fetch();
+
+        if (task.assignmentStatus === 'assigned') {
+          await client.taskrouter.v1
+            .workspaces(workspaceSid)
+            .tasks(taskSid)
+            .update({
+              assignmentStatus: 'completed',
+              reason: 'Call completed',
+            });
+          console.log(`✅ Task ${taskSid} completed`);
+        } else {
+          console.log(`ℹ️ Task is ${task.assignmentStatus}, skipping completion`);
+        }
+      } catch (error) {
+        console.error('❌ Failed to complete task:', error);
       }
-    } catch (error) {
-      console.error('❌ Failed to update task/reservation:', error);
+    } else {
+      console.log(`ℹ️ Call status ${callStatus} - conference instruction handles reservation`);
     }
 
     return new Response('OK', { status: 200 });
