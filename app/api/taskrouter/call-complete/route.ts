@@ -1,14 +1,16 @@
 /**
  * Call Complete Callback
  * 
- * Called when a dequeued call ends (connected call disconnects).
- * Completes the TaskRouter task to release the worker from "wrapping".
+ * Called when a conference call to an agent ends.
+ * - On 'completed': Complete the task (call was answered and finished)
+ * - On 'no-answer', 'busy', 'failed': Reject reservation so TaskRouter tries next target
  */
 
 import twilio from 'twilio';
 
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
 const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
+const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!;
 
 const client = twilio(ACCOUNT_SID, AUTH_TOKEN);
 
@@ -19,10 +21,9 @@ export async function POST(req: Request) {
     const callSid = formData.get('CallSid') as string;
     const callStatus = formData.get('CallStatus') as string;
     
-    // Get taskSid from query params (we'll pass it when setting up the dequeue)
     const url = new URL(req.url);
     const taskSid = url.searchParams.get('taskSid');
-    const workspaceSid = url.searchParams.get('workspaceSid') || process.env.TASKROUTER_WORKSPACE_SID;
+    const workspaceSid = url.searchParams.get('workspaceSid') || WORKSPACE_SID;
 
     console.log('═══════════════════════════════════════════');
     console.log('📞 CALL COMPLETE CALLBACK');
@@ -37,30 +38,48 @@ export async function POST(req: Request) {
       return new Response('Missing parameters', { status: 400 });
     }
 
-    // Complete the task when the call ends
-    if (['completed', 'busy', 'failed', 'no-answer', 'canceled'].includes(callStatus)) {
-      try {
-        // Check task status first - only complete if assigned
-        const task = await client.taskrouter.v1
-          .workspaces(workspaceSid)
-          .tasks(taskSid)
-          .fetch();
+    try {
+      const task = await client.taskrouter.v1
+        .workspaces(workspaceSid)
+        .tasks(taskSid)
+        .fetch();
 
-        if (task.assignmentStatus === 'assigned') {
-          await client.taskrouter.v1
+      // Agent didn't answer - reject reservation so TaskRouter tries next target
+      if (['no-answer', 'busy', 'failed'].includes(callStatus)) {
+        if (task.assignmentStatus === 'reserved') {
+          // Find the pending reservation and reject it
+          const reservations = await client.taskrouter.v1
             .workspaces(workspaceSid)
             .tasks(taskSid)
-            .update({
-              assignmentStatus: 'completed',
-              reason: `Call ${callStatus}`,
-            });
-          console.log(`✅ Task ${taskSid} completed - worker released`);
+            .reservations.list({ reservationStatus: 'pending' });
+
+          for (const res of reservations) {
+            await client.taskrouter.v1
+              .workspaces(workspaceSid)
+              .tasks(taskSid)
+              .reservations(res.sid)
+              .update({ reservationStatus: 'rejected' });
+            console.log(`🚫 Rejected reservation ${res.sid} - agent ${callStatus}`);
+          }
         } else {
-          console.log(`ℹ️ Task ${taskSid} is ${task.assignmentStatus}, not completing`);
+          console.log(`ℹ️ Task is ${task.assignmentStatus}, not rejecting`);
         }
-      } catch (error) {
-        console.error('❌ Failed to complete task:', error);
+        return new Response('OK', { status: 200 });
       }
+
+      // Call completed normally - complete the task
+      if (callStatus === 'completed' && task.assignmentStatus === 'assigned') {
+        await client.taskrouter.v1
+          .workspaces(workspaceSid)
+          .tasks(taskSid)
+          .update({
+            assignmentStatus: 'completed',
+            reason: 'Call completed',
+          });
+        console.log(`✅ Task ${taskSid} completed`);
+      }
+    } catch (error) {
+      console.error('❌ Failed to update task/reservation:', error);
     }
 
     return new Response('OK', { status: 200 });
