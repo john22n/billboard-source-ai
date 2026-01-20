@@ -17,12 +17,16 @@ export async function POST(req: Request) {
     console.log('TaskSid:', taskSid);
     console.log('WorkspaceSid:', workspaceSid);
 
-    // Build callback URLs - escape & as &amp; for XML
+    // Build callback URLs
     const appUrl = `${url.protocol}//${url.host}`;
-    const actionUrl = `${appUrl}/api/taskrouter/voicemail-complete?taskSid=${taskSid}&amp;workspaceSid=${workspaceSid}`;
+    const actionUrl = `${appUrl}/api/taskrouter/voicemail-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
     const transcribeCallbackUrl = `${appUrl}/api/taskrouter/voicemail-transcription`;
     console.log('ActionUrl:', actionUrl);
     console.log('TranscribeCallbackUrl:', transcribeCallbackUrl);
+
+    // Helper to escape XML special characters in attribute values
+    const escapeXml = (str: string) =>
+      str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -32,11 +36,11 @@ export async function POST(req: Request) {
     When you are finished, press pound or simply hang up.
   </Say>
   <Record
-    action="${actionUrl}"
+    action="${escapeXml(actionUrl)}"
     finishOnKey="#"
     playBeep="true"
     transcribe="true"
-    transcribeCallback="${transcribeCallbackUrl}"
+    transcribeCallback="${escapeXml(transcribeCallbackUrl)}"
     maxLength="120"
     timeout="10"
   />
