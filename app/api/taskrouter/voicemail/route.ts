@@ -17,9 +17,9 @@ export async function POST(req: Request) {
     console.log('TaskSid:', taskSid);
     console.log('WorkspaceSid:', workspaceSid);
 
-    // Build callback URLs
+    // Build callback URLs - escape & as &amp; for XML
     const appUrl = `${url.protocol}//${url.host}`;
-    const actionUrl = `${appUrl}/api/taskrouter/voicemail-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
+    const actionUrl = `${appUrl}/api/taskrouter/voicemail-complete?taskSid=${taskSid}&amp;workspaceSid=${workspaceSid}`;
     const transcribeCallbackUrl = `${appUrl}/api/taskrouter/voicemail-transcription`;
     console.log('ActionUrl:', actionUrl);
     console.log('TranscribeCallbackUrl:', transcribeCallbackUrl);
@@ -28,15 +28,15 @@ export async function POST(req: Request) {
 <Response>
   <Say voice="alice">
     Sorry, all of our representatives are currently unavailable.
-    Please leave a message after the beep, and we'll get back to you as soon as possible.
-    When you're finished, press pound or simply hang up.
+    Please leave a message after the beep, and we will get back to you as soon as possible.
+    When you are finished, press pound or simply hang up.
   </Say>
   <Record
-    action="${encodeURI(actionUrl)}"
+    action="${actionUrl}"
     finishOnKey="#"
     playBeep="true"
     transcribe="true"
-    transcribeCallback="${encodeURI(transcribeCallbackUrl)}"
+    transcribeCallback="${transcribeCallbackUrl}"
     maxLength="120"
     timeout="10"
   />
