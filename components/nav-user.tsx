@@ -53,6 +53,14 @@ export function NavUser({
 
   const handleLogout = () => {
     startTransition(async () => {
+      // Clean up Twilio device if it exists (from TwilioProvider)
+      if (typeof window !== 'undefined') {
+        const twilioDeviceRef = (window as any).twilioDevice;
+        if (twilioDeviceRef?.current && twilioDeviceRef.current.state !== 'destroyed') {
+          console.log('🧹 Cleaning up Twilio device on logout');
+          twilioDeviceRef.current.destroy();
+        }
+      }
       await signOut()
     })
   }

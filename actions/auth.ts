@@ -166,12 +166,6 @@ export async function signUp(prevState: ActionResponse, formData: FormData): Pro
 }
 
 export async function signOut(): Promise<void> {
-  try {
-    await deleteSession()
-  } catch (error) {
-    console.error('sign out error: ', error)
-    throw new Error('failed to sign out')
-  } finally {
-    redirect('/login')
-  }
+  await deleteSession()
+  redirect('/login')
 }

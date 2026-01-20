@@ -14,6 +14,7 @@ interface TwilioContextType {
   acceptCall: () => Promise<void>;
   rejectCall: () => void;
   hangupCall: () => void;
+  destroyDevice: () => void;
   updateStatus: (status: string) => void;
   resetStatus: () => void;
   reinitialize: () => Promise<boolean>;
@@ -344,6 +345,24 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
     }
   }, []);
 
+  const destroyDevice = useCallback(() => {
+    console.log('🧹 Destroying Twilio device for logout');
+    if (activeCall.current) {
+      activeCall.current.disconnect();
+      activeCall.current = null;
+    }
+    if (twilioDevice.current && twilioDevice.current.state !== 'destroyed') {
+      twilioDevice.current.destroy();
+      twilioDevice.current = null;
+    }
+    setTwilioReady(false);
+    setIncomingCall(null);
+    setCallActive(false);
+    setDeviceError(null);
+    setStatus('Idle');
+    hasInitialized.current = false;
+  }, []);
+
   const updateStatus = useCallback((newStatus: string) => {
     setStatus(newStatus);
   }, []);
@@ -381,6 +400,7 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
     acceptCall,
     rejectCall,
     hangupCall,
+    destroyDevice,
     updateStatus,
     resetStatus,
     reinitialize,
