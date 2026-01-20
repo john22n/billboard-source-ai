@@ -1,9 +1,8 @@
 /**
- * Call Complete Callback
- * 
- * Called when a conference call to an agent ends.
- * - On 'completed': Complete the task (call was answered and finished)
- * - On 'no-answer', 'busy', 'failed': Reject reservation so TaskRouter tries next target
+ * Conference Status Callback
+ *
+ * Called when conference events occur (start, end, join, leave).
+ * Completes the task when the conference ends.
  */
 
 import twilio from 'twilio';
@@ -17,19 +16,22 @@ const client = twilio(ACCOUNT_SID, AUTH_TOKEN);
 export async function POST(req: Request) {
   try {
     const formData = await req.formData();
-    
+
+    // Conference status callback parameters
+    const statusCallbackEvent = formData.get('StatusCallbackEvent') as string;
+    const conferenceSid = formData.get('ConferenceSid') as string;
     const callSid = formData.get('CallSid') as string;
-    const callStatus = formData.get('CallStatus') as string;
-    
+
     const url = new URL(req.url);
     const taskSid = url.searchParams.get('taskSid');
     const workspaceSid = url.searchParams.get('workspaceSid') || WORKSPACE_SID;
 
     console.log('═══════════════════════════════════════════');
-    console.log('📞 CALL COMPLETE CALLBACK');
+    console.log('📞 CONFERENCE STATUS CALLBACK');
     console.log('═══════════════════════════════════════════');
+    console.log('StatusCallbackEvent:', statusCallbackEvent);
+    console.log('ConferenceSid:', conferenceSid);
     console.log('CallSid:', callSid);
-    console.log('CallStatus:', callStatus);
     console.log('TaskSid:', taskSid);
     console.log('═══════════════════════════════════════════');
 
@@ -38,9 +40,8 @@ export async function POST(req: Request) {
       return new Response('Missing parameters', { status: 400 });
     }
 
-    // Conference instruction handles reservation acceptance/rejection automatically
-    // We need to complete the task when the call ends
-    if (callStatus === 'completed') {
+    // Complete the task when the conference ends
+    if (statusCallbackEvent === 'conference-end') {
       try {
         const task = await client.taskrouter.v1
           .workspaces(workspaceSid)
@@ -54,7 +55,7 @@ export async function POST(req: Request) {
             .tasks(taskSid)
             .update({
               assignmentStatus: 'completed',
-              reason: 'Call completed',
+              reason: 'Conference ended',
             });
           console.log(`✅ Task ${taskSid} completed (was ${task.assignmentStatus})`);
         } else {
@@ -64,12 +65,12 @@ export async function POST(req: Request) {
         console.error('❌ Failed to complete task:', error);
       }
     } else {
-      console.log(`ℹ️ Call status ${callStatus} - conference instruction handles reservation`);
+      console.log(`ℹ️ Conference event: ${statusCallbackEvent}`);
     }
 
     return new Response('OK', { status: 200 });
   } catch (error) {
-    console.error('❌ Call complete callback error:', error);
+    console.error('❌ Conference status callback error:', error);
     return new Response('Error', { status: 500 });
   }
 }

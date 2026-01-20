@@ -107,7 +107,7 @@ export async function POST(req: Request) {
     // Normal worker - use conference instruction (recommended by Twilio)
     // Conference handles call orchestration, monitors if agent answered,
     // and properly times out the reservation if agent doesn't answer
-    const statusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
+    const conferenceStatusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
 
     const instruction = {
       instruction: 'conference',
@@ -115,9 +115,10 @@ export async function POST(req: Request) {
       from: taskAttrs.from || process.env.TWILIO_MAIN_NUMBER || '+18338547126',
       post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
       timeout: 20,
-      status_callback: statusCallbackUrl,
-      status_callback_events: 'completed',
+      conference_status_callback: conferenceStatusCallbackUrl,
+      conference_status_callback_event: 'start, end, join, leave',
       end_conference_on_exit: true,
+      end_conference_on_customer_exit: true,
     };
 
     console.log('📞 Conference instruction:', instruction);
