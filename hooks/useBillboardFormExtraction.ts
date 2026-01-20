@@ -3,7 +3,7 @@
 
 import { experimental_useObject as useObject } from "@ai-sdk/react";
 import { billboardLeadSchema } from "@/lib/schemas";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, useEffect } from "react";
 import { LeadSentiment } from "@/types/sales-call";
 
 export interface BillboardFormData {
@@ -58,6 +58,11 @@ export function useBillboardFormExtraction() {
   const [extractionError, setExtractionError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
   const [isCleared, setIsCleared] = useState(false);
+  
+  // ✅ NEW: Store the final completed result separately from streaming partial
+  const [completedFormData, setCompletedFormData] = useState<Partial<BillboardFormData> | null>(null);
+  const prevIsLoadingRef = useRef<boolean>(false);
+  
   const MAX_RETRIES = 3;
 
   const { object, submit, isLoading, error, stop } = useObject({
@@ -67,13 +72,29 @@ export function useBillboardFormExtraction() {
       console.error("❌ Extraction error:", error);
       setExtractionError(error.message || "Failed to extract fields");
     },
-    onFinish: () => {
-      console.log("✅ Extraction completed successfully");
+    onFinish: ({ object: finalObject }) => {
+      console.log("✅ Extraction completed successfully", finalObject);
       setExtractionError(null);
       setRetryCount(0);
       setIsCleared(false);
+      
+      // ✅ Store the FINAL complete object
+      if (finalObject) {
+        setCompletedFormData(finalObject as Partial<BillboardFormData>);
+      }
     },
   });
+
+  // ✅ NEW: Detect when loading completes and capture final object
+  // This is a backup in case onFinish doesn't fire properly
+  useEffect(() => {
+    // Detect transition from loading → not loading (stream completed)
+    if (prevIsLoadingRef.current && !isLoading && object) {
+      console.log("🏁 Stream completed, capturing final object");
+      setCompletedFormData(object as Partial<BillboardFormData>);
+    }
+    prevIsLoadingRef.current = isLoading;
+  }, [isLoading, object]);
 
   const extractFields = useCallback(
     (newTranscript: string) => {
@@ -149,6 +170,7 @@ export function useBillboardFormExtraction() {
     setExtractionError(null);
     setRetryCount(0);
     setIsCleared(true);
+    setCompletedFormData(null); // ✅ Clear completed data too
   }, [stop]);
 
   // Cleanup on unmount
@@ -160,11 +182,19 @@ export function useBillboardFormExtraction() {
   }, [stop]);
 
   return {
-    formData: isCleared ? null : object,
+    // ✅ CHANGED: Return completed data (final), not streaming partial
+    // This prevents partial values like "Plain" instead of "Plainfield"
+    formData: isCleared ? null : completedFormData,
+    
+    // ✅ NEW: Also expose streaming object if you want to show live preview
+    // (optional - use this for "typing" effect UI if desired)
+    streamingFormData: isCleared ? null : object,
+    
     isExtracting: isLoading,
     extractFields,
     error: extractionError || error?.message,
-    overallConfidence: isCleared ? 0 : (object?.confidence?.overall ?? 0),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    overallConfidence: isCleared ? 0 : ((completedFormData as any)?.confidence?.overall ?? 0),
     clearError,
     reset,
     cleanup,
