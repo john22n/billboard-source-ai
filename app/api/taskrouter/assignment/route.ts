@@ -107,22 +107,29 @@ export async function POST(req: Request) {
     // Normal worker - use conference instruction (recommended by Twilio)
     // Conference handles call orchestration, monitors if agent answered,
     // and properly times out the reservation if agent doesn't answer
-    const statusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
+    // In /api/taskrouter/assignment/route.ts
 
-    const instruction = {
-      instruction: 'conference',
-      to: workerAttrs.contact_uri || `client:${workerAttrs.email}`,
-      from: taskAttrs.from || process.env.TWILIO_MAIN_NUMBER || '+18338547126',
-      post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
-      timeout: 20,
-      status_callback: statusCallbackUrl,
-      status_callback_events: 'completed',
-      end_conference_on_exit: true,
-    };
+// Normal worker - use call instruction to pass custom parameters
+  const statusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
 
-    console.log('📞 Conference instruction:', instruction);
+  const instruction = {
+    instruction: 'call',
+    to: workerAttrs.contact_uri || `client:${workerAttrs.email}`,
+    from: taskAttrs.from || process.env.TWILIO_MAIN_NUMBER || '+18338547126',
+    post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
+    timeout: 20,
+    status_callback: statusCallbackUrl,
+    status_callback_events: 'completed',
+    // Custom parameters - this is the key!
+    parameters: {
+      callerNumber: taskAttrs.from || 'Unknown',
+      originalCallSid: taskAttrs.call_sid || '',
+    },
+  };
 
-    return Response.json(instruction);
+  console.log('📞 Call instruction:', instruction);
+
+  return Response.json(instruction);
   } catch (error) {
     console.error('❌ Assignment callback error:', error);
     return new Response('Error', { status: 500 });
