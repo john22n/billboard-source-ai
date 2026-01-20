@@ -213,7 +213,8 @@ export const useFormStore = create<FormStore>()((set, get) => ({
 
     // ✅ Update from AI - SMART MERGE with locking behavior
     // - Skips user-edited fields (user always wins)
-    // - Skips locked fields (already filled by AI)
+    // - Skips locked fields IF the new value is the same/similar
+    // - UPDATES locked fields IF the caller provided DIFFERENT info (correction/update)
     // - EXCEPT for 'notes' which always updates
     // - Locks fields after filling them
     updateFromAI: (data) => {
@@ -225,6 +226,66 @@ export const useFormStore = create<FormStore>()((set, get) => ({
       // Helper to normalize phone numbers for comparison (last 10 digits only)
       const normalizePhone = (phone: string | null | undefined): string => 
         phone?.replace(/\D/g, '').slice(-10) || '';
+
+      // Helper to normalize strings for comparison
+      const normalizeString = (val: unknown): string => {
+        if (typeof val === 'string') return val.trim().toLowerCase();
+        return '';
+      };
+
+      // Helper to check if two values are meaningfully different
+      const isDifferentValue = (currentVal: unknown, newVal: unknown): boolean => {
+        // If current is empty, new value is different (it's new data)
+        if (isEmptyValue(currentVal)) return true;
+
+        // String comparison
+        if (typeof currentVal === 'string' && typeof newVal === 'string') {
+          const currentNorm = normalizeString(currentVal);
+          const newNorm = normalizeString(newVal);
+          
+          // Same value = not different
+          if (currentNorm === newNorm) return false;
+          
+          // New value is an expansion (e.g., "John" → "John Smith")
+          if (newNorm.includes(currentNorm) && newNorm.length > currentNorm.length) {
+            return true;
+          }
+          
+          // New value has more words (more complete info)
+          const currentWords = currentNorm.split(/\s+/).filter(Boolean);
+          const newWords = newNorm.split(/\s+/).filter(Boolean);
+          if (newWords.length > currentWords.length) return true;
+          
+          // Check for meaningful difference (not just minor rewording)
+          // If less than 50% word overlap, consider it different (a correction)
+          const overlap = currentWords.filter(w => newWords.includes(w));
+          if (currentWords.length > 0 && overlap.length < currentWords.length * 0.5) {
+            return true;
+          }
+          
+          return false; // Same or very similar
+        }
+
+        // Array comparison - check if new array has additional items
+        if (Array.isArray(currentVal) && Array.isArray(newVal)) {
+          const currentSet = new Set(currentVal.map(v => String(v).toLowerCase()));
+          const newSet = new Set(newVal.map(v => String(v).toLowerCase()));
+          
+          // Check if new array has items not in current
+          for (const item of newSet) {
+            if (!currentSet.has(item)) return true;
+          }
+          return false; // All items already present
+        }
+
+        // Boolean comparison
+        if (typeof currentVal === 'boolean' && typeof newVal === 'boolean') {
+          return currentVal !== newVal;
+        }
+
+        // Default: consider different if not strictly equal
+        return currentVal !== newVal;
+      };
 
       for (const [key, value] of Object.entries(data)) {
         const fieldKey = key as FormFieldKey;
@@ -247,12 +308,6 @@ export const useFormStore = create<FormStore>()((set, get) => ({
         // ✅ Skip if user has edited this field (user always wins)
         if (userEditedFields.has(key)) {
           console.log(`🔒 Skipping ${key}: user-edited`);
-          continue;
-        }
-        
-        // ✅ Skip if field is already locked (already filled by AI previously)
-        if (lockedFields.has(key)) {
-          console.log(`🔒 Skipping ${key}: already locked`);
           continue;
         }
 
@@ -278,18 +333,29 @@ export const useFormStore = create<FormStore>()((set, get) => ({
           }
         }
 
-        // ✅ Only update if current value is empty
         const currentValue = fields[fieldKey];
-        if (!isEmptyValue(currentValue)) {
-          console.log(`🔒 Skipping ${key}: already has value "${currentValue}"`);
+
+        // ✅ Check if field is locked
+        if (lockedFields.has(key)) {
+          // Only update if caller provided DIFFERENT info (correction/expansion)
+          if (isDifferentValue(currentValue, value)) {
+            console.log(`🔄 Updating locked field ${key}: caller provided different info`);
+            console.log(`   Old: "${currentValue}" → New: "${value}"`);
+            (newFields as Record<string, unknown>)[key] = value;
+            changed.add(key);
+          } else {
+            console.log(`⏭️ Skipping ${key}: same/similar value`);
+          }
           continue;
         }
 
-        // ✅ Update the field and lock it
-        console.log(`✅ Filling ${key} with:`, value);
-        (newFields as Record<string, unknown>)[key] = value;
-        changed.add(key);
-        newLockedFields.add(key); // Lock the field after filling
+        // ✅ Field is not locked - fill it if empty or different
+        if (isEmptyValue(currentValue) || isDifferentValue(currentValue, value)) {
+          console.log(`✅ Filling ${key} with:`, value);
+          (newFields as Record<string, unknown>)[key] = value;
+          changed.add(key);
+          newLockedFields.add(key); // Lock the field after filling
+        }
       }
 
       if (changed.size > 0) {
@@ -300,7 +366,7 @@ export const useFormStore = create<FormStore>()((set, get) => ({
           recentlyChangedFields: changed,
         });
       } else {
-        console.log('📝 No fields updated (all locked or empty values)');
+        console.log('📝 No fields updated (all same values or user-edited)');
       }
     },
 
