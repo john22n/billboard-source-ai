@@ -28,12 +28,21 @@ export interface MarketData {
 
 type FormFieldKey = keyof BillboardFormData;
 
+// Fields that should ALWAYS update from AI (not locked)
+const ALWAYS_UPDATE_FIELDS: FormFieldKey[] = ['notes'];
+
+// Fields to skip entirely (metadata, not user-facing)
+const SKIP_FIELDS: string[] = ['confidence'];
+
 interface FormStore {
   // ✅ Form field values
   fields: BillboardFormData;
   
   // ✅ Track which fields were edited by user (won't be overwritten by AI)
   userEditedFields: Set<string>;
+  
+  // ✅ Track which fields are locked (filled by AI or user - won't be overwritten)
+  lockedFields: Set<string>;
   
   // ✅ Track which fields just changed (for animations/effects)
   recentlyChangedFields: Set<string>;
@@ -67,14 +76,19 @@ interface FormStore {
   // ACTIONS
   // ============================================================================
   
-  // Update a single field (user action)
+  // Update a single field (user action) - locks the field
   updateField: (field: FormFieldKey, value: string | boolean | string[] | null) => void;
   
-  // Update from AI extraction (only updates fields not edited by user OR already filled by AI)
+  // Update from AI extraction (only updates unlocked fields, except notes)
   updateFromAI: (data: Partial<BillboardFormData>) => void;
   
   // Get current form data snapshot
   getFormData: () => BillboardFormData;
+  
+  // Lock/unlock field management
+  lockField: (field: FormFieldKey) => void;
+  unlockField: (field: FormFieldKey) => void;
+  isFieldLocked: (field: FormFieldKey) => boolean;
   
   // Contact management
   addContact: () => void;
@@ -148,6 +162,17 @@ const INITIAL_FIELDS: BillboardFormData = {
 };
 
 // ============================================================================
+// HELPER: Check if a value is "empty" (null, undefined, empty string, empty array)
+// ============================================================================
+
+const isEmptyValue = (value: unknown): boolean => {
+  if (value === null || value === undefined) return true;
+  if (typeof value === 'string' && value.trim() === '') return true;
+  if (Array.isArray(value) && value.length === 0) return true;
+  return false;
+};
+
+// ============================================================================
 // STORE
 // ============================================================================
 
@@ -155,6 +180,7 @@ export const useFormStore = create<FormStore>()((set, get) => ({
     // Initial state
     fields: { ...INITIAL_FIELDS },
     userEditedFields: new Set<string>(),
+    lockedFields: new Set<string>(),
     recentlyChangedFields: new Set<string>(),
     additionalContacts: [],
     additionalMarkets: [],
@@ -170,90 +196,65 @@ export const useFormStore = create<FormStore>()((set, get) => ({
     phoneVerified: false,
     ballpark: '',
 
-    // ✅ Update single field (user action) - marks field as user-edited
+    // ✅ Update single field (user action) - marks field as user-edited AND locked
     updateField: (field, value) => {
-      set((state) => ({
-        fields: { ...state.fields, [field]: value },
-        userEditedFields: new Set(state.userEditedFields).add(field),
-        recentlyChangedFields: new Set([field]),
-      }));
+      set((state) => {
+        const newUserEditedFields = new Set(state.userEditedFields).add(field);
+        const newLockedFields = new Set(state.lockedFields).add(field);
+        
+        return {
+          fields: { ...state.fields, [field]: value },
+          userEditedFields: newUserEditedFields,
+          lockedFields: newLockedFields,
+          recentlyChangedFields: new Set([field]),
+        };
+      });
     },
 
-    // ✅ Update from AI - only updates fields NOT edited by user
-    // ✅ Smart update: Only accepts "better" values (longer strings, more complete data)
-    // ✅ Special handling for phone verification
+    // ✅ Update from AI - SMART MERGE with locking behavior
+    // - Skips user-edited fields (user always wins)
+    // - Skips locked fields (already filled by AI)
+    // - EXCEPT for 'notes' which always updates
+    // - Locks fields after filling them
     updateFromAI: (data) => {
-      const { userEditedFields, fields, twilioPhone, twilioPhonePreFilled } = get();
+      const { userEditedFields, lockedFields, fields, twilioPhone, twilioPhonePreFilled } = get();
       const newFields = { ...fields };
       const changed = new Set<string>();
+      const newLockedFields = new Set(lockedFields);
 
       // Helper to normalize phone numbers for comparison (last 10 digits only)
       const normalizePhone = (phone: string | null | undefined): string => 
         phone?.replace(/\D/g, '').slice(-10) || '';
 
-      // Helper to check if new value is "better" than existing value
-      // Now that we only receive final results (not streaming partials), 
-      // we just need to check if the value is meaningfully different
-      const isBetterValue = (existingValue: unknown, newValue: unknown): boolean => {
-        // If no existing value, new value is always better
-        if (existingValue === null || existingValue === undefined) return true;
-        
-        // Handle string comparisons
-        if (typeof existingValue === 'string') {
-          // If existing is empty, accept new value
-          if (existingValue.trim() === '') return true;
-          
-          // If new value is not a string, accept the type change
-          if (typeof newValue !== 'string') return true;
-          
-          // If new value is empty, don't replace existing with empty
-          if (newValue.trim() === '') return false;
-          
-          // Accept if the values are different (allows corrections)
-          return existingValue.trim() !== newValue.trim();
-        }
-
-        // Handle array comparisons
-        if (Array.isArray(existingValue)) {
-          if (!Array.isArray(newValue)) return true; // Type change, accept it
-          if (existingValue.length === 0) return true; // Empty array, accept new
-          if (newValue.length === 0) return false; // Don't replace with empty
-          
-          // Check if arrays are different
-          const existingStr = JSON.stringify([...existingValue].sort());
-          const newStr = JSON.stringify([...newValue].sort());
-          return existingStr !== newStr;
-        }
-
-        // Handle boolean comparisons
-        if (typeof existingValue === 'boolean') {
-          if (typeof newValue !== 'boolean') return true; // Type change, accept
-          return existingValue !== newValue; // Accept if different
-        }
-
-        // Handle number comparisons
-        if (typeof existingValue === 'number') {
-          if (typeof newValue !== 'number') return true; // Type change, accept
-          return existingValue !== newValue; // Accept if different
-        }
-
-        // For any other types, accept if different
-        return existingValue !== newValue;
-      };
-
       for (const [key, value] of Object.entries(data)) {
-        // Skip 'confidence' field - it's not part of the form
-        if (key === 'confidence') continue;
+        const fieldKey = key as FormFieldKey;
+        
+        // Skip metadata fields
+        if (SKIP_FIELDS.includes(key)) continue;
+        
+        // Skip if value is empty
+        if (isEmptyValue(value)) continue;
+
+        // ✅ ALWAYS UPDATE these fields (like notes) - never lock them
+        if (ALWAYS_UPDATE_FIELDS.includes(fieldKey)) {
+          if (value !== null && value !== undefined) {
+            (newFields as Record<string, unknown>)[key] = value;
+            changed.add(key);
+          }
+          continue;
+        }
         
         // ✅ Skip if user has edited this field (user always wins)
-        if (userEditedFields.has(key)) continue;
+        if (userEditedFields.has(key)) {
+          console.log(`🔒 Skipping ${key}: user-edited`);
+          continue;
+        }
         
-        // Skip if value is undefined or null
-        if (value === null || value === undefined) continue;
-        
-        // Skip empty strings and arrays
-        if (typeof value === 'string' && value.trim() === '') continue;
-        if (Array.isArray(value) && value.length === 0) continue;
+        // ✅ Skip if field is already locked (already filled by AI previously)
+        if (lockedFields.has(key)) {
+          console.log(`🔒 Skipping ${key}: already locked`);
+          continue;
+        }
 
         // =========================================================================
         // PHONE FIELD SPECIAL HANDLING
@@ -277,28 +278,53 @@ export const useFormStore = create<FormStore>()((set, get) => ({
           }
         }
 
-        // ✅ Only update if new value is "better" than existing
-        // This prevents partial streaming results from overwriting complete values
-        const existingValue = fields[key as keyof BillboardFormData];
-        if (!isBetterValue(existingValue, value)) {
+        // ✅ Only update if current value is empty
+        const currentValue = fields[fieldKey];
+        if (!isEmptyValue(currentValue)) {
+          console.log(`🔒 Skipping ${key}: already has value "${currentValue}"`);
           continue;
         }
 
-        // Update the field
+        // ✅ Update the field and lock it
+        console.log(`✅ Filling ${key} with:`, value);
         (newFields as Record<string, unknown>)[key] = value;
         changed.add(key);
+        newLockedFields.add(key); // Lock the field after filling
       }
 
       if (changed.size > 0) {
+        console.log(`📝 Updated ${changed.size} fields:`, Array.from(changed));
         set({ 
           fields: newFields, 
+          lockedFields: newLockedFields,
           recentlyChangedFields: changed,
         });
+      } else {
+        console.log('📝 No fields updated (all locked or empty values)');
       }
     },
 
     // ✅ Get snapshot of current form data
     getFormData: () => get().fields,
+
+    // ✅ Lock/unlock field management
+    lockField: (field) => {
+      set((state) => ({
+        lockedFields: new Set(state.lockedFields).add(field),
+      }));
+    },
+    
+    unlockField: (field) => {
+      set((state) => {
+        const newLockedFields = new Set(state.lockedFields);
+        newLockedFields.delete(field);
+        return { lockedFields: newLockedFields };
+      });
+    },
+    
+    isFieldLocked: (field) => {
+      return get().lockedFields.has(field);
+    },
 
     // ✅ Contact management
     addContact: () => {
@@ -493,11 +519,12 @@ export const useFormStore = create<FormStore>()((set, get) => ({
     // ✅ Ballpark
     setBallpark: (value) => set({ ballpark: value }),
 
-    // ✅ Reset everything
+    // ✅ Reset everything (including locked fields)
     reset: () => {
       set({
         fields: { ...INITIAL_FIELDS },
         userEditedFields: new Set<string>(),
+        lockedFields: new Set<string>(),
         recentlyChangedFields: new Set<string>(),
         additionalContacts: [],
         additionalMarkets: [],
@@ -546,7 +573,11 @@ export const selectIsRecentlyChanged = (field: string) =>
 // Phone verification selector
 export const selectPhoneVerified = (state: FormStore) => state.phoneVerified;
 
-// ✅ Check if a field is locked by user
+// ✅ Check if a field is locked (by user edit or AI fill)
+export const selectIsFieldLocked = (field: string) =>
+  (state: FormStore) => state.lockedFields.has(field);
+
+// ✅ Check if a field was edited by user specifically
 export const selectIsUserEdited = (field: string) =>
   (state: FormStore) => state.userEditedFields.has(field);
 

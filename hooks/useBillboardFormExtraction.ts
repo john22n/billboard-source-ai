@@ -5,6 +5,7 @@ import { experimental_useObject as useObject } from "@ai-sdk/react";
 import { billboardLeadSchema } from "@/lib/schemas";
 import { useCallback, useRef, useState, useEffect } from "react";
 import { LeadSentiment } from "@/types/sales-call";
+import { useFormStore } from "@/stores/formStore";
 
 export interface BillboardFormData {
   // Lead classification - NOW USING ENUM
@@ -70,6 +71,10 @@ export function useBillboardFormExtraction() {
   
   const MAX_RETRIES = 3;
 
+  // ✅ Get the smart merge function from the form store
+  const updateFromAI = useFormStore((s) => s.updateFromAI);
+  const resetStore = useFormStore((s) => s.reset);
+
   const { object, submit, isLoading, error, stop } = useObject({
     api: "/api/extract-billboard-fields",
     schema: billboardLeadSchema,
@@ -85,6 +90,10 @@ export function useBillboardFormExtraction() {
       
       if (finalObject) {
         const data = finalObject as Partial<BillboardFormData>;
+        
+        // ✅ Use the store's smart merge - respects locked fields, always updates notes
+        updateFromAI(data);
+        
         setCompletedFormData(data);
         setExtractionCount(prev => prev + 1);
       }
@@ -98,12 +107,16 @@ export function useBillboardFormExtraction() {
       // Transition from loading → not loading
       if (object) {
         console.log("🏁 Stream completed (backup detection):", object);
+        
+        // ✅ Use the store's smart merge
+        updateFromAI(object as Partial<BillboardFormData>);
+        
         setCompletedFormData(object as Partial<BillboardFormData>);
         setExtractionCount(prev => prev + 1);
       }
     }
     prevIsLoadingRef.current = isLoading;
-  }, [isLoading, object]);
+  }, [isLoading, object, updateFromAI]);
 
   const extractFields = useCallback(
     (newTranscript: string) => {
@@ -169,7 +182,10 @@ export function useBillboardFormExtraction() {
     setIsCleared(true);
     setCompletedFormData(null);
     setExtractionCount(0);
-  }, [stop]);
+    
+    // ✅ Also reset the store (clears locked fields, user edits, etc.)
+    resetStore();
+  }, [stop, resetStore]);
 
   const cleanup = useCallback(() => {
     if (debounceTimerRef.current) {
