@@ -385,8 +385,8 @@ export function LeadForm({ resetTrigger, inboundPhone }: LeadFormProps) {
         {/* Active Contact - Responsive grid */}
         <div className="bg-gray-300 border-2 border-black shadow-black rounded-b-lg rounded-tr-lg p-3 sm:p-4 shadow-sm mx-2 sm:mx-4">
           <div className="space-y-3">
-            {/* Name, Position, Phone, Email - 2x2 on mobile, 4-col on md+ */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-2.5">
+            {/* Name, Position, Phone, Email - Stack on mobile, 2x2 on sm, 4-col on md+ */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 sm:gap-2.5">
               <div>
                 <Label className="text-blue-600 font-bold text-xs sm:text-md mb-1 sm:mb-1.5 block">Name</Label>
                 <ContactFieldInput contactIndex={activeContactIndex} field="name" />

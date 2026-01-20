@@ -793,7 +793,7 @@ export const LeadTypeButtonGroup = memo(function LeadTypeButtonGroup({
           <button
             key={option.value}
             onClick={() => handleClick(option.value)}
-            className={`font-bold border-2 rounded transition-colors px-1.5 sm:px-2 xl:px-3 py-1 sm:py-1.5 xl:py-2 text-[10px] sm:text-xs xl:text-sm whitespace-nowrap flex-1 ${bgClass}`}
+            className={`font-bold border-2 rounded transition-colors px-1.5 sm:px-2 xl:px-3 py-2 sm:py-1.5 xl:py-2 text-[10px] sm:text-xs xl:text-sm whitespace-nowrap flex-1 ${bgClass}`}
           >
             <span className="sm:hidden">{option.short}</span>
             <span className="hidden sm:inline">{option.label}</span>

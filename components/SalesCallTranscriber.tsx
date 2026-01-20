@@ -297,7 +297,7 @@ export default function SalesCallTranscriber() {
       <div className="max-w-[1800px] xl:max-h-[1250px] w-full h-full flex flex-col px-2 sm:px-0">
         <Card className="shadow-lg border-0 flex flex-col h-full overflow-hidden">
           {/* Header */}
-          <CardHeader className="bg-gradient-to-r from-blue-600 via-indigo-600 to-primary rounded-sm text-white py-2 sm:py-3 px-3 sm:px-4 flex-shrink-0">
+          <CardHeader className="bg-gradient-to-r from-blue-600 via-indigo-600 to-primary text-white py-2 sm:py-3 px-3 sm:px-4 flex-shrink-0">
             <div className="flex flex-col gap-2">
               {/* Title Row */}
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
@@ -371,7 +371,7 @@ export default function SalesCallTranscriber() {
               {/* Incoming Call Alert */}
               {incomingCall && (
                 <div className="bg-green-500/30 border border-white/30 rounded px-2 sm:px-3 py-1.5 sm:py-2 animate-pulse">
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1.5 sm:gap-2">
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-1.5 sm:gap-2">
                     <p className="text-white text-xs sm:text-sm font-semibold">
                       📞 Incoming: {incomingCall.parameters.From}
                     </p>
