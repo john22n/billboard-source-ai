@@ -39,7 +39,7 @@ export async function POST(req: Request) {
     }
 
     // Conference instruction handles reservation acceptance/rejection automatically
-    // We only need to complete the task when the call ends successfully
+    // We need to complete the task when the call ends
     if (callStatus === 'completed') {
       try {
         const task = await client.taskrouter.v1
@@ -47,7 +47,8 @@ export async function POST(req: Request) {
           .tasks(taskSid)
           .fetch();
 
-        if (task.assignmentStatus === 'assigned') {
+        // Complete task if it's assigned or wrapping
+        if (task.assignmentStatus === 'assigned' || task.assignmentStatus === 'wrapping') {
           await client.taskrouter.v1
             .workspaces(workspaceSid)
             .tasks(taskSid)
@@ -55,7 +56,7 @@ export async function POST(req: Request) {
               assignmentStatus: 'completed',
               reason: 'Call completed',
             });
-          console.log(`✅ Task ${taskSid} completed`);
+          console.log(`✅ Task ${taskSid} completed (was ${task.assignmentStatus})`);
         } else {
           console.log(`ℹ️ Task is ${task.assignmentStatus}, skipping completion`);
         }
