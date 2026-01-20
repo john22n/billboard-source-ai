@@ -2,12 +2,19 @@
  * Voicemail Complete Handler
  *
  * Called after a voicemail recording is completed.
- * The TaskRouter task is already canceled at this point.
+ * Completes the TaskRouter task so the voicemail worker can accept new tasks.
  */
+
+import twilio from 'twilio';
+
+const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
+const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
 
 export async function POST(req: Request) {
   try {
     const url = new URL(req.url);
+    const taskSid = url.searchParams.get('taskSid');
+    const workspaceSid = url.searchParams.get('workspaceSid');
     const from = url.searchParams.get('from');
     const to = url.searchParams.get('to');
     const callSid = url.searchParams.get('callSid');
@@ -25,6 +32,8 @@ export async function POST(req: Request) {
 
     console.log('═══════════════════════════════════════════');
     console.log('📼 VOICEMAIL COMPLETE');
+    console.log('TaskSid:', taskSid);
+    console.log('WorkspaceSid:', workspaceSid);
     console.log('From:', from);
     console.log('To:', to);
     console.log('CallSid:', callSid);
@@ -33,6 +42,23 @@ export async function POST(req: Request) {
     console.log('RecordingUrl:', recordingUrl);
     console.log('Duration:', durationSeconds, 'seconds');
     console.log('═══════════════════════════════════════════');
+
+    // Complete the TaskRouter task so voicemail worker can accept new tasks
+    if (taskSid && workspaceSid) {
+      try {
+        const client = twilio(ACCOUNT_SID, AUTH_TOKEN);
+        await client.taskrouter.v1
+          .workspaces(workspaceSid)
+          .tasks(taskSid)
+          .update({
+            assignmentStatus: 'completed',
+            reason: 'Voicemail recorded',
+          });
+        console.log('✅ Task completed:', taskSid);
+      } catch (err) {
+        console.error('⚠️ Failed to complete task (may already be completed):', err);
+      }
+    }
 
     // ─────────────────────────────────────────────
     // NO MESSAGE LEFT
