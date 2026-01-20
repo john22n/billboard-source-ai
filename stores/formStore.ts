@@ -35,6 +35,9 @@ interface FormStore {
   // ✅ Track which fields were edited by user (won't be overwritten by AI)
   userEditedFields: Set<string>;
   
+  // ✅ Track which fields were filled by AI (won't be overwritten by subsequent AI extractions)
+  aiFilledFields: Set<string>;
+  
   // ✅ Track which fields just changed (for animations/effects)
   recentlyChangedFields: Set<string>;
   
@@ -70,7 +73,7 @@ interface FormStore {
   // Update a single field (user action)
   updateField: (field: FormFieldKey, value: string | boolean | string[] | null) => void;
   
-  // Update from AI extraction (only updates fields not edited by user)
+  // Update from AI extraction (only updates fields not edited by user OR already filled by AI)
   updateFromAI: (data: Partial<BillboardFormData>) => void;
   
   // Get current form data snapshot
@@ -111,6 +114,12 @@ interface FormStore {
   
   // Clear recently changed (call after animation completes)
   clearRecentlyChanged: () => void;
+  
+  // ✅ NEW: Clear AI lock on a specific field (allows AI to re-extract)
+  clearAiFilledField: (field: string) => void;
+  
+  // ✅ NEW: Clear all AI locks (allows full re-extraction)
+  clearAllAiFilledFields: () => void;
 }
 
 // ============================================================================
@@ -155,6 +164,7 @@ export const useFormStore = create<FormStore>()((set, get) => ({
     // Initial state
     fields: { ...INITIAL_FIELDS },
     userEditedFields: new Set<string>(),
+    aiFilledFields: new Set<string>(),
     recentlyChangedFields: new Set<string>(),
     additionalContacts: [],
     additionalMarkets: [],
@@ -171,20 +181,28 @@ export const useFormStore = create<FormStore>()((set, get) => ({
     ballpark: '',
 
     // ✅ Update single field (user action) - marks field as user-edited
+    // This also removes the field from aiFilledFields since user is now in control
     updateField: (field, value) => {
-      set((state) => ({
-        fields: { ...state.fields, [field]: value },
-        userEditedFields: new Set(state.userEditedFields).add(field),
-        recentlyChangedFields: new Set([field]),
-      }));
+      set((state) => {
+        const newAiFilledFields = new Set(state.aiFilledFields);
+        newAiFilledFields.delete(field); // User edit takes precedence, remove AI lock
+        
+        return {
+          fields: { ...state.fields, [field]: value },
+          userEditedFields: new Set(state.userEditedFields).add(field),
+          aiFilledFields: newAiFilledFields,
+          recentlyChangedFields: new Set([field]),
+        };
+      });
     },
 
-    // ✅ Update from AI - only updates fields NOT edited by user
+    // ✅ Update from AI - only updates fields NOT edited by user AND NOT already filled by AI
     // ✅ Special handling for phone verification
     updateFromAI: (data) => {
-      const { userEditedFields, fields, twilioPhone, twilioPhonePreFilled } = get();
+      const { userEditedFields, aiFilledFields, fields, twilioPhone, twilioPhonePreFilled } = get();
       const newFields = { ...fields };
       const changed = new Set<string>();
+      const newAiFilledFields = new Set(aiFilledFields);
 
       // Helper to normalize phone numbers for comparison (last 10 digits only)
       const normalizePhone = (phone: string | null | undefined): string => 
@@ -194,8 +212,11 @@ export const useFormStore = create<FormStore>()((set, get) => ({
         // Skip 'confidence' field - it's not part of the form
         if (key === 'confidence') continue;
         
-        // Skip if user has edited this field
+        // ✅ Skip if user has edited this field (user always wins)
         if (userEditedFields.has(key)) continue;
+        
+        // ✅ Skip if AI has already filled this field (preserve first extraction)
+        if (aiFilledFields.has(key)) continue;
         
         // Skip if value is undefined or null
         if (value === null || value === undefined) continue;
@@ -229,10 +250,15 @@ export const useFormStore = create<FormStore>()((set, get) => ({
         // Update the field
         (newFields as Record<string, unknown>)[key] = value;
         changed.add(key);
+        newAiFilledFields.add(key); // ✅ Track that AI filled this field
       }
 
       if (changed.size > 0) {
-        set({ fields: newFields, recentlyChangedFields: changed });
+        set({ 
+          fields: newFields, 
+          recentlyChangedFields: changed,
+          aiFilledFields: newAiFilledFields, // ✅ Update AI-filled tracking
+        });
       }
     },
 
@@ -437,6 +463,7 @@ export const useFormStore = create<FormStore>()((set, get) => ({
       set({
         fields: { ...INITIAL_FIELDS },
         userEditedFields: new Set<string>(),
+        aiFilledFields: new Set<string>(), // ✅ Reset AI-filled tracking
         recentlyChangedFields: new Set<string>(),
         additionalContacts: [],
         additionalMarkets: [],
@@ -457,6 +484,20 @@ export const useFormStore = create<FormStore>()((set, get) => ({
     // ✅ Clear recently changed fields
     clearRecentlyChanged: () => {
       set({ recentlyChangedFields: new Set<string>() });
+    },
+    
+    // ✅ NEW: Clear AI lock on a specific field (allows AI to re-extract that field)
+    clearAiFilledField: (field) => {
+      set((state) => {
+        const newAiFilledFields = new Set(state.aiFilledFields);
+        newAiFilledFields.delete(field);
+        return { aiFilledFields: newAiFilledFields };
+      });
+    },
+    
+    // ✅ NEW: Clear all AI locks (allows full re-extraction)
+    clearAllAiFilledFields: () => {
+      set({ aiFilledFields: new Set<string>() });
     },
   }));
 
@@ -484,6 +525,14 @@ export const selectIsRecentlyChanged = (field: string) =>
 
 // Phone verification selector
 export const selectPhoneVerified = (state: FormStore) => state.phoneVerified;
+
+// ✅ NEW: Check if a field is locked by AI
+export const selectIsAiFilled = (field: string) =>
+  (state: FormStore) => state.aiFilledFields.has(field);
+
+// ✅ NEW: Check if a field is locked by user
+export const selectIsUserEdited = (field: string) =>
+  (state: FormStore) => state.userEditedFields.has(field);
 
 // Select current market data
 export const selectCurrentMarket = (state: FormStore) => {
