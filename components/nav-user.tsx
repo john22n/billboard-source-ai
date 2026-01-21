@@ -53,17 +53,7 @@ export function NavUser({
 
   const handleLogout = () => {
     startTransition(async () => {
-      try {
-        await fetch('/api/taskrouter/worker-status', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'offline' }),
-        })
-        console.log('✅ Worker set to offline')
-      } catch (error) {
-        console.error('Failed to set worker offline:', error)
-      }
-
+      // Clean up Twilio device if it exists (from TwilioProvider)
       if (typeof window !== 'undefined') {
         const twilioDeviceRef = (window as any).twilioDevice;
         if (twilioDeviceRef?.current && twilioDeviceRef.current.state !== 'destroyed') {
