@@ -3,8 +3,9 @@
 
 import { experimental_useObject as useObject } from "@ai-sdk/react";
 import { billboardLeadSchema } from "@/lib/schemas";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, useEffect } from "react";
 import { LeadSentiment } from "@/types/sales-call";
+import { useFormStore } from "@/stores/formStore";
 
 export interface BillboardFormData {
   // Lead classification - NOW USING ENUM
@@ -58,34 +59,69 @@ export function useBillboardFormExtraction() {
   const [extractionError, setExtractionError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
   const [isCleared, setIsCleared] = useState(false);
+  
+  // Store the final completed result separately from streaming partial
+  const [completedFormData, setCompletedFormData] = useState<Partial<BillboardFormData> | null>(null);
+  
+  // Track previous loading state to detect completion
+  const prevIsLoadingRef = useRef<boolean>(false);
+  
+  // Track extraction count to force re-renders
+  const [extractionCount, setExtractionCount] = useState(0);
+  
   const MAX_RETRIES = 3;
+
+  // ✅ Get the smart merge function from the form store
+  const updateFromAI = useFormStore((s) => s.updateFromAI);
+  const resetStore = useFormStore((s) => s.reset);
 
   const { object, submit, isLoading, error, stop } = useObject({
     api: "/api/extract-billboard-fields",
     schema: billboardLeadSchema,
-    onError: (error) => {
-      console.error("❌ Extraction error:", error);
-      setExtractionError(error.message || "Failed to extract fields");
+    onError: (err) => {
+      console.error("❌ Extraction error:", err);
+      setExtractionError(err.message || "Failed to extract fields");
     },
-    onFinish: () => {
-      console.log("✅ Extraction completed successfully");
+    onFinish: ({ object: finalObject }) => {
+      console.log("✅ Extraction completed via onFinish:", finalObject);
       setExtractionError(null);
       setRetryCount(0);
       setIsCleared(false);
+      
+      if (finalObject) {
+        const data = finalObject as Partial<BillboardFormData>;
+        
+        // ✅ Use the store's smart merge - respects locked fields, always updates notes
+        updateFromAI(data);
+        
+        setCompletedFormData(data);
+        setExtractionCount(prev => prev + 1);
+      }
     },
   });
 
+  // Backup: Detect when loading completes and capture final object
+  // This fires if onFinish doesn't work properly
+  useEffect(() => {
+    if (prevIsLoadingRef.current && !isLoading) {
+      // Transition from loading → not loading
+      if (object) {
+        console.log("🏁 Stream completed (backup detection):", object);
+        
+        // ✅ Use the store's smart merge
+        updateFromAI(object as Partial<BillboardFormData>);
+        
+        setCompletedFormData(object as Partial<BillboardFormData>);
+        setExtractionCount(prev => prev + 1);
+      }
+    }
+    prevIsLoadingRef.current = isLoading;
+  }, [isLoading, object, updateFromAI]);
+
   const extractFields = useCallback(
     (newTranscript: string) => {
-      // Use isLoading from the hook instead of manual ref
       if (isLoading) {
         console.log("⏳ Extraction already in progress, skipping...");
-        return;
-      }
-
-      // Prevent duplicate processing of same transcript
-      if (lastProcessedTranscriptRef.current === newTranscript) {
-        console.log("⏭️ Transcript already processed, skipping...");
         return;
       }
 
@@ -113,11 +149,9 @@ export function useBillboardFormExtraction() {
       // Debounce the actual API call
       debounceTimerRef.current = setTimeout(() => {
         try {
-          console.log("🚀 Starting extraction...");
+          console.log("🚀 Starting extraction, transcript length:", newTranscript.length);
           lastProcessedTranscriptRef.current = newTranscript;
 
-          // Send only the full transcript - no previousContext needed
-          // The transcript already contains the full conversation
           submit({ transcript: newTranscript });
 
           setRetryCount((prev) => prev + 1);
@@ -125,7 +159,7 @@ export function useBillboardFormExtraction() {
           console.error("❌ Error submitting extraction:", err);
           setExtractionError(err instanceof Error ? err.message : "Unknown error");
         }
-      }, 500); // 500ms debounce
+      }, 500);
     },
     [submit, retryCount, isLoading, stop]
   );
@@ -136,22 +170,23 @@ export function useBillboardFormExtraction() {
   }, []);
 
   const reset = useCallback(() => {
-    // Stop any in-progress extraction
     stop();
 
-    // Clear timers
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
     }
 
-    // Reset state
     lastProcessedTranscriptRef.current = "";
     setExtractionError(null);
     setRetryCount(0);
     setIsCleared(true);
-  }, [stop]);
+    setCompletedFormData(null);
+    setExtractionCount(0);
+    
+    // ✅ Also reset the store (clears locked fields, user edits, etc.)
+    resetStore();
+  }, [stop, resetStore]);
 
-  // Cleanup on unmount
   const cleanup = useCallback(() => {
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
@@ -160,11 +195,14 @@ export function useBillboardFormExtraction() {
   }, [stop]);
 
   return {
-    formData: isCleared ? null : object,
+    formData: isCleared ? null : completedFormData,
+    streamingFormData: isCleared ? null : object,
+    extractionCount,
     isExtracting: isLoading,
     extractFields,
     error: extractionError || error?.message,
-    overallConfidence: isCleared ? 0 : (object?.confidence?.overall ?? 0),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    overallConfidence: isCleared ? 0 : ((completedFormData as any)?.confidence?.overall ?? 0),
     clearError,
     reset,
     cleanup,

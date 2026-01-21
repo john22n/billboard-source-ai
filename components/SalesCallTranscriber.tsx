@@ -102,7 +102,7 @@ export default function SalesCallTranscriber() {
     });
   }, [onCallAccepted, onCallDisconnected, startTranscription, stopTranscription, resetStatus]);
 
-  // Billboard form extraction hook
+  // Billboard form extraction hook (must be declared before effects that use extractFields)
   const {
     formData: aiFormData,
     isExtracting,
@@ -113,14 +113,48 @@ export default function SalesCallTranscriber() {
     reset: resetExtraction,
     cleanup,
     canRetry,
+    extractionCount,
   } = useBillboardFormExtraction();
 
-  // ✅ Push AI data to Zustand store when it changes
+  // ✅ Push AI data to Zustand store when extraction completes
   useEffect(() => {
     if (aiFormData) {
+      console.log("🎯 Applying extracted data to form:", aiFormData);
       updateFromAI(aiFormData);
     }
-  }, [aiFormData, updateFromAI]);
+  }, [aiFormData, extractionCount, updateFromAI]);
+
+  // ✅ Track if we've done the final extraction for this call
+  const hasDoneFinalExtractionRef = useRef<boolean>(false);
+  const fullTranscriptRef = useRef<string>("");
+  
+  // Keep the ref updated with latest transcript (declared after fullTranscript is defined)
+  const fullTranscript = useMemo(() => {
+    return transcripts.map(t => {
+      const speaker = t.speaker === 'agent' ? 'Sales Rep' : 'Caller';
+      return `${speaker}: ${t.text}`;
+    }).join("\n");
+  }, [transcripts]);
+
+  useEffect(() => {
+    fullTranscriptRef.current = fullTranscript;
+  }, [fullTranscript]);
+  
+  // ✅ Reset the flag when a new call starts
+  useEffect(() => {
+    if (callActive) {
+      hasDoneFinalExtractionRef.current = false;
+    }
+  }, [callActive]);
+  
+  // ✅ Do ONE final extraction when call ends
+  useEffect(() => {
+    if (!callActive && !hasDoneFinalExtractionRef.current && fullTranscriptRef.current.length > 50) {
+      hasDoneFinalExtractionRef.current = true;
+      console.log("📞 Call ended - running final extraction");
+      extractFields(fullTranscriptRef.current);
+    }
+  }, [callActive, extractFields]);
 
   const clearAll = useCallback(() => {
     clearTranscripts();
@@ -130,13 +164,6 @@ export default function SalesCallTranscriber() {
     setCallerPhone("");
     setResetTrigger(prev => prev + 1);
   }, [clearTranscripts, resetExtraction, resetForm]);
-
-  const fullTranscript = useMemo(() => {
-    return transcripts.map(t => {
-      const speaker = t.speaker === 'agent' ? 'Sales Rep' : 'Caller';
-      return `${speaker}: ${t.text}`;
-    }).join("\n");
-  }, [transcripts]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -152,12 +179,12 @@ export default function SalesCallTranscriber() {
     }
   }, [transcripts, interimTranscript]);
 
-  // Extract form fields when transcripts update
+  // Extract form fields when transcripts update (only during active call)
   useEffect(() => {
-    if (fullTranscript.length > 50 && !isExtracting) {
+    if (fullTranscript.length > 50 && !isExtracting && callActive) {
       extractFields(fullTranscript);
     }
-  }, [fullTranscript, extractFields, isExtracting]);
+  }, [fullTranscript, extractFields, isExtracting, callActive]);
 
   const handleFileSelect = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;

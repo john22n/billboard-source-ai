@@ -8,11 +8,26 @@ import { useFormStore, selectField, type BillboardFormData } from "@/stores/form
 type FormFieldKey = keyof BillboardFormData;
 
 // ============================================================================
-// HELPER: Get input styling based on value
+// HELPER: Get input styling based on value (SAFE - handles all types)
 // ============================================================================
 
-const getInputClass = (value: string | null | undefined, baseClass: string = "") => {
-  if (value && value.trim() !== "") {
+const getInputClass = (value: unknown, baseClass: string = "") => {
+  // Safely check if value is a non-empty string, array, or truthy value
+  let hasValue = false;
+  
+  if (value === null || value === undefined) {
+    hasValue = false;
+  } else if (typeof value === 'string') {
+    hasValue = value.trim() !== '';
+  } else if (Array.isArray(value)) {
+    hasValue = value.length > 0;
+  } else if (typeof value === 'boolean') {
+    hasValue = true; // booleans are considered "filled"
+  } else {
+    hasValue = Boolean(value);
+  }
+  
+  if (hasValue) {
     return `${baseClass} bg-green-50 border-green-500 focus:border-green-600 focus:ring-green-500`;
   }
   return `${baseClass} bg-red-100`;
@@ -22,8 +37,9 @@ const getInputClass = (value: string | null | undefined, baseClass: string = "")
 // HELPER: Get input styling for full name (requires first AND last name)
 // ============================================================================
 
-const getFullNameInputClass = (value: string | null | undefined, baseClass: string = "") => {
-  if (value && value.trim() !== "") {
+const getFullNameInputClass = (value: unknown, baseClass: string = "") => {
+  // Only process if value is a string
+  if (typeof value === 'string' && value.trim() !== '') {
     const nameParts = value.trim().split(/\s+/).filter(part => part.length > 0);
     if (nameParts.length >= 2) {
       return `${baseClass} bg-green-50 border-green-500 focus:border-green-600 focus:ring-green-500`;
@@ -57,9 +73,15 @@ export const FieldInput = memo(function FieldInput({
     console.log(`🔄 Re-render: FieldInput[${field}]`);
   }
 
-  const value = typeof rawValue === 'boolean'
-    ? (rawValue ? 'Yes' : 'No')
-    : (rawValue as string | null);
+  // Convert to string for display
+  let value: string | null;
+  if (typeof rawValue === 'boolean') {
+    value = rawValue ? 'Yes' : 'No';
+  } else if (Array.isArray(rawValue)) {
+    value = rawValue.join(', ');
+  } else {
+    value = rawValue as string | null;
+  }
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     updateField(field, e.target.value);
@@ -97,11 +119,11 @@ export const FirstNameInput = memo(function FirstNameInput({
     console.log(`🔄 Re-render: FirstNameInput`);
   }
 
-  const firstName = fullName?.split(' ')[0] ?? '';
+  const firstName = typeof fullName === 'string' ? fullName.split(' ')[0] : '';
   
   const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const newFirstName = e.target.value;
-    const nameParts = fullName?.split(' ') ?? [];
+    const nameParts = typeof fullName === 'string' ? fullName.split(' ') : [];
     const restOfName = nameParts.slice(1).join(' ');
     const newFullName = restOfName 
       ? `${newFirstName} ${restOfName}`
@@ -175,10 +197,14 @@ export const PhoneInput = memo(function PhoneInput({
     updateField('phone', e.target.value);
   }, [updateField, setTwilioPhonePreFilled, setPhoneVerified]);
 
+  // Safely convert phone to string
+  const phoneStr = typeof phone === 'string' ? phone : '';
+  const hasPhone = phoneStr.trim() !== '';
+
   let colorClass = 'bg-red-100 border-black';
   let wrapperClass = '';
   
-  if (phone && phone.trim() !== "") {
+  if (hasPhone) {
     if (phoneVerified) {
       colorClass = 'bg-green-100 border-green-600 shadow-lg ring-2 ring-green-400 focus:border-green-700 focus:ring-green-500 focus:ring-offset-1';
       wrapperClass = 'relative';
@@ -194,7 +220,7 @@ export const PhoneInput = memo(function PhoneInput({
   return (
     <div className={wrapperClass}>
       <Input
-        value={phone ?? ""}
+        value={phoneStr}
         onChange={handleChange}
         className={`${baseClassName} ${colorClass} ${className}`}
       />
@@ -224,7 +250,8 @@ export const ContactFieldInput = memo(function ContactFieldInput({
 }: ContactFieldInputProps) {
   const value = useFormStore((s) => {
     if (contactIndex === 0) {
-      return s.fields[field] ?? '';
+      const val = s.fields[field];
+      return typeof val === 'string' ? val : '';
     }
     const contact = s.additionalContacts[contactIndex - 1];
     return contact ? contact[field] : '';
@@ -273,7 +300,8 @@ export const MarketFieldInput = memo(function MarketFieldInput({
 }: MarketFieldInputProps) {
   const value = useFormStore((s) => {
     if (marketIndex === 0) {
-      return s.fields[field] ?? '';
+      const val = s.fields[field];
+      return typeof val === 'string' ? val : '';
     }
     const market = s.additionalMarkets[marketIndex - 1];
     return market ? market[field] : '';
@@ -312,7 +340,8 @@ export const MarketFieldTextarea = memo(function MarketFieldTextarea({
 }: MarketFieldTextareaProps) {
   const value = useFormStore((s) => {
     if (marketIndex === 0) {
-      return s.fields.targetArea ?? '';
+      const val = s.fields.targetArea;
+      return typeof val === 'string' ? val : '';
     }
     const market = s.additionalMarkets[marketIndex - 1];
     return market ? market.targetArea : '';
