@@ -1,9 +1,13 @@
 'use server'
 
 import { z } from 'zod'
-import { verifyPassword, createSession, createUser, deleteSession } from '@/lib/auth'
+import { verifyPassword, createSession, createUser, deleteSession, getSession } from '@/lib/auth'
 import { getUserByEmail } from '@/lib/dal'
 import { redirect } from 'next/navigation'
+import twilio from 'twilio'
+import { db } from '@/db'
+import { user } from '@/db/schema'
+import { eq } from 'drizzle-orm'
 
 // define zod schema for signin validation
 const SignInSchema = z.object({
@@ -166,6 +170,57 @@ export async function signUp(prevState: ActionResponse, formData: FormData): Pro
 }
 
 export async function signOut(): Promise<void> {
+  try {
+    const session = await getSession()
+    
+    if (session) {
+      const currentUser = await db
+        .select({
+          id: user.id,
+          email: user.email,
+          taskRouterWorkerSid: user.taskRouterWorkerSid,
+          twilioPhoneNumber: user.twilioPhoneNumber,
+        })
+        .from(user)
+        .where(eq(user.id, session.userId))
+        .limit(1)
+        .then(rows => rows[0])
+
+      if (currentUser?.taskRouterWorkerSid) {
+        const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID
+        const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN
+        const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID
+        const OFFLINE_ACTIVITY_SID = process.env.TASKROUTER_ACTIVITY_OFFLINE_SID
+
+        if (ACCOUNT_SID && AUTH_TOKEN && WORKSPACE_SID && OFFLINE_ACTIVITY_SID) {
+          const client = twilio(ACCOUNT_SID, AUTH_TOKEN)
+          
+          await client.taskrouter.v1
+            .workspaces(WORKSPACE_SID)
+            .workers(currentUser.taskRouterWorkerSid)
+            .update({
+              activitySid: OFFLINE_ACTIVITY_SID,
+              attributes: JSON.stringify({
+                email: currentUser.email,
+                contact_uri: `client:${currentUser.email}`,
+                phoneNumber: currentUser.twilioPhoneNumber,
+                available: false,
+              }),
+            })
+
+          await db
+            .update(user)
+            .set({ workerActivity: 'offline' })
+            .where(eq(user.id, currentUser.id))
+
+          console.log(`✅ Worker ${currentUser.email} set to offline on logout`)
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error setting worker offline during logout:', error)
+  }
+  
   await deleteSession()
   redirect('/login')
 }
