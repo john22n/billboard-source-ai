@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useRef, useState, useEffect, useCallback, ReactNode } from "react";
 import { Device, Call } from '@twilio/voice-sdk';
+import { useWorkerStatus, type WorkerActivity } from "@/hooks/useWorkerStatus";
 
 interface TwilioContextType {
   status: string;
@@ -47,6 +48,14 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
   const onCallAcceptedRef = useRef<((call: Call) => void) | null>(null);
   const onCallDisconnectedRef = useRef<(() => void) | null>(null);
 
+  // Get worker status to determine if user is available for calls
+  const { status: workerStatus } = useWorkerStatus();
+
+  // Debug: Log worker status changes
+  useEffect(() => {
+    console.log('👷 Worker status in TwilioProvider:', workerStatus);
+  }, [workerStatus]);
+
   const [status, setStatus] = useState("Idle");
   const [twilioReady, setTwilioReady] = useState(false);
   const [incomingCall, setIncomingCall] = useState<Call | null>(null);
@@ -54,6 +63,17 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
   const [userEmail, setUserEmail] = useState<string>('');
   const [deviceError, setDeviceError] = useState<string | null>(null);
   const [isDestroyed, setIsDestroyed] = useState(false);
+
+  // Helper to get appropriate status message based on worker availability
+  const getReadyStatus = useCallback(() => {
+    console.log('🔍 getReadyStatus called, workerStatus:', workerStatus);
+    if (workerStatus === 'available') {
+      console.log('✅ Worker is available, returning "Ready to receive calls"');
+      return 'Ready to receive calls';
+    }
+    console.log('❌ Worker not available, returning "Offline"');
+    return 'Offline';
+  }, [workerStatus]);
 
   const initTwilio = useCallback(async () => {
     if (isInitializing.current) {
@@ -177,7 +197,7 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
         console.log('═══════════════════════════════════════════');
 
         setTwilioReady(true);
-        setStatus(`Ready to receive calls`);
+        setStatus(getReadyStatus());
         setDeviceError(null);
         setIsDestroyed(false);
         hasInitialized.current = true;
@@ -291,6 +311,23 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
     return () => clearInterval(checkInterval);
   }, []);
 
+  // Update status when worker availability changes
+  useEffect(() => {
+    console.log('🔄 Worker status changed:', {
+      workerStatus,
+      twilioReady,
+      incomingCall: !!incomingCall,
+      callActive,
+    });
+    if (twilioReady && !incomingCall && !callActive) {
+      const newStatus = getReadyStatus();
+      console.log('📝 Updating Twilio status to:', newStatus);
+      setStatus(newStatus);
+    } else {
+      console.log('⏸️ Not updating status because conditions not met');
+    }
+  }, [workerStatus, twilioReady, incomingCall, callActive, getReadyStatus]);
+
   const acceptCall = useCallback(async () => {
     if (!incomingCall) {
       console.error('❌ acceptCall called but no incoming call');
@@ -331,9 +368,9 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
       console.log('🚫 Rejecting call');
       incomingCall.reject();
       setIncomingCall(null);
-      setStatus(twilioReady ? "Ready to receive calls" : "Idle");
+      setStatus(twilioReady ? getReadyStatus() : "Idle");
     }
-  }, [incomingCall, twilioReady]);
+  }, [incomingCall, twilioReady, getReadyStatus]);
 
   const hangupCall = useCallback(() => {
     if (activeCall.current) {
@@ -368,8 +405,8 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
   }, []);
 
   const resetStatus = useCallback(() => {
-    setStatus(twilioReady ? "Ready to receive calls" : "Idle");
-  }, [twilioReady]);
+    setStatus(twilioReady ? getReadyStatus() : "Idle");
+  }, [twilioReady, getReadyStatus]);
 
   const reinitialize = useCallback(async () => {
     console.log('🔄 Manual reinitialization requested');
