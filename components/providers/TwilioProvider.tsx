@@ -51,6 +51,11 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
   // Get worker status to determine if user is available for calls
   const { status: workerStatus } = useWorkerStatus();
 
+  // Debug: Log worker status changes
+  useEffect(() => {
+    console.log('👷 Worker status in TwilioProvider:', workerStatus);
+  }, [workerStatus]);
+
   const [status, setStatus] = useState("Idle");
   const [twilioReady, setTwilioReady] = useState(false);
   const [incomingCall, setIncomingCall] = useState<Call | null>(null);
@@ -61,9 +66,12 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
 
   // Helper to get appropriate status message based on worker availability
   const getReadyStatus = useCallback(() => {
+    console.log('🔍 getReadyStatus called, workerStatus:', workerStatus);
     if (workerStatus === 'available') {
+      console.log('✅ Worker is available, returning "Ready to receive calls"');
       return 'Ready to receive calls';
     }
+    console.log('❌ Worker not available, returning "Offline"');
     return 'Offline';
   }, [workerStatus]);
 
@@ -305,8 +313,18 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
 
   // Update status when worker availability changes
   useEffect(() => {
+    console.log('🔄 Worker status changed:', {
+      workerStatus,
+      twilioReady,
+      incomingCall: !!incomingCall,
+      callActive,
+    });
     if (twilioReady && !incomingCall && !callActive) {
-      setStatus(getReadyStatus());
+      const newStatus = getReadyStatus();
+      console.log('📝 Updating Twilio status to:', newStatus);
+      setStatus(newStatus);
+    } else {
+      console.log('⏸️ Not updating status because conditions not met');
     }
   }, [workerStatus, twilioReady, incomingCall, callActive, getReadyStatus]);
 
