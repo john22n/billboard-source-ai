@@ -47,7 +47,7 @@ async function sendVoicemailEmail(
         Authorization: `Bearer ${RESEND_API_KEY}`,
       },
       body: JSON.stringify({
-        from: 'Billboard Source <voicemail@billboardsource.com>',
+        from: 'Billboard Source <tech@billboardsource.com>',
         to: [VOICEMAIL_EMAIL],
         subject: `New Voicemail from ${from}`,
         html: emailBody,

@@ -27,6 +27,7 @@ const DIRECT_NUMBERS = [
   '+13163953070',
   '+19783916647',
   '+17654396669',
+  '+17123773679',
 ];
 
 const client = twilio(ACCOUNT_SID, AUTH_TOKEN);
