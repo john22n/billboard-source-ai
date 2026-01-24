@@ -273,7 +273,7 @@ export function PricingPanel({
         label: 'Market Range',
         data: [marketRangeMatch[1].trim()],
         subtitle: dbMarketName || undefined,
-        note: '*No city boards, but in market.'
+        note: '*This is the known range for the greater market. Check map for city specifc intel.'
       });
     }
     // PRIORITY 4: BLACK - has General Pricing with market size tiers
