@@ -348,7 +348,7 @@ export default function SalesCallTranscriber() {
                       <span className={`inline-block w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full flex-shrink-0 ${
                           status === 'Ready to receive calls' 
                             ? 'bg-green-400 animate-pulse' 
-                            : 'bg-red-400'
+                            : 'bg-red-600'
                         }`}></span>
                     )}
                     {callActive && (
