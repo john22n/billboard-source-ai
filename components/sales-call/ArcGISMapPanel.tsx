@@ -97,6 +97,46 @@ export function ArcGISMapPanel({ initialLocation }: ArcGISMapPanelProps) {
 
       // Enable popups on all layers in the map (wait for layers to load)
       await view.map.loadAll();
+
+      // Make market circle layers have transparent fill
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      view.map.allLayers.forEach((layer: any) => {
+        // Check if this is a feature layer with a renderer (likely the market circles)
+        if (layer.renderer) {
+          const renderer = layer.renderer;
+          
+          // Helper function to make a symbol's fill transparent
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const makeTransparent = (symbol: any) => {
+            if (symbol && symbol.color) {
+              // Set fill to transparent (RGBA with 0 alpha)
+              symbol.color = [0, 0, 0, 0];
+            }
+          };
+          
+          // Handle simple renderer
+          if (renderer.symbol) {
+            makeTransparent(renderer.symbol);
+          }
+          
+          // Handle unique value renderer
+          if (renderer.uniqueValueInfos) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            renderer.uniqueValueInfos.forEach((info: any) => {
+              makeTransparent(info.symbol);
+            });
+          }
+          
+          // Handle class breaks renderer
+          if (renderer.classBreakInfos) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            renderer.classBreakInfos.forEach((info: any) => {
+              makeTransparent(info.symbol);
+            });
+          }
+        }
+      });
+
       view.map.allLayers.forEach((layer: { popupEnabled?: boolean }) => {
         if (layer.popupEnabled !== undefined) {
           layer.popupEnabled = true;
