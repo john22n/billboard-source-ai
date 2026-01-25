@@ -60,12 +60,12 @@ export function ArcGISMapPanel({ initialLocation }: ArcGISMapPanelProps) {
         <arcgis-search slot="top-left" position="top-left"></arcgis-search>
         <arcgis-home slot="top-left" position="top-left"></arcgis-home>
 
-        <!-- Bottom-left -->
-        <arcgis-legend slot="bottom-left"></arcgis-legend>
+        <!-- Right side -->
+        <arcgis-legend slot="bottom-right"></arcgis-legend>
       </arcgis-map>
 
       <!-- Layer list container (hidden by default, toggled via React state) -->
-      <div id="layer-list-container" class="hidden absolute top-[180px] left-[15px] z-10 bg-white rounded-lg shadow-lg w-64 max-h-80 overflow-hidden">
+      <div id="layer-list-container" class="hidden absolute bottom-[70px] left-[15px] z-[1] bg-white rounded-lg shadow-lg w-64 max-h-60 overflow-auto pb-2">
         <arcgis-layer-list reference-element="arcgis-map"></arcgis-layer-list>
       </div>
     `;
@@ -82,6 +82,14 @@ export function ArcGISMapPanel({ initialLocation }: ArcGISMapPanelProps) {
       await mapElement.ready;
       const view = mapElement.view;
       if (!view) return;
+
+      // Make selection/highlight transparent
+      view.highlightOptions = {
+        color: [0, 0, 0, 0],        // Transparent fill
+        haloColor: [0, 0, 0, 0],    // Transparent halo
+        haloOpacity: 0,
+        fillOpacity: 0
+      };
 
       // Enable popup on click
       view.popupEnabled = true;
@@ -175,35 +183,49 @@ export function ArcGISMapPanel({ initialLocation }: ArcGISMapPanelProps) {
 
     setCurrentLocation(initialLocation);
 
-    // Get the search widget and perform the search
-    const searchWidget = mapRef.current.querySelector("arcgis-search");
-    if (searchWidget) {
-      // Use the search widget's search method to find and go to the location
-      const performSearch = async () => {
-        try {
-          // Wait for map to be ready
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const mapElement = mapRef.current as any;
-          if (mapElement?.ready) {
-            await mapElement.ready;
-          }
+    const goToLocation = async () => {
+      try {
+        // Wait for map to be ready
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const mapElement = mapRef.current as any;
+        if (!mapElement) return;
+        
+        await mapElement.ready;
+        const view = mapElement.view;
+        if (!view) return;
 
-          // Access the search widget and perform search
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const search = searchWidget as any;
-          if (search?.search) {
-            await search.search(initialLocation);
-          } else if (search?.searchTerm !== undefined) {
-            // Alternative: set searchTerm property
-            search.searchTerm = initialLocation;
-          }
-        } catch (err) {
-          console.error("Failed to search location:", err);
+        // Wait for the view to be fully ready
+        if (view.when) {
+          await view.when();
         }
-      };
 
-      performSearch();
-    }
+        // Use ArcGIS World Geocoding Service to find the location
+        const geocodeUrl = `https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates?f=json&singleLine=${encodeURIComponent(initialLocation)}&outFields=Match_addr,Addr_type`;
+        
+        const response = await fetch(geocodeUrl);
+        const data = await response.json();
+        
+        if (data.candidates && data.candidates.length > 0) {
+          const topResult = data.candidates[0];
+          const { x, y } = topResult.location;
+          
+          // Navigate to the location using simple center/zoom
+          view.center = [x, y];
+          view.zoom = 10;
+
+          // Update the search widget text to show the location
+          const searchWidget = mapRef.current?.querySelector("arcgis-search");
+          if (searchWidget) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (searchWidget as any).searchTerm = initialLocation;
+          }
+        }
+      } catch (err) {
+        console.error("Failed to go to location:", err);
+      }
+    };
+
+    goToLocation();
   }, [isLoaded, initialLocation, currentLocation]);
 
   // Toggle layer list visibility
@@ -245,7 +267,7 @@ export function ArcGISMapPanel({ initialLocation }: ArcGISMapPanelProps) {
       {/* Layers toggle button */}
       <button
         onClick={() => setLayersOpen(!layersOpen)}
-        className={`absolute top-[180px] left-[15px] z-20 w-8 h-8 flex items-center justify-center rounded-full shadow-md transition-colors ${
+        className={`absolute bottom-[30px] left-[15px] z-[2] w-8 h-8 flex items-center justify-center rounded-full shadow-md transition-colors ${
           layersOpen
             ? "bg-blue-600 text-white"
             : "bg-white text-gray-700 hover:bg-gray-100"
