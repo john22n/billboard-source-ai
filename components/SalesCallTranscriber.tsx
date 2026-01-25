@@ -345,7 +345,11 @@ export default function SalesCallTranscriber() {
                   {/* Status Badge */}
                   <div className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs ${isProcessing ? "animate-pulse" : ""}`}>
                     {twilioReady && !callActive && (
-                      <span className="inline-block w-1.5 h-1.5 sm:w-2 sm:h-2 bg-green-400 rounded-full flex-shrink-0"></span>
+                      <span className={`inline-block w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full flex-shrink-0 ${
+                          status === 'Ready to receive calls' 
+                            ? 'bg-green-400 animate-pulse' 
+                            : 'bg-red-600'
+                        }`}></span>
                     )}
                     {callActive && (
                       <span className="inline-block w-1.5 h-1.5 sm:w-2 sm:h-2 bg-red-400 rounded-full animate-pulse flex-shrink-0"></span>
