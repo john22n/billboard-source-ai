@@ -1,12 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 
-interface NutshellLeadRequest {
-  // Contact info
+interface ContactInfo {
   name: string;
   position: string;
   phone: string;
   email: string;
+}
+
+interface NutshellLeadRequest {
+  // Primary contact info (for backwards compatibility)
+  name: string;
+  position: string;
+  phone: string;
+  email: string;
+
+  // Additional contacts
+  additionalContacts?: ContactInfo[];
 
   // Account/Business info
   entityName: string;
@@ -49,6 +59,9 @@ interface NutshellLeadRequest {
 
   // Budget
   budget: string;
+
+  // Ballpark (rate estimate)
+  ballpark: string;
 }
 
 async function nutshellRequest(
@@ -139,12 +152,17 @@ export async function POST(req: NextRequest) {
       }
     };
 
-    // 2. Find or Create Contact (Person) if we have contact info
-    let contactId: number | null = null;
-    const validEmail = data.email?.trim() && isValidEmail(data.email.trim()) ? data.email.trim() : null;
-    const hasContactInfo = data.name?.trim() || data.phone?.trim() || validEmail;
-    if (hasContactInfo) {
-      // First try to find existing contact by email or name
+    // 2. Find or Create Contacts (People)
+    // Helper function to find or create a single contact
+    async function findOrCreateContact(contact: ContactInfo): Promise<number | null> {
+      const validEmail = contact.email?.trim() && isValidEmail(contact.email.trim()) ? contact.email.trim() : null;
+      const hasContactInfo = contact.name?.trim() || contact.phone?.trim() || validEmail;
+      
+      if (!hasContactInfo) return null;
+
+      let contactId: number | null = null;
+
+      // First try to find existing contact by email
       if (validEmail) {
         const searchResult = await nutshellRequest('searchByEmail', {
           emailAddressString: validEmail,
@@ -155,12 +173,12 @@ export async function POST(req: NextRequest) {
       }
 
       // If not found by email, search by name
-      if (!contactId && data.name?.trim()) {
+      if (!contactId && contact.name?.trim()) {
         const searchResult = await nutshellRequest('searchUniversal', {
-          string: data.name.trim(),
+          string: contact.name.trim(),
         }, credentials);
         const foundContact = searchResult.result?.contacts?.find(
-          (c: { name?: string }) => c.name?.toLowerCase() === data.name?.trim().toLowerCase()
+          (c: { name?: string }) => c.name?.toLowerCase() === contact.name?.trim().toLowerCase()
         );
         if (foundContact?.id) {
           contactId = Number(foundContact.id);
@@ -170,9 +188,9 @@ export async function POST(req: NextRequest) {
       // Create new contact only if not found
       if (!contactId) {
         const contactPayload: Record<string, unknown> = {};
-        if (data.name?.trim()) contactPayload.name = data.name.trim();
-        if (data.position?.trim()) contactPayload.description = data.position.trim();
-        if (data.phone?.trim()) contactPayload.phone = [data.phone.trim()];
+        if (contact.name?.trim()) contactPayload.name = contact.name.trim();
+        if (contact.position?.trim()) contactPayload.description = contact.position.trim();
+        if (contact.phone?.trim()) contactPayload.phone = [contact.phone.trim()];
         if (validEmail) contactPayload.email = [validEmail];
 
         const contactResult = await nutshellRequest('newContact', {
@@ -184,6 +202,23 @@ export async function POST(req: NextRequest) {
         } else if (contactResult.error) {
           console.error('Failed to create contact:', contactResult.error);
         }
+      }
+
+      return contactId;
+    }
+
+    // Build list of all contacts (primary + additional)
+    const allContacts: ContactInfo[] = [
+      { name: data.name, position: data.position, phone: data.phone, email: data.email },
+      ...(data.additionalContacts || []),
+    ];
+
+    // Find or create all contacts
+    const contactIds: number[] = [];
+    for (const contact of allContacts) {
+      const contactId = await findOrCreateContact(contact);
+      if (contactId && contactId > 0) {
+        contactIds.push(contactId);
       }
     }
 
@@ -290,25 +325,54 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 5. Determine milestone (stage) based on lead type
-    // Availer/Panel Requester -> "Proposal" stage (id: 115 for stageset 3)
-    // Tire Kicker -> "Qualify" stage (id: 111 for stageset 3)
+    // 5. Find "NEW BSI Pipeline" and determine milestone (stage) based on lead type
+    let stagesetId: number | undefined;
     let milestoneId: number | undefined;
-    if (data.leadType === 'Availer' || data.leadType === 'Panel Requester') {
-      milestoneId = 115; // Proposal in stageset 3
-    } else if (data.leadType === 'Tire Kicker') {
-      milestoneId = 111; // Qualify in stageset 3
+
+    const stagesetsResult = await nutshellRequest('findStagesets', {}, credentials);
+    if (stagesetsResult.result) {
+      const pipeline = stagesetsResult.result.find(
+        (s: { name?: string }) => s.name === 'NEW BSI Pipeline'
+      );
+      if (pipeline?.id) {
+        stagesetId = Number(pipeline.id);
+
+        // Find milestones for this pipeline
+        const milestonesResult = await nutshellRequest('findMilestones', {}, credentials);
+        if (milestonesResult.result) {
+          const pipelineMilestones = milestonesResult.result.filter(
+            (m: { stagesetId?: number }) => m.stagesetId === stagesetId
+          );
+
+          // Map lead type to stage name
+          let targetStageName: string | null = null;
+          if (data.leadType === 'Availer' || data.leadType === 'Panel Requester') {
+            targetStageName = 'Proposal';
+          } else if (data.leadType === 'Tire Kicker') {
+            targetStageName = 'Qualify';
+          }
+
+          if (targetStageName) {
+            const milestone = pipelineMilestones.find(
+              (m: { name?: string }) => m.name === targetStageName
+            );
+            if (milestone?.id) {
+              milestoneId = Number(milestone.id);
+            }
+          }
+        }
+      }
     }
 
     // 6. Build custom fields with actual Nutshell field names
     const customFields: Record<string, string> = {};
 
-    // OOH Experience (Ever used billboards before?)
+    // OOH Exp (Ever used billboards before?)
     if (data.billboardsBeforeYN) {
       const experience = data.billboardsBeforeYN === 'Y'
         ? `Yes${data.billboardsBeforeDetails ? ` - ${data.billboardsBeforeDetails}` : ''}`
         : 'No';
-      customFields['OOH Experience'] = experience;
+      customFields['OOH Exp'] = experience;
     }
 
     // Target Market(s) - City/State/Area
@@ -346,6 +410,31 @@ export async function POST(req: NextRequest) {
       customFields['Budget'] = data.budget;
     }
 
+    // Rate Estimate (Ballpark)
+    if (data.ballpark) {
+      customFields['Rate Estimate'] = data.ballpark;
+    }
+
+    // Business Age (Years in Business)
+    if (data.yearsInBusiness) {
+      customFields['Business Age'] = data.yearsInBusiness;
+    }
+
+    // Consumer Target (Target Audience)
+    if (data.targetAudience) {
+      customFields['Consumer Target'] = data.targetAudience;
+    }
+
+    // Other Ads (Doing other advertising?)
+    if (data.hasMediaExperience !== null) {
+      customFields['Other Ads'] = data.hasMediaExperience ? 'Yes' : 'No';
+    }
+
+    // Promised Deliverables (I'll send over)
+    if (data.sendOver && data.sendOver.length > 0) {
+      customFields['Promised Deliverables'] = data.sendOver.join(', ');
+    }
+
     // 7. Build note for timeline
     const noteParts: string[] = [];
 
@@ -371,7 +460,18 @@ export async function POST(req: NextRequest) {
       noteParts.push(`Notes: ${data.notes}`);
     }
 
-    // 8. Create the lead
+    // 8. Get or create the source "Call (GPP2)"
+    let sourceId: number | null = null;
+    const sourceResult = await nutshellRequest('newSource', {
+      name: 'Call (GPP2)',
+    }, credentials);
+    if (sourceResult.result?.id) {
+      sourceId = Number(sourceResult.result.id);
+    } else if (sourceResult.error) {
+      console.error('Failed to get/create source:', sourceResult.error);
+    }
+
+    // 9. Create the lead
     const leadDescription = data.businessName?.trim()
       ? `${data.businessName.trim()} - ${data.entityName?.trim() || data.name?.trim() || 'Lead'}`
       : data.entityName?.trim() || data.name?.trim() || 'Billboard Lead';
@@ -384,9 +484,9 @@ export async function POST(req: NextRequest) {
       },
     };
 
-    // Only add contacts if we have a valid contact ID
-    if (contactId && contactId > 0) {
-      leadPayload.contacts = [{ id: contactId }];
+    // Only add contacts if we have valid contact IDs
+    if (contactIds.length > 0) {
+      leadPayload.contacts = contactIds.map(id => ({ id }));
     }
 
     // Only add accounts if we have a valid account ID
@@ -399,10 +499,17 @@ export async function POST(req: NextRequest) {
       leadPayload.tags = tags;
     }
 
-    // Only add milestone if set
+    // Only add pipeline and milestone if set
+    if (stagesetId && stagesetId > 0) {
+      leadPayload.stagesetId = stagesetId;
+    }
     if (milestoneId && milestoneId > 0) {
       leadPayload.milestoneId = milestoneId;
-      leadPayload.stagesetId = 3;
+    }
+
+    // Add source "Call (GPP2)" if available
+    if (sourceId && sourceId > 0) {
+      leadPayload.sources = [{ id: sourceId }];
     }
 
     // Only add custom fields if we have any
@@ -430,7 +537,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       leadId: leadResult.result?.id,
-      contactId,
+      contactIds,
       accountId,
       message: 'Lead created successfully in Nutshell',
     });
