@@ -361,9 +361,9 @@ export default function SalesCallTranscriber() {
                   <div className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs ${isProcessing ? "animate-pulse" : ""}`}>
                     {twilioReady && !callActive && (
                       <span className={`inline-block w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full flex-shrink-0 ${
-                          status === 'Ready to receive calls' 
-                            ? 'bg-green-600 animate-pulse' 
-                            : 'bg-red-600'
+                          status === 'Offline' || status === 'Away'
+                            ? 'bg-red-600' 
+                            : 'bg-green-500 animate-pulse'
                         }`}></span>
                     )}
                     {callActive && (
