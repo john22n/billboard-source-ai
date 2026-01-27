@@ -47,7 +47,7 @@ const billboardLeadSchema = z.object({
     .describe("Has caller used billboards before? 'Y' or 'N' only"),
 
   billboardsBeforeDetails: z.string().nullable()
-    .describe("If Y: describe experience ('10 years ago', 'in another city'). If N: MUST be 'None'. Never null if billboardsBeforeYN is filled."),
+    .describe("If billboardsBeforeYN is 'Y': describe experience. If 'N': use 'None'. If not discussed: null"),
 
   // === CAMPAIGN GOALS ===
   billboardPurpose: z.enum([
@@ -78,13 +78,13 @@ const billboardLeadSchema = z.object({
 
   // === BUSINESS DETAILS ===
   hasMediaExperience: z.string().nullable()
-    .describe("Other advertising they do: 'Facebook ads', 'Radio', 'TV'. If none: 'No'. NEVER null if discussed."),
+    .describe("Other advertising they do: 'Facebook ads', 'Radio', 'TV'. Use 'No' if they explicitly say none. Null if not discussed."),
 
   yearsInBusiness: z.string().nullable()
     .describe("How long in business: '5 years', 'New business', '10+ years'"),
 
   website: z.string().nullable()
-    .describe("Website URL if mentioned. If no website or not mentioned: 'No'. NEVER leave null."),
+    .describe("Website URL if mentioned. Use 'No' if they explicitly say they don't have one. Null if not discussed."),
 
   // === LOCATION ===
   targetCity: z.string().nullable()
@@ -142,26 +142,31 @@ const billboardLeadSchema = z.object({
 // SYSTEM PROMPT - Concise, focused on behavior not field definitions
 // ============================================================================
 
+// ============================================================================
+// SYSTEM PROMPT - Concise, focused on behavior not field definitions
+// ============================================================================
+
 const SYSTEM_PROMPT = `You are extracting lead information from a billboard advertising sales call transcript.
 
+CRITICAL RULE: Only extract what is EXPLICITLY stated or clearly implied in the transcript.
+- If a field was NOT discussed → return null
+- If a field WAS discussed → extract the value
+- NEVER guess or infer information that wasn't mentioned
+- NEVER fill in default values for undiscussed topics
+
 EXTRACTION RULES:
-1. Extract ONLY what is explicitly stated or clearly implied - never guess
-2. Use exact enum values specified in the schema
-3. For negative responses, use "No" or "None" (not null):
-   - hasMediaExperience: "No" if not advertising
-   - website: "No" if no website mentioned
-   - billboardsBeforeDetails: "None" if billboardsBeforeYN is "N"
-4. For array fields (campaignLength, sendOver), include ALL options mentioned
-5. Phone numbers: Only extract from CALLER, format as (XXX) XXX-XXXX
+1. Use exact enum values specified in the schema
+2. For array fields (campaignLength, sendOver), include ALL options mentioned
+3. Phone numbers: Only extract from CALLER, format as (XXX) XXX-XXXX
+4. If caller explicitly says "no" to something (e.g., "no website"), use "No" - this is different from not mentioning it at all (null)
 
 NOTES FIELD GUIDANCE:
-The notes field should capture key conversation details useful for the sales rep:
+Capture key conversation details useful for the sales rep:
 - Specific concerns or objections raised
-- Budget hints or constraints mentioned
+- Budget hints or constraints
 - Timeline urgency or flexibility
 - Special requests or requirements
 - Follow-up items discussed
-- Any context that helps close the deal
 
 Keep notes concise but informative. Focus on actionable insights.`;
 
