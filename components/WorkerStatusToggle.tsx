@@ -51,7 +51,7 @@ export function WorkerStatusToggle({ className }: WorkerStatusToggleProps) {
         <SelectContent>
           <SelectItem value="available" className="text-[10px] sm:text-xs">
             <span className="flex items-center gap-1.5 sm:gap-2">
-              <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-green-500" />
+              <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-green-600" />
               Available
             </span>
           </SelectItem>
