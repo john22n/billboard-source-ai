@@ -165,6 +165,7 @@ export default function SalesCallTranscriber() {
     resetForm();
     setCallerPhone("");
     setResetTrigger(prev => prev + 1);
+    hasDoneFinalExtractionRef.current = false; 
   }, [clearTranscripts, resetExtraction, resetForm]);
 
   // Cleanup on unmount
@@ -296,9 +297,8 @@ export default function SalesCallTranscriber() {
         setNutshellMessage('Lead created');
         showSuccessToast('Lead sent to Nutshell');
         
-        // Clear form and transcripts after successful submission
-        resetForm();
-        clearTranscripts();
+        // Clear everything after successful submission
+        clearAll();
       } else {
         setNutshellStatus('error');
         setNutshellMessage(result.error || 'Failed');
@@ -545,6 +545,7 @@ export default function SalesCallTranscriber() {
                     inboundPhone={callerPhone}
                   />
                   <PricingPanel
+                    key={`pricing-${resetTrigger}`}
                     isLoading={isLoadingBillboard}
                     billboardContext={billboardContext}
                     hasTranscripts={transcripts.length > 0}
@@ -555,6 +556,7 @@ export default function SalesCallTranscriber() {
                     fullTranscript={fullTranscript}
                     setIsLoadingBillboard={setIsLoadingBillboard}
                     setBillboardContext={setBillboardContext}
+                    onClearAll={clearAll}
                   />
                 </div>
               </TabsContent>
@@ -563,6 +565,7 @@ export default function SalesCallTranscriber() {
               <TabsContent value="map" className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col">
                 <div className="h-full overflow-hidden">
                   <GoogleMapPanel
+                    key={`google-map-${resetTrigger}`}
                     initialLocation={currentMarketLocation}
                   />
                 </div>
@@ -572,6 +575,7 @@ export default function SalesCallTranscriber() {
               <TabsContent value="arcgis" className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col">
                 <div className="h-full overflow-hidden">
                   <ArcGISMapPanel
+                    key={`arcgis-map-${resetTrigger}`}
                     initialLocation={currentMarketLocation}
                   />
                 </div>
@@ -581,6 +585,7 @@ export default function SalesCallTranscriber() {
               <TabsContent value="transcript" className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col">
                 <div className="h-full overflow-hidden">
                   <TranscriptView
+                    key={`transcript-${resetTrigger}`}
                     ref={scrollRef}
                     transcripts={transcripts}
                     interimTranscript={interimTranscript}

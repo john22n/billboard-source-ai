@@ -2,6 +2,15 @@
 
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { useFormStore } from "@/stores/formStore";
 import { ChevronDown, ChevronUp } from "lucide-react";
 
@@ -16,6 +25,7 @@ interface PricingPanelProps {
   fullTranscript: string;
   setIsLoadingBillboard: (loading: boolean) => void;
   setBillboardContext: (context: string) => void;
+  onClearAll?: () => void;
 }
 
 interface PricingCard {
@@ -39,7 +49,8 @@ export function PricingPanel({
   nutshellMessage,
   fullTranscript,
   setIsLoadingBillboard,
-  setBillboardContext
+  setBillboardContext,
+  onClearAll
 }: PricingPanelProps) {
   // ✅ Subscribe directly to only the fields we need from the store
   const activeMarketIndex = useFormStore((s) => s.activeMarketIndex);
@@ -47,6 +58,7 @@ export function PricingPanel({
   const targetCity = useFormStore((s) => s.fields.targetCity);
   const state = useFormStore((s) => s.fields.state);
   const targetArea = useFormStore((s) => s.fields.targetArea);
+  const reset = useFormStore((s) => s.reset);
 
   const [activeTab, setActiveTab] = useState<'estimate' | 'details'>('estimate');
   
@@ -64,6 +76,9 @@ export function PricingPanel({
 
   // ✅ Debounce timeout ref
   const fetchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // ✅ Unqualified dialog state
+  const [unqualifiedDialogOpen, setUnqualifiedDialogOpen] = useState(false);
 
   // Calculate current location from store state
   const getCurrentLocation = (): string => {
@@ -339,6 +354,23 @@ export function PricingPanel({
     return "Enter location";
   };
 
+  // ✅ Handle Unqualified Delete action - clears EVERYTHING
+  const handleUnqualifiedDelete = () => {
+    // Clear local pricing state
+    setMarketContexts({});
+    lastFetchedLocations.current = {};
+    
+    // If parent provided onClearAll, use it to clear everything (transcripts, maps, form, etc.)
+    if (onClearAll) {
+      onClearAll();
+    } else {
+      // Fallback to just resetting the form
+      reset();
+    }
+    
+    setUnqualifiedDialogOpen(false);
+  };
+
   return (
     <div className={`
       flex flex-col transition-all duration-300 w-full 
@@ -519,14 +551,54 @@ export function PricingPanel({
           )}
         </div>
 
-        {/* Nutshell Button */}
+        {/* Action Buttons - Nutshell & Unqualified */}
         <div className="flex flex-col items-center gap-1 sm:gap-2 pt-2 sm:pt-3 border-t border-slate-200 bg-white rounded-b-xl flex-shrink-0">
           {nutshellStatus !== 'idle' && (
             <span className={`text-[10px] sm:text-xs font-medium ${nutshellStatus === 'success' ? 'text-green-600' : 'text-red-600'}`}>{nutshellMessage}</span>
           )}
-          <Button onClick={onNutshellSubmit} disabled={isSubmittingNutshell} className="bg-orange-500 hover:bg-orange-600 text-white font-semibold shadow-lg hover:shadow-xl transition-all duration-200 h-7 sm:h-9 px-3 sm:px-6 text-xs sm:text-sm">
-            {isSubmittingNutshell ? 'Submitting...' : 'Nutshell'}
-          </Button>
+          <div className="flex gap-2">
+            <Button 
+              onClick={onNutshellSubmit} 
+              disabled={isSubmittingNutshell} 
+              className="bg-orange-500 hover:bg-orange-600 text-white font-semibold shadow-lg hover:shadow-xl transition-all duration-200 h-7 sm:h-9 px-3 sm:px-6 text-xs sm:text-sm"
+            >
+              {isSubmittingNutshell ? 'Submitting...' : 'Nutshell'}
+            </Button>
+            
+            <Dialog open={unqualifiedDialogOpen} onOpenChange={setUnqualifiedDialogOpen}>
+              <DialogTrigger asChild>
+                <Button 
+                  variant="outline"
+                  className="border-slate-300 hover:bg-slate-100 text-slate-700 font-semibold shadow-sm hover:shadow-md transition-all duration-200 h-7 sm:h-9 px-3 sm:px-6 text-xs sm:text-sm"
+                >
+                  Unqualified
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle className="text-lg font-bold text-slate-800">
+                    Unqualified Lead
+                  </DialogTitle>
+                  <DialogDescription asChild>
+                    <div className="pt-4">
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-slate-700 text-sm leading-relaxed">
+                        &quot;I&apos;m with our national office in Dallas. To reach the local office, just search &quot;Lamar Advertising&quot; on your phone&apos;s MAP app, and it&apos;ll give you the actual local number.&quot;
+                      </div>
+                    </div>
+                  </DialogDescription>
+                </DialogHeader>
+                <DialogFooter className="mt-4 sm:justify-center">
+                  <Button
+                    variant="destructive"
+                    onClick={handleUnqualifiedDelete}
+                    className="bg-red-500 hover:bg-red-600 text-white font-semibold px-8"
+                  >
+                    Delete
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
         </div>
       </div>
     </div>
