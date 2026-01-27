@@ -150,7 +150,6 @@ export async function signUp(prevState: ActionResponse, formData: FormData): Pro
       }
     }
 
-    await createSession(user.id, user.email)
     return {
       success: true,
       message: 'Account created successfully'

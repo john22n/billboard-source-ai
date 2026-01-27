@@ -8,8 +8,8 @@ export const billboardLeadSchema = z.object({
     .describe("Lead sentiment classification: 'Availer' (wants availability/inventory), 'Panel Requester' (wants specific panel info), or 'Tire Kicker' (low intent/browsing)"),
   
   // Entity information
-  typeName: z.enum(["business", "political", "nonprofit", "personal"]).nullable()
-    .describe("Type of entity: business, political, nonprofit, or personal"),
+  typeName: z.string().nullable()
+    .describe("Type of entity (e.g., 'Est. B2B', 'New B2C', 'Political', 'Non-Profit', 'Personal')"),
   businessName: z.string().nullable()
     .describe("Industry/category for business (e.g., 'HVAC'), office for political (e.g., 'Governor'), service area for nonprofit"),
   entityName: z.string().nullable()

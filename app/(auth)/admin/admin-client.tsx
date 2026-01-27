@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, useEffect } from "react"
+import { useState, useTransition, useEffect, useCallback } from "react"
 import { SignupForm } from "@/components/sign-up"
 import {
   Table,
@@ -185,17 +185,21 @@ export default function AdminClient({
     })
   }
 
-  const totalCostNumber = Array.isArray(initialCosts) 
+  const totalCostNumber = Array.isArray(initialCosts)
     ? initialCosts.reduce((sum, u) => sum + costToNumber(u.cost), 0)
     : 0
   const totalCost = totalCostNumber.toFixed(6)
+
+  const handleSignupSuccess = useCallback(() => {
+    router.refresh()
+  }, [router])
 
   return (
     <div className="flex flex-col lg:flex-row min-h-svh">
       <div className="flex flex-col gap-4 p-6 md:p-10 w-full lg:w-1/2">
         <div className="flex flex-1 items-center justify-center">
           <div className="w-full max-w-xs">
-            <SignupForm onSuccess={() => router.refresh()} />
+            <SignupForm onSuccess={handleSignupSuccess} />
           </div>
         </div>
       </div>

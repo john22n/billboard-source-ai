@@ -55,6 +55,8 @@ export default function SalesCallTranscriber() {
   const targetCity = useFormStore((s) => s.fields.targetCity);
   const state = useFormStore((s) => s.fields.state);
   const targetArea = useFormStore((s) => s.fields.targetArea);
+  const ballpark = useFormStore((s) => s.ballpark);
+  const additionalContacts = useFormStore((s) => s.additionalContacts);
 
   // Custom hooks for Twilio and transcription
   const {
@@ -275,6 +277,15 @@ export default function SalesCallTranscriber() {
           yearsInBusiness: formData.yearsInBusiness || '',
           leadType: formData.leadType || '',
           notes: formData.notes || '',
+          sendOver: formData.sendOver || [],
+          ballpark: ballpark || '',
+          transcript: fullTranscript || '',
+          additionalContacts: additionalContacts.map(c => ({
+            name: c.name,
+            position: c.position,
+            phone: c.phone,
+            email: c.email,
+          })),
         }),
       });
 
@@ -284,6 +295,10 @@ export default function SalesCallTranscriber() {
         setNutshellStatus('success');
         setNutshellMessage('Lead created');
         showSuccessToast('Lead sent to Nutshell');
+        
+        // Clear form and transcripts after successful submission
+        resetForm();
+        clearTranscripts();
       } else {
         setNutshellStatus('error');
         setNutshellMessage(result.error || 'Failed');
@@ -297,7 +312,7 @@ export default function SalesCallTranscriber() {
     } finally {
       setIsSubmittingNutshell(false);
     }
-  }, [getFormData]);
+  }, [getFormData, ballpark, fullTranscript, additionalContacts, resetForm, clearTranscripts]);
 
   const isProcessing = isUploading || isExtracting ||
     status.includes("Fetching") || status.includes("Connecting") ||

@@ -12,7 +12,7 @@ export interface BillboardFormData {
   leadType: LeadSentiment | null;
   
   // Entity information
-  typeName?: "business" | "political" | "nonprofit" | "personal" | null;
+  typeName?: string | null;
   businessName?: string | null;
   entityName?: string | null;
   

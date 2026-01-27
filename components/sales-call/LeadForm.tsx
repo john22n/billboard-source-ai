@@ -96,7 +96,7 @@ export function LeadForm({ resetTrigger, inboundPhone }: LeadFormProps) {
                 <div className="flex flex-col sm:flex-row gap-2 sm:gap-0">
                   <FieldInput 
                     field="typeName" 
-                    placeholder="Type (Est. B2B, New B2C, etc)"
+                    placeholder="Est. B2B, New B2C, Political, etc"
                     className="w-full sm:w-auto sm:flex-1 lg:w-50"
                   />
                   <Minus className="hidden sm:block mt-2.5 w-2 flex-shrink-0" />
