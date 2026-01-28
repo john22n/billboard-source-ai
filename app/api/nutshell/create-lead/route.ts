@@ -471,17 +471,9 @@ export async function POST(req: NextRequest) {
       customFields['Consumer Target'] = data.targetAudience;
     }
 
-    // Other Ads (Doing other advertising?) - handle both boolean and string values
+    // Other Ads - send whatever value is in the form
     if (data.hasMediaExperience !== null && data.hasMediaExperience !== '') {
-      let isDoingOtherAds: boolean;
-      if (typeof data.hasMediaExperience === 'boolean') {
-        isDoingOtherAds = data.hasMediaExperience;
-      } else {
-        // Parse string values like "yes", "no", "y", "n"
-        const val = String(data.hasMediaExperience).toLowerCase().trim();
-        isDoingOtherAds = val === 'yes' || val === 'y' || val === 'true';
-      }
-      customFields['Other Ads'] = isDoingOtherAds ? 'Yes' : 'No';
+      customFields['Other Ads'] = String(data.hasMediaExperience).trim();
     }
 
     // Promised Deliverables (I'll send over)
@@ -504,14 +496,7 @@ export async function POST(req: NextRequest) {
       noteParts.push(`Target Audience: ${data.targetAudience}`);
     }
     if (data.hasMediaExperience !== null && data.hasMediaExperience !== '') {
-      let isDoingOtherAds: boolean;
-      if (typeof data.hasMediaExperience === 'boolean') {
-        isDoingOtherAds = data.hasMediaExperience;
-      } else {
-        const val = String(data.hasMediaExperience).toLowerCase().trim();
-        isDoingOtherAds = val === 'yes' || val === 'y' || val === 'true';
-      }
-      noteParts.push(`Other Advertising: ${isDoingOtherAds ? 'Yes' : 'No'}`);
+      noteParts.push(`Other Advertising: ${String(data.hasMediaExperience).trim()}`);
     }
     if (data.yearsInBusiness) {
       noteParts.push(`Years in Business: ${data.yearsInBusiness}`);
