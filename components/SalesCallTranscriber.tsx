@@ -101,6 +101,16 @@ export default function SalesCallTranscriber() {
     onCallDisconnected(() => {
       stopTranscription();
       resetStatus();
+      
+      // Fallback: Ensure worker is set back to Available after call ends
+      // This handles cases where TaskRouter's post_work_activity_sid fails
+      fetch('/api/taskrouter/worker-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'available' }),
+      })
+        .then(res => res.ok ? console.log('✅ Worker status reset to Available') : console.warn('⚠️ Failed to reset worker status'))
+        .catch(err => console.error('❌ Error resetting worker status:', err));
     });
   }, [onCallAccepted, onCallDisconnected, startTranscription, stopTranscription, resetStatus]);
 
