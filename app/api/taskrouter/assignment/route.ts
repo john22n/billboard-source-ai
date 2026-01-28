@@ -92,6 +92,9 @@ export async function POST(req: Request) {
       // 1. Redirects the call to voicemail TwiML
       // 2. Completes the reservation
       // 3. Pulls the call out of the Enqueue cleanly
+      //
+      // We also complete the task immediately since voicemail doesn't need
+      // task tracking - if caller hangs up before recording, task would stay stuck.
       const instruction = {
         instruction: 'redirect',
         call_sid: callSid,
@@ -101,6 +104,25 @@ export async function POST(req: Request) {
       };
 
       console.log('📞 Redirect instruction:', instruction);
+
+      // Complete the task asynchronously - voicemail doesn't need task tracking
+      // This prevents tasks from getting stuck if caller hangs up early
+      import('twilio').then(({ default: twilioModule }) => {
+        const client = twilioModule(
+          process.env.TWILIO_ACCOUNT_SID!,
+          process.env.TWILIO_AUTH_TOKEN!
+        );
+        client.taskrouter.v1
+          .workspaces(workspaceSid)
+          .tasks(taskSid)
+          .update({
+            assignmentStatus: 'completed',
+            reason: 'Redirected to voicemail',
+          })
+          .then(() => console.log(`✅ Voicemail task ${taskSid} completed`))
+          .catch((err: Error) => console.error('⚠️ Failed to complete voicemail task:', err.message));
+      });
+
       return Response.json(instruction);
     }
 
