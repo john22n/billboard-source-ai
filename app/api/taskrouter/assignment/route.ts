@@ -141,6 +141,7 @@ export async function POST(req: Request) {
       conference_status_callback_event: 'start, end, join, leave',
       end_conference_on_exit: true,
       end_conference_on_customer_exit: true,
+      reject_pending_reservations: true,  // Prevent race condition: reject other reservations when this one is accepted
     };
 
     console.log('📞 Conference instruction:', instruction);
