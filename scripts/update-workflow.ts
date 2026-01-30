@@ -64,12 +64,13 @@ async function updateWorkflow() {
   const workflowConfig = {
     task_routing: {
       filters: [
-        // Direct numbers
+        // Direct numbers - try direct rep first, then fallback to any available rep
         ...DIRECT_NUMBERS.filter(num => directQueues[num]).map(num => ({
           filter_friendly_name: `Direct ${num}`,
           expression: `callTo == "${num}"`,
           targets: [
             { queue: directQueues[num], timeout: 20 },
+            { queue: mainQueue.sid, timeout: 20 },  // Fallback to any available rep
             { queue: voicemailQueue.sid, timeout: 120 },
           ],
         })),
