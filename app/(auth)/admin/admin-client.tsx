@@ -21,7 +21,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
-import { Trash2, Loader2 } from "lucide-react"
+import { Trash2, Loader2, FileText } from "lucide-react"
 import { deleteUsers, updateTwilioPhone } from "@/actions/user-actions"
 import { useRouter } from "next/navigation"
 import type { User } from "@/db/schema"
@@ -50,8 +50,30 @@ interface TwilioUsage {
   totalCostFormatted: string;
 }
 
+interface Voicemail {
+  sid: string;
+  callSid: string;
+  from: string;
+  dateCreated: string;
+  duration: number;
+  recordingUrl: string;
+  transcription: string | null;
+  transcriptionStatus: string | null;
+}
+
 // Define a type for the cost parameter
 type CostValue = string | number | { toNumber?: () => number; toFixed?: () => string } | null | undefined
+
+function formatPhoneNumber(phone: string): string {
+  const cleaned = phone.replace(/\D/g, '')
+  if (cleaned.length === 11 && cleaned.startsWith('1')) {
+    return `(${cleaned.slice(1, 4)}) ${cleaned.slice(4, 7)}-${cleaned.slice(7)}`
+  }
+  if (cleaned.length === 10) {
+    return `(${cleaned.slice(0, 3)}) ${cleaned.slice(3, 6)}-${cleaned.slice(6)}`
+  }
+  return phone
+}
 
 function costToNumber(cost: CostValue): number {
   if (cost == null) return 0
@@ -101,6 +123,11 @@ export default function AdminClient({
   const [twilioLoading, setTwilioLoading] = useState(true)
   const [twilioError, setTwilioError] = useState<string | null>(null)
 
+  // Voicemails state
+  const [voicemails, setVoicemails] = useState<Voicemail[]>([])
+  const [voicemailsLoading, setVoicemailsLoading] = useState(true)
+  const [voicemailsError, setVoicemailsError] = useState<string | null>(null)
+
   // Fetch OpenAI and Twilio usage on mount
   useEffect(() => {
     async function fetchOpenAIUsage() {
@@ -137,8 +164,26 @@ export default function AdminClient({
       }
     }
 
+    async function fetchVoicemails() {
+      try {
+        const response = await fetch('/api/twilio/voicemails')
+        if (!response.ok) {
+          throw new Error('Failed to fetch voicemails')
+        }
+        const data = await response.json()
+        setVoicemails(data.voicemails || [])
+      } catch (error) {
+        const message = getErrorMessage(error)
+        console.error('Error fetching voicemails:', message)
+        setVoicemailsError(message)
+      } finally {
+        setVoicemailsLoading(false)
+      }
+    }
+
     fetchOpenAIUsage()
     fetchTwilioUsage()
+    fetchVoicemails()
   }, [])
 
   const toggleSelect = (id: string) => {
@@ -225,9 +270,10 @@ export default function AdminClient({
           </Button>
         </div>
         <Tabs defaultValue="users" className="w-full">
-          <TabsList className="grid w-full grid-cols-3 mb-6">
+          <TabsList className="grid w-full grid-cols-4 mb-6">
             <TabsTrigger value="users">User Accounts</TabsTrigger>
             <TabsTrigger value="costs">User Costs</TabsTrigger>
+            <TabsTrigger value="voicemails">Voicemails</TabsTrigger>
             <TabsTrigger value="billboard">Billboard Data</TabsTrigger>
           </TabsList>
           
@@ -371,7 +417,70 @@ export default function AdminClient({
             </div>
           </TabsContent>
 
-          {/* NEW: Billboard Data Tab */}
+          {/* Voicemails Tab */}
+          <TabsContent value="voicemails">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold">Voicemails (Last 7 Days)</h3>
+                <span className="text-sm text-muted-foreground">
+                  {voicemails.length} recording{voicemails.length !== 1 ? 's' : ''}
+                </span>
+              </div>
+              
+              {voicemailsLoading ? (
+                <div className="flex items-center gap-2 text-muted-foreground py-8 justify-center">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Loading voicemails...</span>
+                </div>
+              ) : voicemailsError ? (
+                <p className="text-sm text-red-500 py-4">{voicemailsError}</p>
+              ) : voicemails.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-8 text-center">
+                  No voicemails in the last 7 days
+                </p>
+              ) : (
+                <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-2">
+                  {voicemails.map((vm) => (
+                    <div
+                      key={vm.sid}
+                      className="p-4 bg-muted rounded-lg border space-y-2"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <span className="font-medium">{formatPhoneNumber(vm.from)}</span>
+                          <span className="text-sm text-muted-foreground">
+                            {vm.duration}s
+                          </span>
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(vm.dateCreated).toLocaleDateString()}{' '}
+                          {new Date(vm.dateCreated).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                      
+                      {vm.transcription ? (
+                        <div className="flex items-start gap-2 pt-2 border-t">
+                          <FileText className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                          <p className="text-sm">{vm.transcription}</p>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 pt-2 border-t text-muted-foreground">
+                          <FileText className="h-4 w-4" />
+                          <span className="text-sm italic">
+                            {vm.transcriptionStatus === 'in-progress' 
+                              ? 'Transcription in progress...' 
+                              : 'No transcription available'}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </TabsContent>
+
+          {/* Billboard Data Tab */}
           <TabsContent value="billboard" className="w-full">
             <BillboardDataUploader />
           </TabsContent>
