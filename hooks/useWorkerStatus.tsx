@@ -14,8 +14,6 @@ interface WorkerStatusContextType {
 
 const WorkerStatusContext = createContext<WorkerStatusContextType | null>(null);
 
-const HEARTBEAT_INTERVAL = 30_000; // 30 seconds
-
 /**
  * Hook to access worker status - must be used within WorkerStatusProvider
  */
@@ -38,7 +36,7 @@ export function WorkerStatusProvider({ children }: WorkerStatusProviderProps) {
   const [status, setStatusState] = useState<WorkerActivity>("offline");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const heartbeatRef = useRef<NodeJS.Timeout | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
   const statusRef = useRef<WorkerActivity>("offline");
 
   /* ---------------------------------------------------- */
@@ -101,18 +99,55 @@ export function WorkerStatusProvider({ children }: WorkerStatusProviderProps) {
   }, []);
 
   /* ---------------------------------------------------- */
-  /* Heartbeat (keeps worker alive)                       */
+  /* SSE connection for real-time status updates          */
   /* ---------------------------------------------------- */
   useEffect(() => {
-    heartbeatRef.current = setInterval(() => {
-      if (statusRef.current !== "offline") {
-        fetch("/api/taskrouter/heartbeat", { method: "POST" }).catch(() => {});
+    const connectSSE = () => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
       }
-    }, HEARTBEAT_INTERVAL);
+
+      const eventSource = new EventSource("/api/taskrouter/worker-status-stream");
+      eventSourceRef.current = eventSource;
+
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+
+          if (data.error) {
+            console.error("❌ SSE error:", data.error);
+            setError(data.error);
+            return;
+          }
+
+          const newStatus = data.status || "offline";
+          if (newStatus !== statusRef.current) {
+            setStatusState(newStatus);
+            statusRef.current = newStatus;
+            console.log("✅ Worker status updated via SSE:", newStatus);
+          }
+
+          setIsLoading(false);
+          setError(null);
+        } catch (err) {
+          console.error("❌ Failed to parse SSE message:", err);
+        }
+      };
+
+      eventSource.onerror = (err) => {
+        console.error("❌ SSE connection error:", err);
+        eventSource.close();
+
+        // Reconnect after 5 seconds
+        setTimeout(connectSSE, 5000);
+      };
+    };
+
+    connectSSE();
 
     return () => {
-      if (heartbeatRef.current) {
-        clearInterval(heartbeatRef.current);
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
       }
     };
   }, []);
@@ -140,11 +175,8 @@ export function WorkerStatusProvider({ children }: WorkerStatusProviderProps) {
   }, []);
 
   /* ---------------------------------------------------- */
-  /* Initial load                                        */
+  /* Initial load handled by SSE connection              */
   /* ---------------------------------------------------- */
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
 
   const value: WorkerStatusContextType = {
     status,

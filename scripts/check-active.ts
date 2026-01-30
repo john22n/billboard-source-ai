@@ -30,7 +30,7 @@ async function check() {
 
   const tasks = await client.taskrouter.v1
     .workspaces(WORKSPACE_SID)
-    .tasks.list({ assignmentStatus: 'assigned', limit: 20 });
+    .tasks.list({ assignmentStatus: ['assigned'], limit: 20 });
 
   if (tasks.length === 0) {
     console.log('No active tasks');

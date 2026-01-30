@@ -10,6 +10,7 @@ import { db } from '@/db';
 import { user } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { getSession } from '@/lib/auth';
+import { sseManager } from '@/lib/sse-manager';
 
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
 const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
@@ -161,6 +162,15 @@ export async function POST(req: Request) {
         taskRouterWorkerSid: workerSid,
       })
       .where(eq(user.id, currentUser.id));
+
+    // Broadcast to SSE clients immediately
+    if (sseManager.hasConnections(currentUser.id)) {
+      sseManager.broadcast(currentUser.id, {
+        status: effectiveStatus,
+        hasWorker: !!workerSid,
+      });
+      console.log(`📡 Broadcasted ${effectiveStatus} to SSE clients`);
+    }
 
     return Response.json({
       success: true,
