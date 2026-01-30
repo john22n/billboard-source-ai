@@ -109,22 +109,48 @@ export async function POST(req: Request) {
       console.log('✅ Worker created:', workerSid);
     }
 
-    // Update worker activity in TaskRouter
+    // Update worker activity in TaskRouter with retry for conflicts
     if (workerSid && WORKSPACE_SID) {
-      await client.taskrouter.v1
-        .workspaces(WORKSPACE_SID)
-        .workers(workerSid)
-        .update({
-          activitySid: ACTIVITY_SIDS[effectiveStatus],
-          attributes: JSON.stringify({
-            email: currentUser.email,
-            contact_uri: `client:${currentUser.email}`,
-            phoneNumber: currentUser.twilioPhoneNumber,
-            available: effectiveStatus === 'available',
-          }),
-        });
+      const maxRetries = 3;
+      let lastError: Error | null = null;
 
-      console.log(`✅ Worker ${currentUser.email} status updated to: ${effectiveStatus}`);
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          await client.taskrouter.v1
+            .workspaces(WORKSPACE_SID)
+            .workers(workerSid)
+            .update({
+              activitySid: ACTIVITY_SIDS[effectiveStatus],
+              attributes: JSON.stringify({
+                email: currentUser.email,
+                contact_uri: `client:${currentUser.email}`,
+                phoneNumber: currentUser.twilioPhoneNumber,
+                available: effectiveStatus === 'available',
+              }),
+            });
+
+          console.log(`✅ Worker ${currentUser.email} status updated to: ${effectiveStatus}`);
+          lastError = null;
+          break;
+        } catch (err) {
+          lastError = err as Error;
+          const twilioError = err as { status?: number; code?: number };
+          
+          // 409 Conflict - another update in progress, retry after short delay
+          if (twilioError.status === 409 || twilioError.code === 20409) {
+            console.warn(`⚠️ Worker update conflict (attempt ${attempt}/${maxRetries}), retrying...`);
+            await new Promise(resolve => setTimeout(resolve, 100 * attempt));
+            continue;
+          }
+          
+          // Other errors - don't retry
+          throw err;
+        }
+      }
+
+      if (lastError) {
+        console.warn(`⚠️ Worker update failed after ${maxRetries} retries, continuing with DB update`);
+      }
     }
 
     // Update database
