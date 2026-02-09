@@ -8,6 +8,8 @@ import {
 } from "@/components/ui/sidebar"
 import SalesCallTranscriber from "@/components/SalesCallTranscriber"
 import { getCurrentUser } from '@/lib/dal'
+export const dynamic = 'force-dynamic'
+
 
 function DashboardSkeleton() {
   return (
