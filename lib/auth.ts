@@ -19,13 +19,13 @@ const JWT_SECRET = new TextEncoder().encode(
 )
 
 // JWT expiration
-const JWT_EXPIRATION = '2d' // 2 days
+const JWT_EXPIRATION = '4h' 
 
 // token refresh threshold - refresh if token expires within this time
-const REFRESH_THRESHOLD = 24 * 60 * 60 // 24 hours in seconds
+const REFRESH_THRESHOLD = 60 * 60 // 24 hours in seconds
 
 // cookie max age in seconds
-const COOKIE_MAX_AGE = 60 * 60 * 24 * 2 // 2 days
+const COOKIE_MAX_AGE = 60 * 60 * 4 // 2 days
 
 // hash a password
 export async function hashPassword(password: string) {

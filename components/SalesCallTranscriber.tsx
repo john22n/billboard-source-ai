@@ -12,6 +12,7 @@ import { LeadForm, PricingPanel, TranscriptView } from "@/components/sales-call"
 import type { TranscriptItem } from "@/types/sales-call";
 import { showSuccessToast, showErrorToast } from "@/lib/error-handling";
 import { useFormStore } from "@/stores/formStore";
+import { useAutoLogout } from "@/hooks/useAutoLogout"; 
 
 // Dynamic imports for heavy map components
 const GoogleMapPanel = dynamic(
@@ -25,6 +26,9 @@ const ArcGISMapPanel = dynamic(
 );
 
 export default function SalesCallTranscriber() {
+
+ useAutoLogout();
+
   // 🔍 Performance monitoring (only in development)
   if (process.env.NODE_ENV === 'development') {
     console.log('🔄 Re-render: SalesCallTranscriber');
