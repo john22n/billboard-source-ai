@@ -3,8 +3,11 @@
  *
  * Server-Sent Events endpoint for real-time worker status updates.
  * Clients subscribe here and receive status changes immediately.
+ * 
+ * IMPORTANT: Uses getSessionWithoutRefresh() so SSE reconnections
+ * don't keep extending the user's session indefinitely.
  */
-import { getSession } from "@/lib/auth";
+import { getSessionWithoutRefresh } from "@/lib/auth";
 import { sseManager } from "@/lib/sse-manager";
 import { db } from "@/db";
 import { user } from "@/db/schema";
@@ -14,7 +17,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const session = await getSession();
+  // Use getSessionWithoutRefresh so SSE reconnections don't extend the session
+  const session = await getSessionWithoutRefresh();
 
   // Return auth error as SSE format so client can handle gracefully
   // instead of returning 401 JSON which triggers infinite reconnect loop
@@ -81,7 +85,7 @@ export async function GET() {
       });
     },
     cancel() {
-      console.log(`📡 SSE stream cancelled for user ${userId}`);
+      console.log(`📡 SSE stream ended for user ${userId} (normal timeout)`);
     },
   });
 
