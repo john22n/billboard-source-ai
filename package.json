@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "dotenv -e .env.dev next dev --turbopack",
-    "build": "drizzle-kit push && next build",
+    "build": "next build",
     "build:local": "dotenv -e .env.dev next build",
     "start": "next start",
     "lint": "next lint",

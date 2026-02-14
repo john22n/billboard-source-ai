@@ -1,5 +1,5 @@
 // app/api/billboard-data/process-chunk/route.ts
-// UPDATED VERSION - 512 dimensions using OpenAI SDK directly
+// UPDATED: Uses UPSERT - updates existing locations, inserts new ones
 
 import { NextRequest, NextResponse } from 'next/server';
 import { parse } from 'csv-parse/sync';
@@ -8,6 +8,7 @@ import { db } from '@/db';
 import { billboardLocations } from '@/db/schema';
 import { getSession } from '@/lib/auth';
 import { getCurrentUser } from '@/lib/dal';
+import { sql } from 'drizzle-orm';
 
 export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
@@ -36,15 +37,14 @@ interface CSVRow {
   'Avg Views/Period': string;
 }
 
-// ⭐ FIXED: Filter function now includes General Range check
+// ⭐ Filter function - includes General Range check
 function hasUsefulData(record: CSVRow): boolean {
-  // Keep if it has ANY of these:
   const hasViews = record['Avg Daily Views'] && record['Avg Daily Views'].trim() !== '';
   const hasFourWeekRange = record['4-Wk Range'] && record['4-Wk Range'].trim() !== '';
   const hasMarket = record.Market && record.Market.trim() !== '';
   const hasDetails = record.Details && record.Details.trim() !== '';
-  const hasGeneralRange = record['General Range'] && record['General Range'].trim() !== ''; // ⭐ NEW
-  const hasMarketRange = record['Market Range'] && record['Market Range'].trim() !== ''; // ⭐ NEW
+  const hasGeneralRange = record['General Range'] && record['General Range'].trim() !== '';
+  const hasMarketRange = record['Market Range'] && record['Market Range'].trim() !== '';
   const hasPricing = 
     parseInt(record['Avg Bull Price/Mo'] || '0') > 0 ||
     parseInt(record['Avg Poster Price/Mo'] || '0') > 0 ||
@@ -110,7 +110,6 @@ async function generateEmbeddings(texts: string[]): Promise<number[][]> {
     dimensions: 512,
   });
   
-  // Sort by index to ensure order matches input
   return response.data
     .sort((a, b) => a.index - b.index)
     .map(item => item.embedding);
@@ -147,7 +146,7 @@ export async function POST(req: NextRequest) {
     const endIndex = Math.min(startIndex + chunkSize, allRecords.length);
     const chunk = allRecords.slice(startIndex, endIndex);
 
-    // ⭐ FILTER OUT EMPTY ROWS (now properly checks General Range)
+    // Filter out empty rows
     const filteredChunk = chunk.filter(hasUsefulData);
     const skipped = chunk.length - filteredChunk.length;
     
@@ -160,6 +159,8 @@ export async function POST(req: NextRequest) {
         chunkIndex,
         recordsProcessed: 0,
         recordsSkipped: skipped,
+        recordsUpdated: 0,
+        recordsInserted: 0,
       });
     }
 
@@ -172,7 +173,6 @@ export async function POST(req: NextRequest) {
 
       console.log(`🤖 Generating ${textsToEmbed.length} embeddings (512 dimensions)...`);
       
-      // ⭐ Use our helper function for 512-dimension embeddings
       const embeddings = await generateEmbeddings(textsToEmbed);
 
       const dataWithEmbeddings = batch.map((record, idx) => ({
@@ -201,17 +201,43 @@ export async function POST(req: NextRequest) {
       processedData.push(...dataWithEmbeddings);
     }
 
-    // Insert in smaller batches
-    console.log(`💾 Inserting ${processedData.length} records in batches...`);
+    // ⭐ UPSERT: Insert new records, update existing ones (based on city+state)
+    console.log(`💾 Upserting ${processedData.length} records in batches...`);
     const INSERT_BATCH_SIZE = 100;
+    let totalUpdated = 0;
+    let totalInserted = 0;
     
     for (let k = 0; k < processedData.length; k += INSERT_BATCH_SIZE) {
       const insertBatch = processedData.slice(k, k + INSERT_BATCH_SIZE);
-      await db.insert(billboardLocations).values(insertBatch);
-      console.log(`  ✓ Inserted ${k + insertBatch.length}/${processedData.length}`);
+      
+      // ⭐ Use ON CONFLICT DO UPDATE for upsert behavior
+      await db.insert(billboardLocations)
+        .values(insertBatch)
+        .onConflictDoUpdate({
+          target: [billboardLocations.city, billboardLocations.state],
+          set: {
+            county: sql`EXCLUDED.county`,
+            avgDailyViews: sql`EXCLUDED.avg_daily_views`,
+            fourWeekRange: sql`EXCLUDED.four_week_range`,
+            market: sql`EXCLUDED.market`,
+            marketRange: sql`EXCLUDED.market_range`,
+            generalRange: sql`EXCLUDED.general_range`,
+            details: sql`EXCLUDED.details`,
+            avgBullPricePerMonth: sql`EXCLUDED.avg_bull_price_per_month`,
+            avgStatBullViewsPerWeek: sql`EXCLUDED.avg_stat_bull_views_per_week`,
+            avgPosterPricePerMonth: sql`EXCLUDED.avg_poster_price_per_month`,
+            avgPosterViewsPerWeek: sql`EXCLUDED.avg_poster_views_per_week`,
+            avgDigitalPricePerMonth: sql`EXCLUDED.avg_digital_price_per_month`,
+            avgDigitalViewsPerWeek: sql`EXCLUDED.avg_digital_views_per_week`,
+            avgViewsPerPeriod: sql`EXCLUDED.avg_views_per_period`,
+            embedding: sql`EXCLUDED.embedding`,
+          },
+        });
+      
+      console.log(`  ✓ Upserted ${k + insertBatch.length}/${processedData.length}`);
     }
 
-    console.log(`✅ Chunk ${chunkIndex + 1} complete`);
+    console.log(`✅ Chunk ${chunkIndex + 1} complete (upsert mode)`);
 
     return NextResponse.json({
       success: true,
