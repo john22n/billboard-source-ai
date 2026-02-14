@@ -4,7 +4,6 @@
  * Server-Sent Events endpoint for real-time worker status updates.
  * Clients subscribe here and receive status changes immediately.
  */
-
 import { getSession } from "@/lib/auth";
 import { sseManager } from "@/lib/sse-manager";
 import { db } from "@/db";
@@ -16,10 +15,25 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   const session = await getSession();
+
+  // Return auth error as SSE format so client can handle gracefully
+  // instead of returning 401 JSON which triggers infinite reconnect loop
   if (!session) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({ error: "unauthorized", code: 401 })}\n\n`)
+        );
+        controller.close();
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+      },
     });
   }
 
@@ -41,8 +55,8 @@ export async function GET() {
   const stream = new ReadableStream({
     start(controller) {
       const connection = sseManager.addConnection(userId, controller);
-
       const encoder = new TextEncoder();
+
       const initialMessage = `data: ${JSON.stringify({ status: initialStatus, hasWorker })}\n\n`;
       controller.enqueue(encoder.encode(initialMessage));
 

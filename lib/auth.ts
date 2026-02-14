@@ -9,33 +9,43 @@ import { cache } from 'react'
 //JWT types
 interface JWTPayload {
   userId: string
+  email?: string
   [key: string]: string | number | boolean | null | undefined
 }
 
-// secret key for JWT signing ( in a real app, use env variables)
+// secret key for JWT signing (in a real app, use env variables)
 const JWT_SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET || 'your-secret-key-min-32-chars-long'
 )
 
-// JWT experation
-const JWT_EXPIRATION = '2d' // 1 day
+// JWT expiration
+const JWT_EXPIRATION = '4h' 
 
-// token refresh threshold
-const REFRESH_THRESHOLD = 24 * 60 * 60 // 24 hours in seconds
+// token refresh threshold - refresh if token expires within this time
+const REFRESH_THRESHOLD = 60 * 60 // 24 hours in seconds
+
+// cookie max age in seconds
+const COOKIE_MAX_AGE = 60 * 60 * 4 // 2 days
 
 // hash a password
 export async function hashPassword(password: string) {
   return hash(password, 10)
 }
+
 //verify password
 export async function verifyPassword(password: string, hashedPassword: string) {
   return compare(password, hashedPassword)
 }
+
 // create a new user
-export async function createUser(email: string, password: string, role: string = 'user', twilioPhoneNumber?: string) {
+export async function createUser(
+  email: string,
+  password: string,
+  role: string = 'user',
+  twilioPhoneNumber?: string
+) {
   const hashedPassword = await hashPassword(password)
   const id = nanoid()
-
   console.log(id)
 
   try {
@@ -48,7 +58,7 @@ export async function createUser(email: string, password: string, role: string =
     })
     return { id, email }
   } catch (error) {
-    console.error("error createing user:", error)
+    console.error('error creating user:', error)
     return null
   }
 }
@@ -68,7 +78,7 @@ export async function verifyJWT(token: string): Promise<JWTPayload | null> {
     const { payload } = await jose.jwtVerify(token, JWT_SECRET)
     return payload as JWTPayload
   } catch (error) {
-    console.error('JWT verifcation failed:', error)
+    console.error('JWT verification failed:', error)
     return null
   }
 }
@@ -91,6 +101,20 @@ export async function shouldRefreshToken(token: string): Promise<boolean> {
   }
 }
 
+// helper to set auth cookie
+async function setAuthCookie(token: string) {
+  const cookieStore = await cookies()
+  cookieStore.set({
+    name: 'auth_token',
+    value: token,
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: COOKIE_MAX_AGE,
+    path: '/',
+    sameSite: 'lax',
+  })
+}
+
 // create a session using jwt
 export async function createSession(userId: string, email: string) {
   try {
@@ -98,16 +122,8 @@ export async function createSession(userId: string, email: string) {
     const token = await generateJWT({ userId, email })
 
     //store jwt in a cookie
-    const cookieStore = await cookies()
-    cookieStore.set({
-      name: 'auth_token',
-      value: token,
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      maxAge: 60 * 60 * 24 * 2, // 2 days
-      path: '/',
-      sameSite: 'lax'
-    })
+    await setAuthCookie(token)
+
     return true
   } catch (error) {
     console.error('Error creating session:', error)
@@ -115,15 +131,35 @@ export async function createSession(userId: string, email: string) {
   }
 }
 
-// get current session from jwt
+// get current session from jwt with auto-refresh
 export const getSession = cache(async () => {
   try {
     const cookieStore = await cookies()
     const token = cookieStore.get('auth_token')?.value
 
     if (!token) return null
+
     const payload = await verifyJWT(token)
-    return payload ? { userId: payload.userId, email: payload.email as string } : null
+    if (!payload) return null
+
+    // Auto-refresh token if it's getting close to expiration
+    // This keeps active users logged in indefinitely
+    try {
+      if (await shouldRefreshToken(token)) {
+        const newToken = await generateJWT({
+          userId: payload.userId,
+          email: payload.email as string,
+        })
+        await setAuthCookie(newToken)
+        console.log('🔄 Session token auto-refreshed for user:', payload.userId)
+      }
+    } catch (refreshError) {
+      // If refresh fails, still return the valid session
+      // The user will just need to login when the token eventually expires
+      console.error('Token refresh failed (non-fatal):', refreshError)
+    }
+
+    return { userId: payload.userId, email: payload.email as string }
   } catch (error) {
     if (
       error instanceof Error &&
@@ -132,6 +168,8 @@ export const getSession = cache(async () => {
       console.log('Cookies not available during prerendering, returning null session')
       return null
     }
+    console.error('Error getting session:', error)
+    return null
   }
 })
 

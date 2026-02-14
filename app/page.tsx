@@ -3,6 +3,8 @@
 import { LoginForm } from "@/components/login-form"
 import Spline from "@splinetool/react-spline"
 
+
+
 export default function Home() {
   return (
     <div className="grid min-h-svh lg:grid-cols-2 bg-primary-foreground">
