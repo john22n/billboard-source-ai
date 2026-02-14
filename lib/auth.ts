@@ -18,14 +18,12 @@ const JWT_SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET || 'your-secret-key-min-32-chars-long'
 )
 
-// JWT expiration
-const JWT_EXPIRATION = '4h' 
+// JWT expiration - 4 hours of inactivity will log user out
+const JWT_EXPIRATION = '4h'
 
 // token refresh threshold - refresh if token expires within this time
-const REFRESH_THRESHOLD = 60 * 60 // 24 hours in seconds
-
-// cookie max age in seconds
-const COOKIE_MAX_AGE = 60 * 60 * 4 // 2 days
+// This keeps active users logged in by refreshing before expiration
+const REFRESH_THRESHOLD = 60 * 60 // 1 hour in seconds
 
 // hash a password
 export async function hashPassword(password: string) {
@@ -101,7 +99,7 @@ export async function shouldRefreshToken(token: string): Promise<boolean> {
   }
 }
 
-// helper to set auth cookie
+// helper to set auth cookie (SESSION COOKIE - no maxAge means it dies when browser closes)
 async function setAuthCookie(token: string) {
   const cookieStore = await cookies()
   cookieStore.set({
@@ -109,7 +107,7 @@ async function setAuthCookie(token: string) {
     value: token,
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    maxAge: COOKIE_MAX_AGE,
+    // NO maxAge - this makes it a session cookie that's deleted when browser closes
     path: '/',
     sameSite: 'lax',
   })
@@ -131,7 +129,39 @@ export async function createSession(userId: string, email: string) {
   }
 }
 
-// get current session from jwt with auto-refresh
+/**
+ * Get current session WITHOUT refreshing the token
+ * Use this for SSE endpoints and background checks that shouldn't extend the session
+ */
+export const getSessionWithoutRefresh = cache(async () => {
+  try {
+    const cookieStore = await cookies()
+    const token = cookieStore.get('auth_token')?.value
+
+    if (!token) return null
+
+    const payload = await verifyJWT(token)
+    if (!payload) return null
+
+    return { userId: payload.userId, email: payload.email as string }
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.includes('During prerendering, `cookies()` rejects')
+    ) {
+      console.log('Cookies not available during prerendering, returning null session')
+      return null
+    }
+    console.error('Error getting session:', error)
+    return null
+  }
+})
+
+/**
+ * Get current session WITH auto-refresh
+ * Use this for user-initiated actions (form submissions, page loads, API calls)
+ * This keeps active users logged in by refreshing tokens before they expire
+ */
 export const getSession = cache(async () => {
   try {
     const cookieStore = await cookies()
@@ -143,7 +173,7 @@ export const getSession = cache(async () => {
     if (!payload) return null
 
     // Auto-refresh token if it's getting close to expiration
-    // This keeps active users logged in indefinitely
+    // This keeps active users logged in during working hours
     try {
       if (await shouldRefreshToken(token)) {
         const newToken = await generateJWT({
