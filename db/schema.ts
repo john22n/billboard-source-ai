@@ -1,5 +1,5 @@
 import { InferSelectModel, relations } from 'drizzle-orm'
-import { pgTable, serial, text, timestamp, integer, numeric, index, varchar, vector } from 'drizzle-orm/pg-core'
+import { pgTable, serial, text, timestamp, integer, numeric, index, varchar, vector, unique } from 'drizzle-orm/pg-core'
 
 // Your existing tables
 export const user = pgTable('User', {
@@ -43,6 +43,7 @@ export const openaiLogs = pgTable("openai_logs", {
 });
 
 // BILLBOARD DATA TABLE - UPDATED TO 512 DIMENSIONS
+// ⭐ Added unique constraint on city+state for UPSERT support
 export const billboardLocations = pgTable(
   "billboard_locations",
   {
@@ -68,7 +69,7 @@ export const billboardLocations = pgTable(
     avgDigitalViewsPerWeek: integer("avg_digital_views_per_week").default(0),
     avgViewsPerPeriod: text("avg_views_per_period"),
 
-    // ⭐ CHANGED: Vector embedding - now 512 dimensions (was 1536)
+    // ⭐ Vector embedding - 512 dimensions
     embedding: vector("embedding", { dimensions: 512 }),
   },
   (table) => ({
@@ -77,6 +78,8 @@ export const billboardLocations = pgTable(
       table.embedding.op("vector_cosine_ops")
     ),
     cityStateIndex: index("city_state_idx").on(table.city, table.state),
+    // ⭐ NEW: Unique constraint for UPSERT support
+    cityStateUnique: unique("city_state_unique").on(table.city, table.state),
   })
 );
 

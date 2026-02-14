@@ -1,3 +1,6 @@
+// app/api/billboard-data/start/route.ts
+// UPDATED: No longer truncates - uses UPSERT mode for updates
+
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
 import { sql } from 'drizzle-orm';
@@ -28,14 +31,14 @@ export async function POST(req: NextRequest) {
     }
 
     console.log('📥 Fetching CSV to count records...');
-    
+
     const response = await fetch(blobUrl);
     if (!response.ok) {
       throw new Error(`Failed to fetch CSV: ${response.statusText}`);
     }
-    
+
     const csvContent = await response.text();
-    
+
     // Quick parse to count
     const records = parse(csvContent, {
       columns: true,
@@ -49,10 +52,16 @@ export async function POST(req: NextRequest) {
 
     console.log(`📊 Total: ${totalRecords} records, ${totalChunks} chunks`);
 
-    // Clear existing data
-    console.log('🗑️ Clearing existing data...');
-    await db.execute(sql`TRUNCATE TABLE billboard_locations RESTART IDENTITY CASCADE`);
-    console.log('✅ Data cleared');
+    // ⭐ REMOVED: No longer truncating - using UPSERT mode instead
+    // This means:
+    // - Existing locations (same city+state) will be UPDATED
+    // - New locations will be INSERTED
+    console.log('📝 UPSERT mode: existing locations will be updated, new locations will be added');
+
+    // Get current count for logging
+    const currentCount = await db.execute(sql`SELECT COUNT(*) as count FROM billboard_locations`);
+    const existingRecords = Number(currentCount.rows[0]?.count || 0);
+    console.log(`📊 Current database has ${existingRecords} locations`);
 
     return NextResponse.json({
       success: true,
@@ -60,6 +69,8 @@ export async function POST(req: NextRequest) {
       totalRecords,
       chunkSize,
       totalChunks,
+      existingRecords,
+      mode: 'upsert', // ⭐ Indicate we're in upsert mode
     });
   } catch (error) {
     console.error('Error:', error);
