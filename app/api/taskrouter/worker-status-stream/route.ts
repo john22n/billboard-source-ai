@@ -15,6 +15,7 @@ import { eq } from "drizzle-orm";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 300; // 5 minutes (Pro plan)
 
 export async function GET() {
   // Use getSessionWithoutRefresh so SSE reconnections don't extend the session
