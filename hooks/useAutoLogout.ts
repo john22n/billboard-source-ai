@@ -5,9 +5,9 @@ import { useRouter } from "next/navigation";
 
 /**
  * Auto-logout hook that logs users out at 8pm local time
- * ONLY if they were logged in before 8pm.
  * 
- * Users who log in after 8pm will NOT be auto-logged out.
+ * - Login before 8pm → logged out at 8pm same day
+ * - Login after 8pm → logged out at 8pm NEXT day
  */
 
 const LOGOUT_HOUR = 20; // 8pm in 24-hour format
@@ -16,13 +16,26 @@ export function useAutoLogout() {
   const router = useRouter();
   const hasLoggedOutRef = useRef(false);
   const checkIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const loginHourRef = useRef<number | null>(null);
+  const loginTimestampRef = useRef<Date | null>(null);
+  const nextLogoutTimeRef = useRef<Date | null>(null);
 
-  // Capture the hour when user logged in (when hook first mounts)
+  // Calculate the next 8pm logout time based on login time
   useEffect(() => {
     const now = new Date();
-    loginHourRef.current = now.getHours();
-    console.log(`🕐 Session started at hour: ${loginHourRef.current}`);
+    loginTimestampRef.current = now;
+
+    // Calculate next 8pm
+    const next8pm = new Date(now);
+    next8pm.setHours(LOGOUT_HOUR, 0, 0, 0);
+
+    // If it's already past 8pm today, next logout is tomorrow at 8pm
+    if (now.getHours() >= LOGOUT_HOUR) {
+      next8pm.setDate(next8pm.getDate() + 1);
+    }
+
+    nextLogoutTimeRef.current = next8pm;
+    console.log(`🕐 Session started: ${now.toLocaleString()}`);
+    console.log(`🕗 Next auto-logout scheduled: ${next8pm.toLocaleString()}`);
   }, []);
 
   const performLogout = useCallback(async () => {
@@ -57,25 +70,22 @@ export function useAutoLogout() {
 
   const checkTime = useCallback(() => {
     const now = new Date();
-    const currentHour = now.getHours();
 
-    // Only logout if:
-    // 1. It's 8pm or later
-    // 2. User logged in BEFORE 8pm
-    // 3. Haven't already logged out
-    const loggedInBefore8pm = loginHourRef.current !== null && loginHourRef.current < LOGOUT_HOUR;
-    
-    if (currentHour >= LOGOUT_HOUR && loggedInBefore8pm && !hasLoggedOutRef.current) {
+    // Check if we've reached the scheduled logout time
+    if (
+      nextLogoutTimeRef.current &&
+      now >= nextLogoutTimeRef.current &&
+      !hasLoggedOutRef.current
+    ) {
       performLogout();
     }
   }, [performLogout]);
 
   useEffect(() => {
-    // Don't check immediately - wait for loginHourRef to be set
-    // Then check every minute
+    // Wait for nextLogoutTimeRef to be set, then start checking
     const startChecking = setTimeout(() => {
       checkTime();
-      checkIntervalRef.current = setInterval(checkTime, 60 * 1000);
+      checkIntervalRef.current = setInterval(checkTime, 60 * 1000); // Check every minute
     }, 1000);
 
     // Also check when tab becomes visible (in case user was away)
