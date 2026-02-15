@@ -76,9 +76,12 @@ export async function verifyJWT(token: string): Promise<JWTPayload | null> {
     const { payload } = await jose.jwtVerify(token, JWT_SECRET)
     return payload as JWTPayload
   } catch (error: unknown) {
-    // Don't log expired tokens as errors - it's expected behavior
+    // Check if it's an expired token error
     if (error && typeof error === 'object' && 'code' in error && error.code === 'ERR_JWT_EXPIRED') {
-      console.log('🔒 Token expired - user will be logged out')
+      // Extract user email from the expired token's payload
+      const expiredPayload = 'payload' in error ? error.payload as JWTPayload : null
+      const userEmail = expiredPayload?.email || 'unknown'
+      console.log(`🔒 Token expired for user: ${userEmail} - logging out`)
     } else {
       console.error('JWT verification failed:', error)
     }
