@@ -11,7 +11,7 @@ interface WorkerStatusContextType {
   isSessionExpired: boolean;
   setStatus: (status: WorkerActivity) => Promise<void>;
   refresh: () => Promise<void>;
-  reconnect: () => void; // New: manual reconnect without page refresh
+  reconnect: () => void;
 }
 
 const WorkerStatusContext = createContext<WorkerStatusContextType | null>(null);
@@ -44,13 +44,49 @@ export function WorkerStatusProvider({ children }: WorkerStatusProviderProps) {
   const authFailedRef = useRef(false);
   const retryCountRef = useRef(0);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const MAX_RETRIES = 5; // Increased slightly to handle brief network blips
+  const MAX_RETRIES = 5;
+
+  /* ---------------------------------------------------- */
+  /* Set worker offline (used when session expires)       */
+  /* ---------------------------------------------------- */
+  const setWorkerOffline = useCallback(() => {
+    // Use sendBeacon to try to set offline even if session is expiring
+    // This is fire-and-forget, may or may not succeed
+    try {
+      navigator.sendBeacon(
+        "/api/taskrouter/worker-status",
+        JSON.stringify({ status: "offline" })
+      );
+      console.log("📡 Attempted to set worker offline via sendBeacon");
+    } catch (error) {
+      console.error("Failed to send offline beacon:", error);
+    }
+    
+    // Update local state regardless
+    setStatusState("offline");
+    statusRef.current = "offline";
+  }, []);
+
+  /* ---------------------------------------------------- */
+  /* Handle session expiration                            */
+  /* ---------------------------------------------------- */
+  const handleSessionExpired = useCallback(() => {
+    if (authFailedRef.current) return; // Already handled
+    
+    console.error("❌ Session expired - setting worker offline");
+    authFailedRef.current = true;
+    setIsSessionExpired(true);
+    setError("Session expired - please log in again");
+    setIsLoading(false);
+    
+    // Try to set worker offline before fully expiring
+    setWorkerOffline();
+  }, [setWorkerOffline]);
 
   /* ---------------------------------------------------- */
   /* Fetch current status                                 */
   /* ---------------------------------------------------- */
   const refresh = useCallback(async () => {
-    // Don't refresh if session is known to be expired
     if (authFailedRef.current) {
       return;
     }
@@ -62,9 +98,7 @@ export function WorkerStatusProvider({ children }: WorkerStatusProviderProps) {
       const data = await res.json();
 
       if (res.status === 401) {
-        authFailedRef.current = true;
-        setIsSessionExpired(true);
-        setError("Session expired - please log in again");
+        handleSessionExpired();
         return;
       }
 
@@ -82,13 +116,12 @@ export function WorkerStatusProvider({ children }: WorkerStatusProviderProps) {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [handleSessionExpired]);
 
   /* ---------------------------------------------------- */
   /* Update status                                        */
   /* ---------------------------------------------------- */
   const setStatus = useCallback(async (newStatus: WorkerActivity) => {
-    // Don't allow status updates if session is expired
     if (authFailedRef.current) {
       throw new Error("Session expired - please log in again");
     }
@@ -107,9 +140,7 @@ export function WorkerStatusProvider({ children }: WorkerStatusProviderProps) {
       const data = await res.json();
 
       if (res.status === 401) {
-        authFailedRef.current = true;
-        setIsSessionExpired(true);
-        setError("Session expired - please log in again");
+        handleSessionExpired();
         throw new Error("Session expired - please log in again");
       }
 
@@ -127,25 +158,22 @@ export function WorkerStatusProvider({ children }: WorkerStatusProviderProps) {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [handleSessionExpired]);
 
   /* ---------------------------------------------------- */
-  /* SSE connection function (extracted for reuse)        */
+  /* SSE connection function                              */
   /* ---------------------------------------------------- */
   const connectSSE = useCallback(() => {
-    // Don't reconnect if we know auth has failed
     if (authFailedRef.current) {
       console.log("🚫 SSE reconnect skipped - session expired");
       return;
     }
 
-    // Clear any pending reconnect timeout
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
     }
 
-    // Close existing connection
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
       eventSourceRef.current = null;
@@ -159,14 +187,10 @@ export function WorkerStatusProvider({ children }: WorkerStatusProviderProps) {
       try {
         const data = JSON.parse(event.data);
 
-        // Handle auth error from server - stop retrying
+        // Handle auth error from server - set offline and stop retrying
         if (data.error === "unauthorized" || data.code === 401) {
-          console.error("❌ Session expired - stopping SSE reconnection");
-          authFailedRef.current = true;
-          setIsSessionExpired(true);
-          setError("Session expired - please log in again");
-          setIsLoading(false);
           eventSource.close();
+          handleSessionExpired();
           return;
         }
 
@@ -198,15 +222,12 @@ export function WorkerStatusProvider({ children }: WorkerStatusProviderProps) {
       eventSource.close();
       eventSourceRef.current = null;
 
-      // Don't retry if auth has failed
       if (authFailedRef.current) {
         return;
       }
 
-      // Increment retry count
       retryCountRef.current += 1;
 
-      // Stop retrying after MAX_RETRIES to prevent infinite loop
       if (retryCountRef.current >= MAX_RETRIES) {
         console.error("❌ Max SSE retries reached - stopping reconnection");
         setError("Connection interrupted. Click 'Reconnect' to try again.");
@@ -214,39 +235,34 @@ export function WorkerStatusProvider({ children }: WorkerStatusProviderProps) {
         return;
       }
 
-      // Reconnect with exponential backoff
       const backoffTime = Math.min(5000 * Math.pow(2, retryCountRef.current - 1), 30000);
       console.log(`🔄 SSE reconnecting in ${backoffTime}ms (attempt ${retryCountRef.current}/${MAX_RETRIES})`);
       reconnectTimeoutRef.current = setTimeout(connectSSE, backoffTime);
     };
-  }, []);
+  }, [handleSessionExpired]);
 
   /* ---------------------------------------------------- */
-  /* Manual reconnect (resets everything and tries again) */
+  /* Manual reconnect                                     */
   /* ---------------------------------------------------- */
   const reconnect = useCallback(() => {
     console.log("🔄 Manual reconnect triggered");
     
-    // Reset all failure flags
     retryCountRef.current = 0;
     authFailedRef.current = false;
     setIsSessionExpired(false);
     setError(null);
     setIsLoading(true);
 
-    // Clear any pending reconnect timeout
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
     }
 
-    // Close existing connection if any
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
       eventSourceRef.current = null;
     }
 
-    // Start fresh connection
     connectSSE();
   }, [connectSSE]);
 
@@ -257,7 +273,6 @@ export function WorkerStatusProvider({ children }: WorkerStatusProviderProps) {
     connectSSE();
 
     return () => {
-      // Cleanup on unmount
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }
@@ -272,7 +287,6 @@ export function WorkerStatusProvider({ children }: WorkerStatusProviderProps) {
   /* ---------------------------------------------------- */
   useEffect(() => {
     const goOffline = () => {
-      // Don't send beacon if session is expired
       if (authFailedRef.current) {
         return;
       }
@@ -304,7 +318,7 @@ export function WorkerStatusProvider({ children }: WorkerStatusProviderProps) {
     isSessionExpired,
     setStatus,
     refresh,
-    reconnect, // New: exposed for UI to use
+    reconnect,
   };
 
   return (

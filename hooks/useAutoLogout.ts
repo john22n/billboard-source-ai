@@ -33,7 +33,19 @@ export function useAutoLogout() {
     console.log("🕗 8pm auto-logout triggered");
 
     try {
-      // Call your logout API endpoint
+      // First, set worker status to offline
+      await fetch("/api/taskrouter/worker-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "offline" }),
+      });
+      console.log("✅ Worker set to offline");
+    } catch (error) {
+      console.error("Failed to set worker offline:", error);
+    }
+
+    try {
+      // Then call logout API endpoint
       await fetch("/api/auth/logout", { method: "POST" });
     } catch (error) {
       console.error("Logout API call failed:", error);
