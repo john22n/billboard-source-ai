@@ -33,13 +33,14 @@ const MAX_ADDITIONAL_CONTACTS = 1;
 interface LeadFormProps {
   resetTrigger?: number;
   inboundPhone?: string;
+  validationErrors?: string[];
 }
 
 // ============================================================================
 // LEAD FORM COMPONENT
 // ============================================================================
 
-export function LeadForm({ resetTrigger, inboundPhone }: LeadFormProps) {
+export function LeadForm({ resetTrigger, inboundPhone, validationErrors = [] }: LeadFormProps) {
   // 🔍 Performance monitoring (only in development)
   if (process.env.NODE_ENV === 'development') {
     console.log('🔄 Re-render: LeadForm');
@@ -85,7 +86,7 @@ export function LeadForm({ resetTrigger, inboundPhone }: LeadFormProps) {
             {/* Name and What do you want to advertise - Stack on mobile */}
             <div className="flex flex-col xl:flex-row gap-3 xl:gap-8">
               <div className="w-full xl:w-60">
-                <Label className="text-blue-600 font-bold text-sm sm:text-md mb-1 block">Name</Label>
+                <Label className="text-blue-600 font-bold text-sm sm:text-md mb-1 block">First Name</Label>
                 <FirstNameInput />
               </div>
               <div className="flex-1">
@@ -93,11 +94,13 @@ export function LeadForm({ resetTrigger, inboundPhone }: LeadFormProps) {
                   What do you want to advertise?
                 </Label>
                 {/* Stack on mobile, row on md+ */}
+                {/* ORDER CHANGED: Company Name (entityName) | Kind | Est. B2B (typeName) */}
                 <div className="flex flex-col sm:flex-row gap-2 sm:gap-0">
                   <FieldInput 
-                    field="typeName" 
-                    placeholder="Est. B2B, New B2C, Political, etc"
-                    className="w-full sm:w-auto sm:flex-1 lg:w-50"
+                    field="entityName" 
+                    placeholder="Company Name"
+                    className="w-full sm:flex-1"
+                    hasValidationError={validationErrors.includes('Company Name')}
                   />
                   <Minus className="hidden sm:block mt-2.5 w-2 flex-shrink-0" />
                   <FieldInput 
@@ -107,9 +110,9 @@ export function LeadForm({ resetTrigger, inboundPhone }: LeadFormProps) {
                   />
                   <Minus className="hidden sm:block mt-2.5 w-2 flex-shrink-0" />
                   <FieldInput 
-                    field="entityName" 
-                    placeholder="Entity Name"
-                    className="w-full sm:flex-1"
+                    field="typeName" 
+                    placeholder="Est. B2B, New B2C, Political, etc"
+                    className="w-full sm:w-auto sm:flex-1 lg:w-50"
                   />
                 </div>
               </div>
@@ -388,20 +391,38 @@ export function LeadForm({ resetTrigger, inboundPhone }: LeadFormProps) {
             {/* Name, Position, Phone, Email - Stack on mobile, 2x2 on sm, 4-col on md+ */}
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 sm:gap-2.5">
               <div>
-                <Label className="text-blue-600 font-bold text-xs sm:text-md mb-1 sm:mb-1.5 block">Name</Label>
-                <ContactFieldInput contactIndex={activeContactIndex} field="name" />
+                <Label className="text-blue-600 font-bold text-xs sm:text-md mb-1 sm:mb-1.5 block">
+                  Full Name
+                </Label>
+                <ContactFieldInput 
+                  contactIndex={activeContactIndex} 
+                  field="name" 
+                  hasValidationError={validationErrors.includes('Name')}
+                />
               </div>
               <div>
                 <Label className="text-blue-600 font-bold text-xs sm:text-md mb-1 sm:mb-1.5 block">Position</Label>
                 <ContactFieldInput contactIndex={activeContactIndex} field="position" />
               </div>
               <div>
-                <Label className="text-blue-600 font-bold text-xs sm:text-md mb-1 sm:mb-1.5 block">Phone</Label>
-                <ContactFieldInput contactIndex={activeContactIndex} field="phone" />
+                <Label className="text-blue-600 font-bold text-xs sm:text-md mb-1 sm:mb-1.5 block">
+                  Phone
+                </Label>
+                <ContactFieldInput 
+                  contactIndex={activeContactIndex} 
+                  field="phone" 
+                  hasValidationError={validationErrors.includes('Phone')}
+                />
               </div>
               <div>
-                <Label className="text-blue-600 font-bold text-xs sm:text-md mb-1 sm:mb-1.5 block">Email</Label>
-                <ContactFieldInput contactIndex={activeContactIndex} field="email" />
+                <Label className="text-blue-600 font-bold text-xs sm:text-md mb-1 sm:mb-1.5 block">
+                  Email
+                </Label>
+                <ContactFieldInput 
+                  contactIndex={activeContactIndex} 
+                  field="email" 
+                  hasValidationError={validationErrors.includes('Email')}
+                />
               </div>
             </div>
 

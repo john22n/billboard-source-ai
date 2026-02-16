@@ -99,6 +99,38 @@ export async function POST(req: NextRequest) {
     const userEmail = session.email;
     const data: NutshellLeadRequest = await req.json();
 
+    // =========================================================================
+    // VALIDATION: Required fields for Nutshell submission
+    // =========================================================================
+    const missingFields: string[] = [];
+
+    if (!data.name?.trim()) {
+      missingFields.push('Name');
+    }
+
+    if (!data.entityName?.trim()) {
+      missingFields.push('Company Name');
+    }
+
+    if (!data.phone?.trim()) {
+      missingFields.push('Phone');
+    }
+
+    if (!data.email?.trim()) {
+      missingFields.push('Email');
+    }
+
+    if (missingFields.length > 0) {
+      return NextResponse.json(
+        { 
+          error: 'Missing required fields',
+          missingFields 
+        },
+        { status: 400 }
+      );
+    }
+    // =========================================================================
+
     console.log('Nutshell form submitted:', {
       submittedBy: userEmail,
       formData: data

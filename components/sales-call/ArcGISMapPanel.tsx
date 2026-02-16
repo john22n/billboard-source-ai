@@ -106,32 +106,52 @@ export function ArcGISMapPanel({ initialLocation }: ArcGISMapPanelProps) {
       // Enable popups on all layers in the map (wait for layers to load)
       await view.map.loadAll();
 
-      // Make market circle layers have transparent fill
+      // Debug: Log all layer names to help identify correct layer titles
+      console.log("=== ArcGIS Layer Debug ===");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      view.map.allLayers.forEach((layer: any, index: number) => {
+        console.log(`Layer ${index}: "${layer.title}" | Type: ${layer.type} | Visible: ${layer.visible} | Loaded: ${layer.loaded}`);
+        if (layer.source) {
+          console.log(`  - Source items: ${layer.source?.length ?? 'N/A'}`);
+        }
+        if (layer.url) {
+          console.log(`  - URL: ${layer.url}`);
+        }
+      });
+      console.log("=========================");
+
+      // Style layers based on their name
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       view.map.allLayers.forEach((layer: any) => {
-        // Check if this is a feature layer with a renderer (likely the market circles)
-        if (layer.renderer) {
-          const renderer = layer.renderer;
-          
-          // Helper function to make a symbol's fill transparent
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const makeTransparent = (symbol: any) => {
-            if (symbol && symbol.color) {
-              // Set fill to transparent (RGBA with 0 alpha)
-              symbol.color = [0, 0, 0, 0];
+        const layerTitle = (layer.title || "").toLowerCase();
+        
+        // Helper function to set symbol color
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const setSymbolColor = (symbol: any, color: number[]) => {
+          if (symbol) {
+            symbol.color = color;
+            // If it's a simple marker symbol, also set the color
+            if (symbol.type === "simple-marker" || symbol.type === "simple-fill") {
+              symbol.color = color;
             }
-          };
+          }
+        };
+
+        // Helper function to apply color to all renderer types
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const applyColorToRenderer = (renderer: any, color: number[]) => {
+          if (!renderer) return;
           
           // Handle simple renderer
           if (renderer.symbol) {
-            makeTransparent(renderer.symbol);
+            setSymbolColor(renderer.symbol, color);
           }
           
           // Handle unique value renderer
           if (renderer.uniqueValueInfos) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             renderer.uniqueValueInfos.forEach((info: any) => {
-              makeTransparent(info.symbol);
+              setSymbolColor(info.symbol, color);
             });
           }
           
@@ -139,8 +159,35 @@ export function ArcGISMapPanel({ initialLocation }: ArcGISMapPanelProps) {
           if (renderer.classBreakInfos) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             renderer.classBreakInfos.forEach((info: any) => {
-              makeTransparent(info.symbol);
+              setSymbolColor(info.symbol, color);
             });
+          }
+        };
+
+        // Check if this is a feature layer with a renderer
+        if (layer.renderer) {
+          // "digitals" layer → orange dots [255, 165, 0, 255] (RGBA)
+          if (layerTitle.includes("digital")) {
+            console.log(`🟠 Styling "${layer.title}" as ORANGE`);
+            applyColorToRenderer(layer.renderer, [255, 165, 0, 255]);
+          }
+          // "All boards no vendor icons" layer → black [0, 0, 0, 255]
+          else if (layerTitle.includes("all boards") && layerTitle.includes("no vendor")) {
+            console.log(`⚫ Styling "${layer.title}" as BLACK`);
+            applyColorToRenderer(layer.renderer, [0, 0, 0, 255]);
+            
+            // Debug: Check if this layer has data issues
+            if (layer.queryFeatureCount) {
+              layer.queryFeatureCount().then((count: number) => {
+                console.log(`  - Feature count for "${layer.title}": ${count}`);
+              }).catch((err: Error) => {
+                console.error(`  - Error querying feature count: ${err}`);
+              });
+            }
+          }
+          // All other layers → transparent (existing behavior)
+          else {
+            applyColorToRenderer(layer.renderer, [0, 0, 0, 0]);
           }
         }
       });

@@ -58,13 +58,15 @@ interface FieldInputProps {
   placeholder?: string;
   className?: string;
   baseClassName?: string;
+  hasValidationError?: boolean;
 }
 
 export const FieldInput = memo(function FieldInput({
   field,
   placeholder,
   className = "",
-  baseClassName = "h-9 sm:h-10 text-xs sm:text-sm border-2 border-black rounded transition-colors"
+  baseClassName = "h-9 sm:h-10 text-xs sm:text-sm border-2 border-black rounded transition-colors",
+  hasValidationError = false
 }: FieldInputProps) {
   const rawValue = useFormStore(selectField(field));
   const updateField = useFormStore((s) => s.updateField);
@@ -87,7 +89,12 @@ export const FieldInput = memo(function FieldInput({
     updateField(field, e.target.value);
   }, [field, updateField]);
 
-  const inputClass = getInputClass(value, baseClassName);
+  let inputClass = getInputClass(value, baseClassName);
+  
+  // Add validation error styling (red ring) if field is empty and has error
+  if (hasValidationError && (!value || value.trim() === '')) {
+    inputClass += ' ring-2 ring-red-500 ring-offset-1 border-red-500 animate-pulse';
+  }
 
   return (
     <Input
@@ -181,8 +188,9 @@ export const FieldTextarea = memo(function FieldTextarea({
 
 export const PhoneInput = memo(function PhoneInput({ 
   className = "",
-  baseClassName = "h-9 sm:h-10 text-xs sm:text-sm border-2 rounded transition-all"
-}: { className?: string; baseClassName?: string }) {
+  baseClassName = "h-9 sm:h-10 text-xs sm:text-sm border-2 rounded transition-all",
+  hasValidationError = false
+}: { className?: string; baseClassName?: string; hasValidationError?: boolean }) {
   const phone = useFormStore(selectField('phone'));
   const twilioPhonePreFilled = useFormStore((s) => s.twilioPhonePreFilled);
   const phoneVerified = useFormStore((s) => s.phoneVerified);
@@ -217,6 +225,11 @@ export const PhoneInput = memo(function PhoneInput({
     }
   }
 
+  // Add validation error styling if empty and has error
+  if (hasValidationError && !hasPhone) {
+    colorClass += ' ring-2 ring-red-500 ring-offset-1 border-red-500 animate-pulse';
+  }
+
   return (
     <div className={wrapperClass}>
       <Input
@@ -241,12 +254,14 @@ interface ContactFieldInputProps {
   contactIndex: number;
   field: 'name' | 'position' | 'phone' | 'email';
   className?: string;
+  hasValidationError?: boolean;
 }
 
 export const ContactFieldInput = memo(function ContactFieldInput({
   contactIndex,
   field,
-  className = ""
+  className = "",
+  hasValidationError = false
 }: ContactFieldInputProps) {
   const value = useFormStore((s) => {
     if (contactIndex === 0) {
@@ -264,13 +279,18 @@ export const ContactFieldInput = memo(function ContactFieldInput({
   }, [contactIndex, field, updateContactField]);
 
   if (contactIndex === 0 && field === 'phone') {
-    return <PhoneInput className={className} />;
+    return <PhoneInput className={className} hasValidationError={hasValidationError} />;
   }
 
   const baseClassName = "h-9 sm:h-10 text-xs sm:text-sm border-2 border-black rounded transition-colors";
-  const inputClass = field === 'name' 
+  let inputClass = field === 'name' 
     ? getFullNameInputClass(value, baseClassName)
     : getInputClass(value, baseClassName);
+
+  // Add validation error styling if empty and has error
+  if (hasValidationError && (!value || value.trim() === '')) {
+    inputClass += ' ring-2 ring-red-500 ring-offset-1 border-red-500 animate-pulse';
+  }
 
   return (
     <Input
