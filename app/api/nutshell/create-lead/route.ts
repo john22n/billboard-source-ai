@@ -99,6 +99,11 @@ export async function POST(req: NextRequest) {
     const userEmail = session.email;
     const data: NutshellLeadRequest = await req.json();
 
+    console.log('Nutshell form submitted:', {
+      submittedBy: userEmail,
+      formData: data
+    });
+
     const nutshellApiKey = process.env.NUTSHELL_API_KEY;
     if (!nutshellApiKey) {
       return NextResponse.json(
