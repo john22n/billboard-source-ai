@@ -43,7 +43,20 @@ export default function SalesCallTranscriber() {
   const [isSubmittingNutshell, setIsSubmittingNutshell] = useState(false);
   const [nutshellStatus, setNutshellStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [nutshellMessage, setNutshellMessage] = useState('');
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [resetTrigger, setResetTrigger] = useState(0);
+
+  // Auto-clear Nutshell success message after 10 seconds (errors stay visible)
+  useEffect(() => {
+    if (nutshellStatus !== 'success') return;
+    
+    const timer = setTimeout(() => {
+      setNutshellStatus('idle');
+      setNutshellMessage('');
+    }, 10000);
+
+    return () => clearTimeout(timer);
+  }, [nutshellStatus]);
   
   // ✅ Store caller's phone number separately so it persists after call is accepted
   const [callerPhone, setCallerPhone] = useState<string>("");
@@ -260,6 +273,7 @@ export default function SalesCallTranscriber() {
     setIsSubmittingNutshell(true);
     setNutshellStatus('idle');
     setNutshellMessage('');
+    setValidationErrors([]); // Clear previous validation errors
 
     const formData = getFormData();
 
@@ -316,6 +330,12 @@ export default function SalesCallTranscriber() {
       } else {
         setNutshellStatus('error');
         setNutshellMessage(result.error || 'Failed');
+        
+        // Capture validation errors for field highlighting
+        if (result.missingFields && Array.isArray(result.missingFields)) {
+          setValidationErrors(result.missingFields);
+        }
+        
         showErrorToast(result.error || 'Failed to create lead');
       }
     } catch (error) {
@@ -326,7 +346,7 @@ export default function SalesCallTranscriber() {
     } finally {
       setIsSubmittingNutshell(false);
     }
-  }, [getFormData, ballpark, fullTranscript, additionalContacts, resetForm, clearTranscripts]);
+  }, [getFormData, ballpark, fullTranscript, additionalContacts, clearAll]);
 
   const isProcessing = isUploading || isExtracting ||
     status.includes("Fetching") || status.includes("Connecting") ||
@@ -557,6 +577,7 @@ export default function SalesCallTranscriber() {
                     key={resetTrigger}
                     resetTrigger={resetTrigger}
                     inboundPhone={callerPhone}
+                    validationErrors={validationErrors}
                   />
                   <PricingPanel
                     key={`pricing-${resetTrigger}`}
