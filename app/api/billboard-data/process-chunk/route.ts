@@ -7,7 +7,6 @@ import OpenAI from 'openai';
 import { db } from '@/db';
 import { billboardLocations } from '@/db/schema';
 import { getSession } from '@/lib/auth';
-import { getCurrentUser } from '@/lib/dal';
 import { sql } from 'drizzle-orm';
 
 export const maxDuration = 300;
@@ -123,8 +122,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const currentUser = await getCurrentUser();
-    if (!currentUser || currentUser.role !== 'admin') {
+    if (session.role !== 'admin') {
       return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 });
     }
 

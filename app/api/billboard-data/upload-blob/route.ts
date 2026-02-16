@@ -2,7 +2,6 @@
 import { handleUpload, type HandleUploadBody } from '@vercel/blob/client';
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
-import { getCurrentUser } from '@/lib/dal';
 
 export async function POST(request: Request): Promise<NextResponse> {
   console.log('📤 Upload-blob route hit');
@@ -13,8 +12,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const currentUser = await getCurrentUser();
-  if (!currentUser || currentUser.role !== 'admin') {
+  if (session.role !== 'admin') {
     return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 });
   }
 

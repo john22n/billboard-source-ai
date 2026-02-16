@@ -45,10 +45,17 @@ export async function GET() {
       return Response.json({ error: 'User not found' }, { status: 404 });
     }
 
-    return Response.json({
-      status: currentUser.workerActivity || 'offline',
-      hasWorker: !!currentUser.taskRouterWorkerSid,
-    });
+    return Response.json(
+      {
+        status: currentUser.workerActivity || 'offline',
+        hasWorker: !!currentUser.taskRouterWorkerSid,
+      },
+      {
+        headers: {
+          'Cache-Control': 'private, max-age=5, stale-while-revalidate=10',
+        },
+      }
+    );
   } catch (error) {
     console.error('❌ Worker status GET error:', error);
     return Response.json({ error: 'Internal error' }, { status: 500 });

@@ -12,7 +12,7 @@
 import twilio from 'twilio';
 import { db } from '@/db';
 import { user } from '@/db/schema';
-import { getCurrentUser } from '@/lib/dal';
+import { getSession } from '@/lib/auth';
 
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
 const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
@@ -24,12 +24,12 @@ const client = twilio(ACCOUNT_SID, AUTH_TOKEN);
 
 export async function GET() {
   try {
-    const currentUser = await getCurrentUser();
-    if (!currentUser) {
+    const session = await getSession();
+    if (!session) {
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    if (currentUser.role !== 'admin') {
+    if (session.role !== 'admin') {
       return Response.json({ error: 'Forbidden' }, { status: 403 });
     }
 
