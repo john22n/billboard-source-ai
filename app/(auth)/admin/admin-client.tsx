@@ -128,6 +128,13 @@ export default function AdminClient({
   const [voicemailsLoading, setVoicemailsLoading] = useState(true)
   const [voicemailsError, setVoicemailsError] = useState<string | null>(null)
 
+  // Worker availability state
+  interface WorkerAvailability {
+    [userId: string]: { avgDailyHours: number; totalHours: number };
+  }
+  const [workerAvailability, setWorkerAvailability] = useState<WorkerAvailability>({})
+  const [availabilityLoading, setAvailabilityLoading] = useState(true)
+
   // Fetch OpenAI and Twilio usage on mount
   useEffect(() => {
     async function fetchOpenAIUsage() {
@@ -181,9 +188,23 @@ export default function AdminClient({
       }
     }
 
+    async function fetchWorkerAvailability() {
+      try {
+        const response = await fetch('/api/taskrouter/worker-availability')
+        if (!response.ok) throw new Error('Failed to fetch availability data')
+        const data = await response.json()
+        setWorkerAvailability(data.availability || {})
+      } catch (error) {
+        console.error('Error fetching worker availability:', error)
+      } finally {
+        setAvailabilityLoading(false)
+      }
+    }
+
     fetchOpenAIUsage()
     fetchTwilioUsage()
     fetchVoicemails()
+    fetchWorkerAvailability()
   }, [])
 
   const toggleSelect = (id: string) => {
@@ -287,12 +308,13 @@ export default function AdminClient({
                   <TableHead>Email</TableHead>
                   <TableHead>Role</TableHead>
                   <TableHead>Twilio Phone</TableHead>
+                  <TableHead className="text-right">Avg Daily Hours</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {initialUsers.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center text-muted-foreground">
+                    <TableCell colSpan={6} className="text-center text-muted-foreground">
                       No users found
                     </TableCell>
                   </TableRow>
@@ -320,6 +342,15 @@ export default function AdminClient({
                           onKeyDown={(e) => e.key === 'Enter' && handlePhoneUpdate(user.id, user.twilioPhoneNumber)}
                           disabled={isPending}
                         />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {availabilityLoading ? (
+                          <Loader2 className="h-3 w-3 animate-spin ml-auto" />
+                        ) : workerAvailability[user.id] ? (
+                          <span className="font-medium">{workerAvailability[user.id].avgDailyHours.toFixed(1)}h</span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))
