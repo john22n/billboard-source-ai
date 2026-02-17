@@ -7,7 +7,7 @@ import {
   SidebarProvider,
 } from "@/components/ui/sidebar"
 import SalesCallTranscriber from "@/components/SalesCallTranscriber"
-import { getCurrentUser } from '@/lib/dal'
+import { getSession } from '@/lib/auth'
 export const dynamic = 'force-dynamic'
 
 
@@ -31,9 +31,9 @@ function DashboardSkeleton() {
 }
 
 export default async function Page() {
-  const currentUser = await getCurrentUser()
+  const session = await getSession()
   
-  if (!currentUser) {
+  if (!session) {
     redirect('/login')
   }
 
@@ -50,10 +50,10 @@ export default async function Page() {
       <AppSidebar
         variant="inset"
         user={{
-          name: currentUser.email.split('@')[0],
-          email: currentUser.email,
+          name: session.email.split('@')[0],
+          email: session.email,
           avatar: "",
-          role: currentUser.role ?? undefined
+          role: session.role ?? undefined
         }}
       />
       <SidebarInset className="flex flex-col h-dvh min-h-0 overflow-hidden bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">

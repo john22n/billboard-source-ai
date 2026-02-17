@@ -1,6 +1,6 @@
 'use server'
 
-import { deleteUsersByIds, getCurrentUser, updateUserTwilioPhone } from "@/lib/dal";
+import { deleteUsersByIds, updateUserTwilioPhone } from "@/lib/dal";
 import { getSession } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 
@@ -15,9 +15,7 @@ export async function deleteUsers(ids: string[]) {
       };
     }
 
-    // Verify user has admin role
-    const currentUser = await getCurrentUser();
-    if (!currentUser || currentUser.role !== 'admin') {
+    if (session.role !== 'admin') {
       return {
         success: false,
         message: "Forbidden: Admin access required",
@@ -32,7 +30,7 @@ export async function deleteUsers(ids: string[]) {
     }
 
     // Prevent admin from deleting themselves
-    if (ids.includes(currentUser.id)) {
+    if (ids.includes(session.userId)) {
       return {
         success: false,
         message: "Cannot delete your own account",
@@ -61,8 +59,7 @@ export async function updateTwilioPhone(userId: string, twilioPhoneNumber: strin
       return { success: false, message: "Unauthorized" };
     }
 
-    const currentUser = await getCurrentUser();
-    if (!currentUser || currentUser.role !== 'admin') {
+    if (session.role !== 'admin') {
       return { success: false, message: "Admin access required" };
     }
 

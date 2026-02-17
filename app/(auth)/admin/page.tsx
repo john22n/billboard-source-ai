@@ -1,4 +1,4 @@
-import { getAllUsers, getUserCosts, getCurrentUser } from "@/lib/dal";
+import { getAllUsers, getUserCosts } from "@/lib/dal";
 import { getSession } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import AdminClient from "./admin-client";
@@ -12,8 +12,7 @@ export default async function AdminPage() {
     redirect('/login');
   }
 
-  const currentUser = await getCurrentUser();
-  if (!currentUser || currentUser.role !== 'admin') {
+  if (session.role !== 'admin') {
     redirect('/dashboard');
   }
 

@@ -87,7 +87,7 @@ export async function signIn(formData: FormData): Promise<ActionResponse> {
     }
 
     //create session
-    await createSession(user.id, user.email)
+    await createSession(user.id, user.email, user.role ?? 'user')
     return {
       success: true,
       message: 'Signed in successfully'

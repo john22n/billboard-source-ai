@@ -122,10 +122,10 @@ async function setAuthCookie(token: string) {
 }
 
 // create a session using jwt
-export async function createSession(userId: string, email: string) {
+export async function createSession(userId: string, email: string, role: string = 'user') {
   try {
     //create jwt with user data
-    const token = await generateJWT({ userId, email })
+    const token = await generateJWT({ userId, email, role })
 
     //store jwt in a cookie
     await setAuthCookie(token)
@@ -151,7 +151,7 @@ export const getSessionWithoutRefresh = cache(async () => {
     const payload = await verifyJWT(token)
     if (!payload) return null
 
-    return { userId: payload.userId, email: payload.email as string }
+    return { userId: payload.userId, email: payload.email as string, role: (payload.role as string) || 'user' }
   } catch (error) {
     if (
       error instanceof Error &&
@@ -187,6 +187,7 @@ export const getSession = cache(async () => {
         const newToken = await generateJWT({
           userId: payload.userId,
           email: payload.email as string,
+          role: (payload.role as string) || 'user',
         })
         await setAuthCookie(newToken)
         console.log('🔄 Session token auto-refreshed for user:', payload.userId)
@@ -197,7 +198,7 @@ export const getSession = cache(async () => {
       console.error('Token refresh failed (non-fatal):', refreshError)
     }
 
-    return { userId: payload.userId, email: payload.email as string }
+    return { userId: payload.userId, email: payload.email as string, role: (payload.role as string) || 'user' }
   } catch (error) {
     if (
       error instanceof Error &&

@@ -72,18 +72,6 @@ Transcript: ${transcript}`,
       dimensions: 512,
     });
     const embedding = embeddingResponse.data[0].embedding;
-
-    // ✅ First, let's check what we have in the database for this city/state
-    const debugResults = await db.execute(sql`
-      SELECT DISTINCT city, state
-      FROM billboard_locations
-      WHERE LOWER(city) LIKE LOWER(${'%' + city + '%'})
-         OR LOWER(state) LIKE LOWER(${'%' + state + '%'})
-      LIMIT 10
-    `);
-
-    console.log('🔍 DEBUG - Similar locations in database:', debugResults.rows);
-
     // ✅ STRICT HYBRID SEARCH: Require both city AND state to match
     const results = await db.execute(sql`
       SELECT 
