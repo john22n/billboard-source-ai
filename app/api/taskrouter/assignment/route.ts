@@ -8,9 +8,6 @@
  *
  * Uses a top-level Twilio client instead of dynamic import to avoid
  * silent failures in Vercel's serverless environment.
- *
- * NOTE: Signature validation temporarily disabled for feature branch testing.
- * Re-enable before merging to main.
  */
 import twilio from 'twilio';
 
@@ -26,27 +23,28 @@ export async function POST(req: Request) {
     const bodyText = await clonedReq.text();
     const formData = await req.formData();
 
-    // --- Signature validation (temporarily disabled for feature branch testing) ---
-    // if (TWILIO_AUTH_TOKEN) {
-    //   const twilioSignature = req.headers.get('X-Twilio-Signature') || '';
-    //   const url = new URL(req.url);
-    //   const webhookUrl = url.toString();
-    //   const params: Record<string, string> = {};
-    //   new URLSearchParams(bodyText).forEach((value, key) => {
-    //     params[key] = value;
-    //   });
-    //   const isValid = twilio.validateRequest(
-    //     TWILIO_AUTH_TOKEN,
-    //     twilioSignature,
-    //     webhookUrl,
-    //     params
-    //   );
-    //   if (!isValid) {
-    //     console.error('❌ Invalid Twilio signature on assignment callback');
-    //     console.error('URL used:', webhookUrl);
-    //     console.error('Signature:', twilioSignature);
-    //   }
-    // }
+    // --- Signature validation ---
+    if (TWILIO_AUTH_TOKEN) {
+      const twilioSignature = req.headers.get('X-Twilio-Signature') || '';
+      const url = new URL(req.url);
+      const webhookUrl = url.toString();
+      const params: Record<string, string> = {};
+      new URLSearchParams(bodyText).forEach((value, key) => {
+        params[key] = value;
+      });
+      const isValid = twilio.validateRequest(
+        TWILIO_AUTH_TOKEN,
+        twilioSignature,
+        webhookUrl,
+        params
+      );
+      if (!isValid) {
+        console.error('❌ Invalid Twilio signature on assignment callback');
+        console.error('URL used:', webhookUrl);
+        console.error('Signature:', twilioSignature);
+        // Not blocking due to proxy/load balancer issues
+      }
+    }
 
     const taskSid = formData.get('TaskSid') as string;
     const reservationSid = formData.get('ReservationSid') as string;
@@ -110,6 +108,7 @@ export async function POST(req: Request) {
 
       console.log('📞 Redirect instruction:', instruction);
 
+      // Complete the voicemail task asynchronously
       twilioClient.taskrouter.v1
         .workspaces(workspaceSid)
         .tasks(taskSid)
@@ -137,8 +136,10 @@ export async function POST(req: Request) {
         workerAttrs.cell_phone
       );
 
+      // Unique, deterministic conference name tied to this reservation
       const conferenceName = `simring-${reservationSid}`;
 
+      // TwiML for the cell leg — joins the same named conference room
       const cellTwiml = `<?xml version="1.0" encoding="UTF-8"?>
         <Response>
           <Dial>
@@ -151,6 +152,7 @@ export async function POST(req: Request) {
           </Dial>
         </Response>`;
 
+      // Dial cell phone — fire and forget so assignment response isn't delayed
       twilioClient.calls
         .create({
           to: workerAttrs.cell_phone,
@@ -166,6 +168,7 @@ export async function POST(req: Request) {
           console.error('❌ Failed to dial cell phone:', err.message)
         );
 
+      // Return conference instruction for the GPP2 (browser client)
       const instruction = {
         instruction: 'conference',
         to: workerAttrs.contact_uri || `client:${workerAttrs.email}`,
