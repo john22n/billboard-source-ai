@@ -5,11 +5,17 @@
  * Returns instructions to dial the worker's browser client.
  * For workers with simultaneous_ring=true, also dials their cell phone
  * into the same named conference so they can answer either way.
+ *
+ * Uses a top-level Twilio client instead of dynamic import to avoid
+ * silent failures in Vercel's serverless environment.
  */
 import twilio from 'twilio';
 
-const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
+const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
+
+// Top-level client — avoids dynamic import issues in Vercel serverless
+const twilioClient = twilio(ACCOUNT_SID, TWILIO_AUTH_TOKEN);
 
 export async function POST(req: Request) {
   try {
@@ -70,6 +76,7 @@ export async function POST(req: Request) {
 
     console.log('Worker email:', workerAttrs.email);
     console.log('Simultaneous ring:', workerAttrs.simultaneous_ring ?? false);
+    console.log('Cell phone:', workerAttrs.cell_phone ?? 'none');
     console.log('Call from:', taskAttrs.from);
     console.log('═══════════════════════════════════════════');
 
@@ -101,26 +108,24 @@ export async function POST(req: Request) {
 
       console.log('📞 Redirect instruction:', instruction);
 
-      import('twilio').then(({ default: twilioModule }) => {
-        const client = twilioModule(ACCOUNT_SID, TWILIO_AUTH_TOKEN!);
-        client.taskrouter.v1
-          .workspaces(workspaceSid)
-          .tasks(taskSid)
-          .update({
-            assignmentStatus: 'completed',
-            reason: 'Redirected to voicemail',
-          })
-          .then(() => console.log(`✅ Voicemail task ${taskSid} completed`))
-          .catch((err: Error) =>
-            console.error('⚠️ Failed to complete voicemail task:', err.message)
-          );
-      });
+      // Complete the voicemail task asynchronously
+      twilioClient.taskrouter.v1
+        .workspaces(workspaceSid)
+        .tasks(taskSid)
+        .update({
+          assignmentStatus: 'completed',
+          reason: 'Redirected to voicemail',
+        })
+        .then(() => console.log(`✅ Voicemail task ${taskSid} completed`))
+        .catch((err: Error) =>
+          console.error('⚠️ Failed to complete voicemail task:', err.message)
+        );
 
       return Response.json(instruction);
     }
 
     // ─────────────────────────────────────────────
-    // SIMULTANEOUS RING (McDonald only via worker attribute)
+    // SIMULTANEOUS RING
     // Rings both GPP2 (browser) and cell phone at the same time.
     // Both legs join the same named conference — whoever answers first
     // wins; the other leg is kicked in call-complete/route.ts.
@@ -134,40 +139,36 @@ export async function POST(req: Request) {
       // Unique, deterministic conference name tied to this reservation
       const conferenceName = `simring-${reservationSid}`;
 
-      // Fire-and-forget: dial cell phone into the same named conference room
-      import('twilio').then(({ default: twilioModule }) => {
-        const client = twilioModule(ACCOUNT_SID, TWILIO_AUTH_TOKEN!);
+      // TwiML for the cell leg — joins the same named conference room
+      const cellTwiml = `<?xml version="1.0" encoding="UTF-8"?>
+        <Response>
+          <Dial>
+            <Conference
+              startConferenceOnEnter="true"
+              endConferenceOnExit="true"
+              beep="false">
+              ${conferenceName}
+            </Conference>
+          </Dial>
+        </Response>`;
 
-        const cellTwiml = `<?xml version="1.0" encoding="UTF-8"?>
-          <Response>
-            <Dial>
-              <Conference
-                startConferenceOnEnter="true"
-                endConferenceOnExit="true"
-                beep="false">
-                ${conferenceName}
-              </Conference>
-            </Dial>
-          </Response>`;
-
-        client.calls
-          .create({
-            to: workerAttrs.cell_phone!,
-            from: process.env.TWILIO_MAIN_NUMBER || '+18338547126',
-            twiml: cellTwiml,
-            timeout: 20,
-            statusCallback: `${appUrl}/api/twilio-status?type=simring-cell&conferenceName=${encodeURIComponent(conferenceName)}`,
-            statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
-            statusCallbackMethod: 'POST',
-          })
-          .then((call) => console.log(`📱 Cell leg initiated: ${call.sid}`))
-          .catch((err: Error) =>
-            console.error('❌ Failed to dial cell phone:', err.message)
-          );
-      });
+      // Dial cell phone — fire and forget so assignment response isn't delayed
+      twilioClient.calls
+        .create({
+          to: workerAttrs.cell_phone,
+          from: process.env.TWILIO_MAIN_NUMBER || '+18338547126',
+          twiml: cellTwiml,
+          timeout: 20,
+          statusCallback: `${appUrl}/api/twilio-status?type=simring-cell&conferenceName=${encodeURIComponent(conferenceName)}`,
+          statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
+          statusCallbackMethod: 'POST',
+        })
+        .then((call) => console.log(`📱 Cell leg initiated: ${call.sid}`))
+        .catch((err: Error) =>
+          console.error('❌ Failed to dial cell phone:', err.message)
+        );
 
       // Return conference instruction for the GPP2 (browser client)
-      // conference_friendly_name pins this leg to the named room
       const instruction = {
         instruction: 'conference',
         to: workerAttrs.contact_uri || `client:${workerAttrs.email}`,
