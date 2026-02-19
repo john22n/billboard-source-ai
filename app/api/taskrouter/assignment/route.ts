@@ -1,13 +1,15 @@
 /**
  * TaskRouter Assignment Callback
- * 
+ *
  * Called when TaskRouter needs to assign a task to a worker.
  * Returns instructions to dial the worker's browser client.
+ * For workers with simultaneous_ring=true, also dials their cell phone
+ * into the same named conference so they can answer either way.
  */
-
 import twilio from 'twilio';
 
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
+const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
 
 export async function POST(req: Request) {
   try {
@@ -15,31 +17,26 @@ export async function POST(req: Request) {
     const bodyText = await clonedReq.text();
     const formData = await req.formData();
 
-    // Validate Twilio signature (skip in dev, log failures in prod)
+    // --- Signature validation ---
     if (TWILIO_AUTH_TOKEN) {
       const twilioSignature = req.headers.get('X-Twilio-Signature') || '';
       const url = new URL(req.url);
       const webhookUrl = url.toString();
-
       const params: Record<string, string> = {};
-      const searchParams = new URLSearchParams(bodyText);
-      searchParams.forEach((value, key) => {
+      new URLSearchParams(bodyText).forEach((value, key) => {
         params[key] = value;
       });
-
       const isValid = twilio.validateRequest(
         TWILIO_AUTH_TOKEN,
         twilioSignature,
         webhookUrl,
         params
       );
-
       if (!isValid) {
         console.error('❌ Invalid Twilio signature on assignment callback');
         console.error('URL used:', webhookUrl);
         console.error('Signature:', twilioSignature);
-        // Don't block - Twilio signature validation can fail with proxies/load balancers
-        // return new Response('Forbidden', { status: 403 });
+        // Not blocking due to proxy/load balancer issues
       }
     }
 
@@ -56,7 +53,12 @@ export async function POST(req: Request) {
     console.log('ReservationSid:', reservationSid);
     console.log('WorkerSid:', workerSid);
 
-    let workerAttrs: { email?: string; contact_uri?: string } = {};
+    let workerAttrs: {
+      email?: string;
+      contact_uri?: string;
+      simultaneous_ring?: boolean;
+      cell_phone?: string;
+    } = {};
     let taskAttrs: { call_sid?: string; from?: string } = {};
 
     try {
@@ -67,34 +69,28 @@ export async function POST(req: Request) {
     }
 
     console.log('Worker email:', workerAttrs.email);
+    console.log('Simultaneous ring:', workerAttrs.simultaneous_ring ?? false);
     console.log('Call from:', taskAttrs.from);
     console.log('═══════════════════════════════════════════');
 
-    // Build URLs
     const url = new URL(req.url);
     const appUrl = `${url.protocol}//${url.host}`;
     const workspaceSid = formData.get('WorkspaceSid') as string;
+    const conferenceStatusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
 
-    // Check if this is the voicemail worker
+    // ─────────────────────────────────────────────
+    // VOICEMAIL WORKER (unchanged)
+    // ─────────────────────────────────────────────
     if (workerAttrs.email === 'voicemail@system') {
       console.log('📼 Voicemail worker assigned - using redirect instruction');
-
       const voicemailUrl = `${appUrl}/api/taskrouter/voicemail?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
-
-      // call_sid is required for redirect instruction
       const callSid = taskAttrs.call_sid;
+
       if (!callSid) {
         console.error('❌ No call_sid in task attributes - cannot redirect');
         return Response.json({ instruction: 'reject' });
       }
 
-      // Use TaskRouter's redirect instruction - this properly:
-      // 1. Redirects the call to voicemail TwiML
-      // 2. Completes the reservation
-      // 3. Pulls the call out of the Enqueue cleanly
-      //
-      // We also complete the task immediately since voicemail doesn't need
-      // task tracking - if caller hangs up before recording, task would stay stuck.
       const instruction = {
         instruction: 'redirect',
         call_sid: callSid,
@@ -105,13 +101,8 @@ export async function POST(req: Request) {
 
       console.log('📞 Redirect instruction:', instruction);
 
-      // Complete the task asynchronously - voicemail doesn't need task tracking
-      // This prevents tasks from getting stuck if caller hangs up early
       import('twilio').then(({ default: twilioModule }) => {
-        const client = twilioModule(
-          process.env.TWILIO_ACCOUNT_SID!,
-          process.env.TWILIO_AUTH_TOKEN!
-        );
+        const client = twilioModule(ACCOUNT_SID, TWILIO_AUTH_TOKEN!);
         client.taskrouter.v1
           .workspaces(workspaceSid)
           .tasks(taskSid)
@@ -120,17 +111,84 @@ export async function POST(req: Request) {
             reason: 'Redirected to voicemail',
           })
           .then(() => console.log(`✅ Voicemail task ${taskSid} completed`))
-          .catch((err: Error) => console.error('⚠️ Failed to complete voicemail task:', err.message));
+          .catch((err: Error) =>
+            console.error('⚠️ Failed to complete voicemail task:', err.message)
+          );
       });
 
       return Response.json(instruction);
     }
 
-    // Normal worker - use conference instruction (recommended by Twilio)
-    // Conference handles call orchestration, monitors if agent answered,
-    // and properly times out the reservation if agent doesn't answer
-    const conferenceStatusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
+    // ─────────────────────────────────────────────
+    // SIMULTANEOUS RING (McDonald only via worker attribute)
+    // Rings both GPP2 (browser) and cell phone at the same time.
+    // Both legs join the same named conference — whoever answers first
+    // wins; the other leg is kicked in call-complete/route.ts.
+    // ─────────────────────────────────────────────
+    if (workerAttrs.simultaneous_ring && workerAttrs.cell_phone) {
+      console.log(
+        '📱 Simultaneous ring enabled - dialing GPP2 + cell:',
+        workerAttrs.cell_phone
+      );
 
+      // Unique, deterministic conference name tied to this reservation
+      const conferenceName = `simring-${reservationSid}`;
+
+      // Fire-and-forget: dial cell phone into the same named conference room
+      import('twilio').then(({ default: twilioModule }) => {
+        const client = twilioModule(ACCOUNT_SID, TWILIO_AUTH_TOKEN!);
+
+        const cellTwiml = `<?xml version="1.0" encoding="UTF-8"?>
+          <Response>
+            <Dial>
+              <Conference
+                startConferenceOnEnter="true"
+                endConferenceOnExit="true"
+                beep="false">
+                ${conferenceName}
+              </Conference>
+            </Dial>
+          </Response>`;
+
+        client.calls
+          .create({
+            to: workerAttrs.cell_phone!,
+            from: process.env.TWILIO_MAIN_NUMBER || '+18338547126',
+            twiml: cellTwiml,
+            timeout: 20,
+            statusCallback: `${appUrl}/api/twilio-status?type=simring-cell&conferenceName=${encodeURIComponent(conferenceName)}`,
+            statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
+            statusCallbackMethod: 'POST',
+          })
+          .then((call) => console.log(`📱 Cell leg initiated: ${call.sid}`))
+          .catch((err: Error) =>
+            console.error('❌ Failed to dial cell phone:', err.message)
+          );
+      });
+
+      // Return conference instruction for the GPP2 (browser client)
+      // conference_friendly_name pins this leg to the named room
+      const instruction = {
+        instruction: 'conference',
+        to: workerAttrs.contact_uri || `client:${workerAttrs.email}`,
+        from: taskAttrs.from || process.env.TWILIO_MAIN_NUMBER || '+18338547126',
+        post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
+        timeout: 20,
+        conference_friendly_name: conferenceName,
+        conference_status_callback: conferenceStatusCallbackUrl,
+        conference_status_callback_event: 'start, end, join, leave',
+        end_conference_on_exit: true,
+        end_conference_on_customer_exit: true,
+        reject_pending_reservations: true,
+      };
+
+      console.log('📞 Simultaneous ring conference instruction:', instruction);
+      return Response.json(instruction);
+    }
+
+    // ─────────────────────────────────────────────
+    // NORMAL WORKER (unchanged)
+    // ─────────────────────────────────────────────
     const instruction = {
       instruction: 'conference',
       to: workerAttrs.contact_uri || `client:${workerAttrs.email}`,
@@ -141,11 +199,10 @@ export async function POST(req: Request) {
       conference_status_callback_event: 'start, end, join, leave',
       end_conference_on_exit: true,
       end_conference_on_customer_exit: true,
-      reject_pending_reservations: true,  // Prevent race condition: reject other reservations when this one is accepted
+      reject_pending_reservations: true,
     };
 
     console.log('📞 Conference instruction:', instruction);
-
     return Response.json(instruction);
   } catch (error) {
     console.error('❌ Assignment callback error:', error);

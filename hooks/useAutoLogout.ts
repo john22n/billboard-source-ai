@@ -1,41 +1,64 @@
 "use client";
-
 import { useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 
 /**
- * Auto-logout hook that logs users out at 8pm local time
- * 
+ * Auto-logout hook that logs users out at 8pm local time.
+ *
  * - Login before 8pm → logged out at 8pm same day
  * - Login after 8pm → logged out at 8pm NEXT day
+ * - Workers with simultaneous_ring=true → exempt from auto-logout entirely
  */
-
 const LOGOUT_HOUR = 20; // 8pm in 24-hour format
 
 export function useAutoLogout() {
   const router = useRouter();
   const hasLoggedOutRef = useRef(false);
   const checkIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const loginTimestampRef = useRef<Date | null>(null);
   const nextLogoutTimeRef = useRef<Date | null>(null);
+  const isExemptRef = useRef<boolean | null>(null); // null = not yet checked
 
-  // Calculate the next 8pm logout time based on login time
+  // Check if this worker is exempt from auto-logout
   useEffect(() => {
-    const now = new Date();
-    loginTimestampRef.current = now;
+    async function checkExemption() {
+      try {
+        const res = await fetch("/api/taskrouter/worker-status");
+        if (res.ok) {
+          const data = await res.json();
+          const attrs =
+            typeof data.attributes === "string"
+              ? JSON.parse(data.attributes)
+              : data.attributes ?? {};
 
-    // Calculate next 8pm
-    const next8pm = new Date(now);
-    next8pm.setHours(LOGOUT_HOUR, 0, 0, 0);
+          if (attrs.simultaneous_ring) {
+            console.log(
+              `⏭️ Auto-logout disabled for ${attrs.email} (simultaneous ring enabled)`
+            );
+            isExemptRef.current = true;
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("⚠️ Could not check worker exemption, defaulting to auto-logout enabled:", err);
+      }
 
-    // If it's already past 8pm today, next logout is tomorrow at 8pm
-    if (now.getHours() >= LOGOUT_HOUR) {
-      next8pm.setDate(next8pm.getDate() + 1);
+      // Not exempt — calculate the next 8pm logout time
+      isExemptRef.current = false;
+      const now = new Date();
+      const next8pm = new Date(now);
+      next8pm.setHours(LOGOUT_HOUR, 0, 0, 0);
+
+      // If it's already past 8pm today, next logout is tomorrow at 8pm
+      if (now.getHours() >= LOGOUT_HOUR) {
+        next8pm.setDate(next8pm.getDate() + 1);
+      }
+
+      nextLogoutTimeRef.current = next8pm;
+      console.log(`🕐 Session started: ${now.toLocaleString()}`);
+      console.log(`🕗 Next auto-logout scheduled: ${next8pm.toLocaleString()}`);
     }
 
-    nextLogoutTimeRef.current = next8pm;
-    console.log(`🕐 Session started: ${now.toLocaleString()}`);
-    console.log(`🕗 Next auto-logout scheduled: ${next8pm.toLocaleString()}`);
+    checkExemption();
   }, []);
 
   const performLogout = useCallback(async () => {
@@ -46,7 +69,6 @@ export function useAutoLogout() {
     console.log("🕗 8pm auto-logout triggered");
 
     try {
-      // First, set worker status to offline
       await fetch("/api/taskrouter/worker-status", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -58,20 +80,22 @@ export function useAutoLogout() {
     }
 
     try {
-      // Then call logout API endpoint
       await fetch("/api/auth/logout", { method: "POST" });
     } catch (error) {
       console.error("Logout API call failed:", error);
     }
 
-    // Redirect to login page
     router.push("/login?reason=auto-logout");
   }, [router]);
 
   const checkTime = useCallback(() => {
-    const now = new Date();
+    // Don't do anything until exemption check resolves
+    if (isExemptRef.current === null) return;
 
-    // Check if we've reached the scheduled logout time
+    // Skip entirely if exempt
+    if (isExemptRef.current) return;
+
+    const now = new Date();
     if (
       nextLogoutTimeRef.current &&
       now >= nextLogoutTimeRef.current &&
@@ -82,18 +106,17 @@ export function useAutoLogout() {
   }, [performLogout]);
 
   useEffect(() => {
-    // Wait for nextLogoutTimeRef to be set, then start checking
     const startChecking = setTimeout(() => {
       checkTime();
-      checkIntervalRef.current = setInterval(checkTime, 60 * 1000); // Check every minute
+      checkIntervalRef.current = setInterval(checkTime, 60 * 1000);
     }, 1000);
 
-    // Also check when tab becomes visible (in case user was away)
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
         checkTime();
       }
     };
+
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
