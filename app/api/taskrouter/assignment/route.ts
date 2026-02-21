@@ -11,6 +11,9 @@
  */
 import twilio from 'twilio';
 
+// Increase Vercel function timeout to handle Twilio API calls
+export const maxDuration = 30;
+
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
 
@@ -96,7 +99,7 @@ export async function POST(req: Request) {
     // ─────────────────────────────────────────────
     if (workerAttrs.email === 'voicemail@system') {
       console.log('📼 Voicemail worker assigned - using redirect instruction');
-      const voicemailUrl = `${appUrl}/api/taskrouter/voicemail?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
+      const voicemailUrl = `${appUrl}/api/taskrouter/voicemail?taskSid=${taskSid}&workspaceSid=${workspaceSid}${bypassParam}`;
       const callSid = taskAttrs.call_sid;
 
       if (!callSid) {
@@ -143,7 +146,7 @@ export async function POST(req: Request) {
 
       const conferenceName = `simring-${reservationSid}`;
 
-      // waitUrl="" silences the hold music while waiting for the other leg
+      // waitUrl="" silences hold music while waiting for other leg
       const cellTwiml = `<?xml version="1.0" encoding="UTF-8"?>
         <Response>
           <Dial>
@@ -159,8 +162,9 @@ export async function POST(req: Request) {
 
       const cellStatusCallback = `${appUrl}/api/twilio-status?type=simring-cell&conferenceName=${encodeURIComponent(conferenceName)}${bypassParam}`;
 
-      twilioClient.calls
-        .create({
+      // Await the cell call so Vercel doesn't kill it before it fires
+      try {
+        const call = await twilioClient.calls.create({
           to: workerAttrs.cell_phone,
           from: process.env.TWILIO_MAIN_NUMBER || '+18338547126',
           twiml: cellTwiml,
@@ -168,11 +172,11 @@ export async function POST(req: Request) {
           statusCallback: cellStatusCallback,
           statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
           statusCallbackMethod: 'POST',
-        })
-        .then((call) => console.log(`📱 Cell leg initiated: ${call.sid}`))
-        .catch((err: Error) =>
-          console.error('❌ Failed to dial cell phone:', err.message)
-        );
+        });
+        console.log(`📱 Cell leg initiated: ${call.sid}`);
+      } catch (err) {
+        console.error('❌ Failed to dial cell phone:', (err as Error).message);
+      }
 
       const instruction = {
         instruction: 'conference',
