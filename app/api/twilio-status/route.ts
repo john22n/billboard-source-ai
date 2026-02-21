@@ -4,14 +4,16 @@
  * Handles general call status updates.
  *
  * For simultaneous ring cell legs (type=simring-cell):
- * If the cell leg is still ringing/initiated but the conference already
- * has enough participants (meaning GPP2 answered), cancel the cell leg
- * immediately so it doesn't ring through to voicemail.
+ * - If cell answers (in-progress): accept the TaskRouter reservation so
+ *   the caller gets bridged into the conference and the GPP2 stops ringing.
+ * - If GPP2 already answered (conference has 2+ participants): cancel the
+ *   cell leg so it stops ringing.
  */
 import twilio from 'twilio';
 
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
+const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!;
 
 export async function POST(req: Request) {
   try {
@@ -51,6 +53,9 @@ export async function POST(req: Request) {
     const url = new URL(req.url);
     const callType = url.searchParams.get('type');
     const conferenceName = url.searchParams.get('conferenceName');
+    const reservationSid = url.searchParams.get('reservationSid');
+    const taskSid = url.searchParams.get('taskSid');
+    const workspaceSid = url.searchParams.get('workspaceSid') || WORKSPACE_SID;
 
     console.log(`📊 Call status update: ${CallStatus}`, {
       CallSid,
@@ -63,44 +68,54 @@ export async function POST(req: Request) {
     });
 
     // ─────────────────────────────────────────────────────────────
-    // SIMULTANEOUS RING: Safety net for cell leg cancellation.
-    //
-    // Primary cancellation happens in call-complete/route.ts via
-    // participant-join. This is a backup: if the cell leg fires a
-    // status callback while still ringing and the conference already
-    // has 2+ participants, we cancel it here to prevent voicemail pickup.
+    // SIMULTANEOUS RING cell leg handling
     // ─────────────────────────────────────────────────────────────
-    if (
-      callType === 'simring-cell' &&
-      conferenceName &&
-      (CallStatus === 'initiated' || CallStatus === 'ringing')
-    ) {
-      try {
-        const client = twilio(ACCOUNT_SID, TWILIO_AUTH_TOKEN!);
+    if (callType === 'simring-cell' && conferenceName) {
+      const client = twilio(ACCOUNT_SID, TWILIO_AUTH_TOKEN!);
 
-        const conferences = await client.conferences.list({
-          friendlyName: conferenceName,
-          status: 'in-progress',
-          limit: 1,
-        });
-
-        if (conferences.length > 0) {
-          const participants = await client
-            .conferences(conferences[0].sid)
-            .participants.list();
-
-          // 2+ participants = inbound caller + one answering leg already in
-          // The cell leg is the odd one out — cancel it
-          if (participants.length >= 2) {
-            console.log(
-              `📵 GPP2 already answered (${participants.length} participants) - canceling cell leg ${CallSid}`
-            );
-            await client.calls(CallSid).update({ status: 'canceled' });
-          }
+      // ── Cell answered ──
+      // Accept the reservation so TaskRouter bridges the inbound caller
+      // into the conference and stops ringing the GPP2
+      if (CallStatus === 'in-progress' && reservationSid && taskSid) {
+        console.log(`📱 Cell answered - accepting reservation ${reservationSid}`);
+        try {
+          await client.taskrouter.v1
+            .workspaces(workspaceSid)
+            .tasks(taskSid)
+            .reservations(reservationSid)
+            .update({ reservationStatus: 'accepted' });
+          console.log(`✅ Reservation accepted via cell answer`);
+        } catch (err) {
+          console.error('❌ Failed to accept reservation on cell answer:', (err as Error).message);
         }
-      } catch (err) {
-        // Non-fatal — call-complete will handle cleanup if this fails
-        console.warn('⚠️ Simring status callback cleanup failed:', err);
+      }
+
+      // ── Cell still ringing but GPP2 already answered ──
+      // Check if conference already has 2+ participants (GPP2 + caller)
+      // and cancel the cell leg if so
+      if (CallStatus === 'initiated' || CallStatus === 'ringing') {
+        try {
+          const conferences = await client.conferences.list({
+            friendlyName: conferenceName,
+            status: 'in-progress',
+            limit: 1,
+          });
+
+          if (conferences.length > 0) {
+            const participants = await client
+              .conferences(conferences[0].sid)
+              .participants.list();
+
+            if (participants.length >= 2) {
+              console.log(
+                `📵 GPP2 already answered (${participants.length} participants) - canceling cell leg ${CallSid}`
+              );
+              await client.calls(CallSid).update({ status: 'canceled' });
+            }
+          }
+        } catch (err) {
+          console.warn('⚠️ Simring status callback cleanup failed:', err);
+        }
       }
     }
 
