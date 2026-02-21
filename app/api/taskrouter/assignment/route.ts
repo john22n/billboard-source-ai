@@ -137,8 +137,6 @@ export async function POST(req: Request) {
     // Rings both GPP2 (browser) and cell phone at the same time.
     // Both legs join the same named conference — whoever answers first
     // wins; the other leg is kicked in call-complete/route.ts.
-    // The inbound caller is bridged directly into the conference so
-    // answering on either device connects them immediately.
     // ─────────────────────────────────────────────
     if (workerAttrs.simultaneous_ring && workerAttrs.cell_phone) {
       console.log(
@@ -147,6 +145,19 @@ export async function POST(req: Request) {
       );
 
       const conferenceName = `simring-${reservationSid}`;
+
+      // Accept the reservation first so TaskRouter dequeues the caller
+      // into the conference properly before we dial out
+      try {
+        await twilioClient.taskrouter.v1
+          .workspaces(workspaceSid)
+          .tasks(taskSid)
+          .reservations(reservationSid)
+          .update({ reservationStatus: 'accepted' });
+        console.log(`✅ Reservation ${reservationSid} accepted`);
+      } catch (err) {
+        console.error('❌ Failed to accept reservation:', (err as Error).message);
+      }
 
       // waitUrl="" silences hold music while waiting for other leg
       const cellTwiml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -178,30 +189,6 @@ export async function POST(req: Request) {
         console.log(`📱 Cell leg initiated: ${call.sid}`);
       } catch (err) {
         console.error('❌ Failed to dial cell phone:', (err as Error).message);
-      }
-
-      // Bridge the inbound caller directly into the conference
-      // startConferenceOnEnter="false" means they wait until an agent joins
-      if (taskAttrs.call_sid) {
-        const callerTwiml = `<?xml version="1.0" encoding="UTF-8"?>
-          <Response>
-            <Dial>
-              <Conference
-                startConferenceOnEnter="false"
-                endConferenceOnExit="true"
-                beep="false"
-                waitUrl="">
-                ${conferenceName}
-              </Conference>
-            </Dial>
-          </Response>`;
-
-        try {
-          await twilioClient.calls(taskAttrs.call_sid).update({ twiml: callerTwiml });
-          console.log(`📞 Inbound caller bridged into conference: ${conferenceName}`);
-        } catch (err) {
-          console.error('❌ Failed to bridge inbound caller:', (err as Error).message);
-        }
       }
 
       const instruction = {
