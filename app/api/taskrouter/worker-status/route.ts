@@ -1,8 +1,11 @@
 /**
  * Worker Status API
- * 
+ *
  * Allows reps to toggle their availability status (Available/Unavailable/Offline).
  * Updates both TaskRouter worker activity and database.
+ *
+ * Preserves existing worker attributes (e.g. simultaneous_ring, cell_phone)
+ * by merging instead of replacing when updating.
  */
 
 import twilio from 'twilio';
@@ -39,7 +42,7 @@ export async function GET() {
       .from(user)
       .where(eq(user.id, session.userId))
       .limit(1)
-      .then(rows => rows[0]);
+      .then((rows) => rows[0]);
 
     if (!currentUser) {
       return Response.json({ error: 'User not found' }, { status: 404 });
@@ -86,20 +89,22 @@ export async function POST(req: Request) {
       .from(user)
       .where(eq(user.id, session.userId))
       .limit(1)
-      .then(rows => rows[0]);
+      .then((rows) => rows[0]);
 
     if (!currentUser) {
       return Response.json({ error: 'User not found' }, { status: 404 });
     }
 
     const effectiveStatus = newStatus;
-
     let workerSid = currentUser.taskRouterWorkerSid;
 
-    // Create worker if doesn't exist
+    // ─────────────────────────────────────────────
+    // CREATE WORKER (if doesn't exist yet)
+    // No existing attributes to merge — safe to build from scratch
+    // ─────────────────────────────────────────────
     if (!workerSid && WORKSPACE_SID) {
       console.log('📋 Creating new TaskRouter worker for:', currentUser.email);
-      
+
       const worker = await client.taskrouter.v1
         .workspaces(WORKSPACE_SID)
         .workers.create({
@@ -117,8 +122,34 @@ export async function POST(req: Request) {
       console.log('✅ Worker created:', workerSid);
     }
 
-    // Update worker activity in TaskRouter with retry for conflicts
+    // ─────────────────────────────────────────────
+    // UPDATE WORKER ACTIVITY
+    // Fetch existing attributes first and merge — this preserves custom
+    // fields like simultaneous_ring and cell_phone set via Twilio Console
+    // ─────────────────────────────────────────────
     if (workerSid && WORKSPACE_SID) {
+      // Fetch current attributes from Twilio to avoid overwriting custom fields
+      let existingAttrs: Record<string, unknown> = {};
+      try {
+        const existingWorker = await client.taskrouter.v1
+          .workspaces(WORKSPACE_SID)
+          .workers(workerSid)
+          .fetch();
+        existingAttrs = JSON.parse(existingWorker.attributes || '{}');
+        console.log('📋 Existing worker attributes fetched');
+      } catch (err) {
+        console.warn('⚠️ Could not fetch existing worker attributes, proceeding with defaults:', err);
+      }
+
+      // Merge: spread existing attrs first, then override only the fields we manage
+      const mergedAttributes = JSON.stringify({
+        ...existingAttrs,
+        email: currentUser.email,
+        contact_uri: `client:${currentUser.email}`,
+        phoneNumber: currentUser.twilioPhoneNumber,
+        available: effectiveStatus === 'available',
+      });
+
       const maxRetries = 3;
       let lastError: Error | null = null;
 
@@ -129,12 +160,7 @@ export async function POST(req: Request) {
             .workers(workerSid)
             .update({
               activitySid: ACTIVITY_SIDS[effectiveStatus],
-              attributes: JSON.stringify({
-                email: currentUser.email,
-                contact_uri: `client:${currentUser.email}`,
-                phoneNumber: currentUser.twilioPhoneNumber,
-                available: effectiveStatus === 'available',
-              }),
+              attributes: mergedAttributes,
             });
 
           console.log(`✅ Worker ${currentUser.email} status updated to: ${effectiveStatus}`);
@@ -143,14 +169,14 @@ export async function POST(req: Request) {
         } catch (err) {
           lastError = err as Error;
           const twilioError = err as { status?: number; code?: number };
-          
+
           // 409 Conflict - another update in progress, retry after short delay
           if (twilioError.status === 409 || twilioError.code === 20409) {
             console.warn(`⚠️ Worker update conflict (attempt ${attempt}/${maxRetries}), retrying...`);
-            await new Promise(resolve => setTimeout(resolve, 100 * attempt));
+            await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
             continue;
           }
-          
+
           // Other errors - don't retry
           throw err;
         }

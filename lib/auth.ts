@@ -19,7 +19,7 @@ const JWT_SECRET = new TextEncoder().encode(
 )
 
 // JWT expiration - 4 hours of inactivity will log user out
-const JWT_EXPIRATION = '4h'
+const JWT_EXPIRATION = '20h'
 
 // token refresh threshold - refresh if token expires within this time
 // This keeps active users logged in by refreshing before expiration
