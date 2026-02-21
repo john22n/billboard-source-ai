@@ -83,7 +83,13 @@ export async function POST(req: Request) {
     const url = new URL(req.url);
     const appUrl = `${url.protocol}//${url.host}`;
     const workspaceSid = formData.get('WorkspaceSid') as string;
-    const conferenceStatusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
+
+    // Append Vercel bypass token to all callback URLs so Twilio can reach
+    // them on preview deployments. No-op in production (token will be empty).
+    const bypassToken = process.env.VERCEL_BYPASS_TOKEN || '';
+    const bypassParam = bypassToken ? `&x-vercel-protection-bypass=${bypassToken}` : '';
+
+    const conferenceStatusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}${bypassParam}`;
 
     // ─────────────────────────────────────────────
     // VOICEMAIL WORKER (unchanged)
@@ -108,7 +114,6 @@ export async function POST(req: Request) {
 
       console.log('📞 Redirect instruction:', instruction);
 
-      // Complete the voicemail task asynchronously
       twilioClient.taskrouter.v1
         .workspaces(workspaceSid)
         .tasks(taskSid)
@@ -136,30 +141,31 @@ export async function POST(req: Request) {
         workerAttrs.cell_phone
       );
 
-      // Unique, deterministic conference name tied to this reservation
       const conferenceName = `simring-${reservationSid}`;
 
-      // TwiML for the cell leg — joins the same named conference room
+      // waitUrl="" silences the hold music while waiting for the other leg
       const cellTwiml = `<?xml version="1.0" encoding="UTF-8"?>
         <Response>
           <Dial>
             <Conference
               startConferenceOnEnter="true"
               endConferenceOnExit="true"
-              beep="false">
+              beep="false"
+              waitUrl="">
               ${conferenceName}
             </Conference>
           </Dial>
         </Response>`;
 
-      // Dial cell phone — fire and forget so assignment response isn't delayed
+      const cellStatusCallback = `${appUrl}/api/twilio-status?type=simring-cell&conferenceName=${encodeURIComponent(conferenceName)}${bypassParam}`;
+
       twilioClient.calls
         .create({
           to: workerAttrs.cell_phone,
           from: process.env.TWILIO_MAIN_NUMBER || '+18338547126',
           twiml: cellTwiml,
           timeout: 20,
-          statusCallback: `${appUrl}/api/twilio-status?type=simring-cell&conferenceName=${encodeURIComponent(conferenceName)}`,
+          statusCallback: cellStatusCallback,
           statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
           statusCallbackMethod: 'POST',
         })
@@ -168,7 +174,6 @@ export async function POST(req: Request) {
           console.error('❌ Failed to dial cell phone:', err.message)
         );
 
-      // Return conference instruction for the GPP2 (browser client)
       const instruction = {
         instruction: 'conference',
         to: workerAttrs.contact_uri || `client:${workerAttrs.email}`,
