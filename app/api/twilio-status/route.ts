@@ -4,8 +4,8 @@
  * Handles general call status updates.
  *
  * For simultaneous ring cell legs (type=simring-cell):
- * - Cell answers (in-progress): find and cancel the GPP2 leg since
- *   the caller is already in the conference and connected to cell.
+ * - Cell answers (in-progress): redirect the inbound caller into the
+ *   named conference using their call_sid, then cancel the GPP2 leg.
  * - Cell still ringing but GPP2 already answered: cancel the cell leg.
  */
 import twilio from 'twilio';
@@ -51,6 +51,7 @@ export async function POST(req: Request) {
     const url = new URL(req.url);
     const callType = url.searchParams.get('type');
     const conferenceName = url.searchParams.get('conferenceName');
+    const callerCallSid = url.searchParams.get('callerCallSid');
 
     console.log(`📊 Call status update: ${CallStatus}`, {
       CallSid,
@@ -69,12 +70,26 @@ export async function POST(req: Request) {
       const client = twilio(ACCOUNT_SID, TWILIO_AUTH_TOKEN!);
 
       // ── Cell answered ──
-      // Caller is already in the conference and now connected to cell.
-      // Find and cancel the GPP2 leg so it stops ringing.
+      // Redirect the inbound caller into the named conference so they
+      // connect with the cell. Then cancel the GPP2 leg.
       if (CallStatus === 'in-progress') {
-        console.log(`📱 Cell answered - canceling GPP2 leg`);
+        console.log(`📱 Cell answered - bridging caller into conference: ${conferenceName}`);
+
+        // Redirect caller into the same conference where cell is waiting
+        if (callerCallSid) {
+          try {
+            const callerTwiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Dial><Conference startConferenceOnEnter="true" endConferenceOnExit="true" beep="false" waitUrl="">${conferenceName}</Conference></Dial></Response>`;
+            await client.calls(callerCallSid).update({ twiml: callerTwiml });
+            console.log(`✅ Caller ${callerCallSid} redirected into conference: ${conferenceName}`);
+          } catch (err) {
+            console.error('❌ Failed to redirect caller into conference:', (err as Error).message);
+          }
+        } else {
+          console.warn('⚠️ No callerCallSid available — cannot bridge caller');
+        }
+
+        // Cancel the GPP2 leg
         try {
-          // Give conference a moment to fully establish
           await new Promise((resolve) => setTimeout(resolve, 1500));
 
           const conferences = await client.conferences.list({
@@ -90,9 +105,8 @@ export async function POST(req: Request) {
 
             console.log(`👥 Conference participants: ${participants.length}`);
 
-            // Cancel all legs except the cell (current CallSid)
             for (const participant of participants) {
-              if (participant.callSid !== CallSid) {
+              if (participant.callSid !== CallSid && participant.callSid !== callerCallSid) {
                 console.log(`📵 Canceling GPP2 leg: ${participant.callSid}`);
                 try {
                   await client.calls(participant.callSid).update({ status: 'canceled' });

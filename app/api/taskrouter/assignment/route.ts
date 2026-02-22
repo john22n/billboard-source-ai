@@ -81,6 +81,7 @@ export async function POST(req: Request) {
     console.log('Simultaneous ring:', workerAttrs.simultaneous_ring ?? false);
     console.log('Cell phone:', workerAttrs.cell_phone ?? 'none');
     console.log('Call from:', taskAttrs.from);
+    console.log('Caller call_sid:', taskAttrs.call_sid ?? 'none');
     console.log('═══════════════════════════════════════════');
 
     const url = new URL(req.url);
@@ -136,16 +137,13 @@ export async function POST(req: Request) {
     // SIMULTANEOUS RING
     //
     // Both GPP2 and cell join the same named conference room.
-    // TaskRouter puts the caller in the conference when it processes
-    // the conference instruction — so the caller is already waiting
-    // in the room when either device answers.
     //
-    // GPP2 answers → conference starts, caller connects automatically.
-    //   twilio-status sees cell still ringing and cancels it.
+    // GPP2 answers → TaskRouter bridges caller into conference automatically.
+    //   twilio-status cancels cell leg.
     //
-    // Cell answers (startConferenceOnEnter=true) → cell joins the room
-    //   where caller is already waiting, call connects immediately.
-    //   twilio-status finds GPP2 in conference and cancels it.
+    // Cell answers → twilio-status redirects caller into the same conference
+    //   using the caller's call_sid passed via the status callback URL.
+    //   GPP2 leg gets canceled.
     // ─────────────────────────────────────────────
     if (workerAttrs.simultaneous_ring && workerAttrs.cell_phone) {
       console.log(
@@ -155,8 +153,6 @@ export async function POST(req: Request) {
 
       const conferenceName = `simring-${reservationSid}`;
 
-      // Cell TwiML — startConferenceOnEnter=true so when cell answers
-      // it joins the conference where the caller is already waiting
       const cellTwiml = `<?xml version="1.0" encoding="UTF-8"?>
         <Response>
           <Dial>
@@ -170,7 +166,10 @@ export async function POST(req: Request) {
           </Dial>
         </Response>`;
 
-      const cellStatusCallback = `${appUrl}/api/twilio-status?type=simring-cell&conferenceName=${encodeURIComponent(conferenceName)}&reservationSid=${reservationSid}&taskSid=${taskSid}&workspaceSid=${workspaceSid}${bypassParam}`;
+      // Pass caller's call_sid so twilio-status can bridge them into
+      // the conference if cell answers before GPP2
+      const callerCallSid = taskAttrs.call_sid || '';
+      const cellStatusCallback = `${appUrl}/api/twilio-status?type=simring-cell&conferenceName=${encodeURIComponent(conferenceName)}&reservationSid=${reservationSid}&taskSid=${taskSid}&workspaceSid=${workspaceSid}&callerCallSid=${callerCallSid}${bypassParam}`;
 
       // Dial cell phone — await so Vercel doesn't kill it
       try {
@@ -188,9 +187,6 @@ export async function POST(req: Request) {
         console.error('❌ Failed to dial cell phone:', (err as Error).message);
       }
 
-      // Return conference instruction for GPP2
-      // TaskRouter puts the caller into this named conference room
-      // so they're waiting when either device answers
       const instruction = {
         instruction: 'conference',
         to: workerAttrs.contact_uri || `client:${workerAttrs.email}`,
