@@ -20,10 +20,10 @@ export async function POST(req: Request) {
     const bodyText = await clonedReq.text();
     const formData = await req.formData();
 
-    // Signature validation — log only, not blocking
+    // Proper signature validation — includes query params in URL
     if (TWILIO_AUTH_TOKEN) {
       const twilioSignature = req.headers.get('X-Twilio-Signature') || '';
-      const webhookUrl = new URL(req.url).toString();
+      const fullUrl = req.url; // full URL with query params — matches what Twilio signed
       const params: Record<string, string> = {};
       new URLSearchParams(bodyText).forEach(
         (value, key) => (params[key] = value)
@@ -31,11 +31,12 @@ export async function POST(req: Request) {
       const isValid = twilio.validateRequest(
         TWILIO_AUTH_TOKEN,
         twilioSignature,
-        webhookUrl,
+        fullUrl,
         params
       );
       if (!isValid) {
         console.error('❌ Invalid Twilio signature on twilio-status (not blocking)');
+        // Not blocking — proxy/load balancer may alter host header
       }
     }
 
@@ -64,20 +65,12 @@ export async function POST(req: Request) {
       callType: callType || 'standard',
     });
 
-    // ─────────────────────────────────────────────────────────────
-    // SIMULTANEOUS RING cell leg handling
-    // ─────────────────────────────────────────────────────────────
     if (callType === 'simring-cell' && conferenceName) {
       const client = twilio(ACCOUNT_SID, TWILIO_AUTH_TOKEN!);
 
-      // ── Cell answered ──
-      // 1. Redirect caller into the named conference
-      // 2. Complete the task so TaskRouter stops routing
-      // 3. Cancel the GPP2 ringing call directly by contactUri
       if (CallStatus === 'in-progress') {
         console.log(`📱 Cell answered - bridging caller into conference: ${conferenceName}`);
 
-        // Step 1 — Redirect caller into the conference
         if (callerCallSid) {
           try {
             const callerTwiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Dial><Conference startConferenceOnEnter="true" endConferenceOnExit="true" beep="false" waitUrl="">${conferenceName}</Conference></Dial></Response>`;
@@ -90,7 +83,6 @@ export async function POST(req: Request) {
           console.warn('⚠️ No callerCallSid — cannot bridge caller');
         }
 
-        // Step 2 — Complete the task so TaskRouter stops routing
         if (taskSid) {
           try {
             await client.taskrouter.v1
@@ -106,7 +98,6 @@ export async function POST(req: Request) {
           }
         }
 
-        // Step 3 — Cancel the GPP2 ringing call by contactUri
         if (contactUri) {
           try {
             console.log(`🔍 Looking for ringing GPP2 call to: ${contactUri}`);
@@ -131,12 +122,9 @@ export async function POST(req: Request) {
           } catch (err) {
             console.error('❌ Failed to find/cancel GPP2 call:', (err as Error).message);
           }
-        } else {
-          console.warn('⚠️ No contactUri — cannot cancel GPP2 call');
         }
       }
 
-      // ── Cell still ringing but GPP2 already answered ──
       if (CallStatus === 'initiated' || CallStatus === 'ringing') {
         try {
           const conferences = await client.conferences.list({
