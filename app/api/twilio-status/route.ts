@@ -5,7 +5,8 @@
  *
  * For simultaneous ring cell legs (type=simring-cell):
  * - Cell answers (in-progress): redirect the inbound caller into the
- *   named conference using their call_sid, then cancel the GPP2 leg.
+ *   named conference, complete the task so TaskRouter stops routing,
+ *   then cancel the GPP2 leg.
  * - Cell still ringing but GPP2 already answered: cancel the cell leg.
  */
 import twilio from 'twilio';
@@ -52,6 +53,8 @@ export async function POST(req: Request) {
     const callType = url.searchParams.get('type');
     const conferenceName = url.searchParams.get('conferenceName');
     const callerCallSid = url.searchParams.get('callerCallSid');
+    const taskSid = url.searchParams.get('taskSid');
+    const workspaceSid = url.searchParams.get('workspaceSid') || WORKSPACE_SID;
 
     console.log(`📊 Call status update: ${CallStatus}`, {
       CallSid,
@@ -70,25 +73,42 @@ export async function POST(req: Request) {
       const client = twilio(ACCOUNT_SID, TWILIO_AUTH_TOKEN!);
 
       // ── Cell answered ──
-      // Redirect the inbound caller into the named conference so they
-      // connect with the cell. Then cancel the GPP2 leg.
+      // 1. Redirect caller into the named conference
+      // 2. Complete the task so TaskRouter stops creating new reservations
+      // 3. Cancel the GPP2 leg
       if (CallStatus === 'in-progress') {
         console.log(`📱 Cell answered - bridging caller into conference: ${conferenceName}`);
 
-        // Redirect caller into the same conference where cell is waiting
+        // Step 1 — Redirect caller into the conference
         if (callerCallSid) {
           try {
             const callerTwiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Dial><Conference startConferenceOnEnter="true" endConferenceOnExit="true" beep="false" waitUrl="">${conferenceName}</Conference></Dial></Response>`;
             await client.calls(callerCallSid).update({ twiml: callerTwiml });
-            console.log(`✅ Caller ${callerCallSid} redirected into conference: ${conferenceName}`);
+            console.log(`✅ Caller ${callerCallSid} redirected into conference`);
           } catch (err) {
             console.error('❌ Failed to redirect caller into conference:', (err as Error).message);
           }
         } else {
-          console.warn('⚠️ No callerCallSid available — cannot bridge caller');
+          console.warn('⚠️ No callerCallSid — cannot bridge caller');
         }
 
-        // Cancel the GPP2 leg
+        // Step 2 — Complete the task so TaskRouter stops routing
+        if (taskSid) {
+          try {
+            await client.taskrouter.v1
+              .workspaces(workspaceSid)
+              .tasks(taskSid)
+              .update({
+                assignmentStatus: 'completed',
+                reason: 'Answered on cell phone',
+              });
+            console.log(`✅ Task ${taskSid} completed — TaskRouter will stop routing`);
+          } catch (err) {
+            console.error('❌ Failed to complete task:', (err as Error).message);
+          }
+        }
+
+        // Step 3 — Cancel the GPP2 leg
         try {
           await new Promise((resolve) => setTimeout(resolve, 1500));
 
