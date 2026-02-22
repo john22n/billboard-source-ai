@@ -4,7 +4,8 @@
  * Called when TaskRouter needs to assign a task to a worker.
  * Returns instructions to dial the worker's browser client.
  * For workers with simultaneous_ring=true, also dials their cell phone
- * into the same named conference so they can answer either way.
+ * using TaskRouter's dequeue instruction so the caller is bridged
+ * directly to whichever device answers first.
  *
  * Uses a top-level Twilio client instead of dynamic import to avoid
  * silent failures in Vercel's serverless environment.
@@ -136,11 +137,11 @@ export async function POST(req: Request) {
     // SIMULTANEOUS RING
     // Rings both GPP2 (browser) and cell phone at the same time.
     //
-    // GPP2 answers → TaskRouter handles it via conference instruction,
-    //   caller gets bridged, twilio-status cancels the cell leg.
+    // GPP2 answers → TaskRouter handles via conference instruction,
+    //   caller gets bridged, cell dequeue gets canceled automatically.
     //
-    // Cell answers → twilio-status detects in-progress, accepts the
-    //   reservation so TaskRouter bridges the caller, GPP2 stops ringing.
+    // Cell answers → TaskRouter dequeues caller directly to cell,
+    //   GPP2 conference times out and stops ringing automatically.
     // ─────────────────────────────────────────────
     if (workerAttrs.simultaneous_ring && workerAttrs.cell_phone) {
       console.log(
@@ -148,49 +149,34 @@ export async function POST(req: Request) {
         workerAttrs.cell_phone
       );
 
-      const conferenceName = `simring-${reservationSid}`;
-
-      // waitUrl="" silences hold music while waiting for other leg
-      const cellTwiml = `<?xml version="1.0" encoding="UTF-8"?>
-        <Response>
-          <Dial>
-            <Conference
-              startConferenceOnEnter="true"
-              endConferenceOnExit="true"
-              beep="false"
-              waitUrl="">
-              ${conferenceName}
-            </Conference>
-          </Dial>
-        </Response>`;
-
-      // Pass reservationSid and workspaceSid to status callback so
-      // twilio-status can accept the reservation when cell answers
-      const cellStatusCallback = `${appUrl}/api/twilio-status?type=simring-cell&conferenceName=${encodeURIComponent(conferenceName)}&reservationSid=${reservationSid}&taskSid=${taskSid}&workspaceSid=${workspaceSid}${bypassParam}`;
-
-      // Await the cell call so Vercel doesn't kill it before it fires
+      // Dequeue the caller directly to the cell phone via TaskRouter
+      // This is the correct approach per Twilio docs — TaskRouter bridges
+      // the caller to the cell directly, no separate conference needed
       try {
-        const call = await twilioClient.calls.create({
-          to: workerAttrs.cell_phone,
-          from: process.env.TWILIO_MAIN_NUMBER || '+18338547126',
-          twiml: cellTwiml,
-          timeout: 20,
-          statusCallback: cellStatusCallback,
-          statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
-          statusCallbackMethod: 'POST',
-        });
-        console.log(`📱 Cell leg initiated: ${call.sid}`);
+        await twilioClient.taskrouter.v1
+          .workspaces(workspaceSid)
+          .tasks(taskSid)
+          .reservations(reservationSid)
+          .update({
+            reservationStatus: 'accepted',
+            instruction: 'dequeue',
+            to: workerAttrs.cell_phone,
+            from: process.env.TWILIO_MAIN_NUMBER || '+18338547126',
+            postWorkActivitySid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
+          });
+        console.log(`📱 Cell dequeue initiated to: ${workerAttrs.cell_phone}`);
       } catch (err) {
-        console.error('❌ Failed to dial cell phone:', (err as Error).message);
+        console.error('❌ Failed to dequeue to cell phone:', (err as Error).message);
       }
 
+      // Also return conference instruction for the GPP2 (browser client)
+      // so both ring simultaneously — whoever answers first wins
       const instruction = {
         instruction: 'conference',
         to: workerAttrs.contact_uri || `client:${workerAttrs.email}`,
         from: taskAttrs.from || process.env.TWILIO_MAIN_NUMBER || '+18338547126',
         post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
         timeout: 20,
-        conference_friendly_name: conferenceName,
         conference_status_callback: conferenceStatusCallbackUrl,
         conference_status_callback_event: 'start, end, join, leave',
         end_conference_on_exit: true,
