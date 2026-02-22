@@ -5,7 +5,8 @@
  *
  * For simultaneous ring cell legs (type=simring-cell):
  * - If cell answers (in-progress): accept the TaskRouter reservation so
- *   the caller gets bridged into the conference and the GPP2 stops ringing.
+ *   the caller gets bridged into the conference, then cancel the GPP2
+ *   leg so it stops ringing.
  * - If GPP2 already answered (conference has 2+ participants): cancel the
  *   cell leg so it stops ringing.
  */
@@ -74,8 +75,8 @@ export async function POST(req: Request) {
       const client = twilio(ACCOUNT_SID, TWILIO_AUTH_TOKEN!);
 
       // ── Cell answered ──
-      // Accept the reservation so TaskRouter bridges the inbound caller
-      // into the conference and stops ringing the GPP2
+      // 1. Accept the reservation so TaskRouter bridges the inbound caller
+      // 2. Cancel the GPP2 leg so it stops ringing
       if (CallStatus === 'in-progress' && reservationSid && taskSid) {
         console.log(`📱 Cell answered - accepting reservation ${reservationSid}`);
         try {
@@ -85,8 +86,37 @@ export async function POST(req: Request) {
             .reservations(reservationSid)
             .update({ reservationStatus: 'accepted' });
           console.log(`✅ Reservation accepted via cell answer`);
+
+          // Cancel the GPP2 leg so it stops ringing
+          const conferences = await client.conferences.list({
+            friendlyName: conferenceName,
+            status: 'in-progress',
+            limit: 1,
+          });
+
+          if (conferences.length > 0) {
+            const participants = await client
+              .conferences(conferences[0].sid)
+              .participants.list();
+
+            console.log(`👥 Conference participants: ${participants.length}`);
+
+            // Cancel all participants except the cell leg (current call)
+            for (const participant of participants) {
+              if (participant.callSid !== CallSid) {
+                console.log(`📵 Canceling GPP2 leg: ${participant.callSid}`);
+                try {
+                  await client.calls(participant.callSid).update({ status: 'canceled' });
+                } catch (err) {
+                  console.warn(`⚠️ Could not cancel GPP2 leg:`, err);
+                }
+              }
+            }
+          } else {
+            console.log('ℹ️ Conference not yet in-progress, GPP2 leg will timeout naturally');
+          }
         } catch (err) {
-          console.error('❌ Failed to accept reservation on cell answer:', (err as Error).message);
+          console.error('❌ Failed to handle cell answer:', (err as Error).message);
         }
       }
 
