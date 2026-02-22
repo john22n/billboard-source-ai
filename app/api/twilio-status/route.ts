@@ -4,9 +4,11 @@
  * Handles general call status updates.
  *
  * For simultaneous ring cell legs (type=simring-cell):
- * - Cell answers (in-progress): redirect the inbound caller into the
- *   named conference, complete the task, then cancel the GPP2 ringing call.
- * - Cell still ringing but GPP2 already answered: cancel the cell leg.
+ * - Cell answers (in-progress): redirect caller into conference, complete task, cancel GPP2
+ * - Cell still ringing but GPP2 answered: cancel cell leg
+ *
+ * For AMD detection (type=simring-amd):
+ * - Voicemail detected: cancel the cell leg so caller rolls to next agent
  */
 import twilio from 'twilio';
 
@@ -20,29 +22,24 @@ export async function POST(req: Request) {
     const bodyText = await clonedReq.text();
     const formData = await req.formData();
 
-    // Proper signature validation using forwarded host headers
-    // Vercel's req.url uses internal host — x-forwarded-host has the real external host
+    // Signature validation — log only, not blocking
     if (TWILIO_AUTH_TOKEN) {
       const twilioSignature = req.headers.get('X-Twilio-Signature') || '';
       const proto = req.headers.get('x-forwarded-proto') || 'https';
       const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || '';
       const { pathname, search } = new URL(req.url);
       const fullUrl = `${proto}://${host}${pathname}${search}`;
-
       const params: Record<string, string> = {};
       new URLSearchParams(bodyText).forEach((value, key) => (params[key] = value));
-
       const isValid = twilio.validateRequest(TWILIO_AUTH_TOKEN, twilioSignature, fullUrl, params);
       if (!isValid) {
         console.error('❌ Invalid Twilio signature on twilio-status (not blocking)');
-        console.error('URL used for validation:', fullUrl);
-      } else {
-        console.log('✅ Twilio signature valid');
       }
     }
 
     const CallSid = formData.get('CallSid') as string;
     const CallStatus = formData.get('CallStatus') as string;
+    const AnsweredBy = formData.get('AnsweredBy') as string;
     const CallDuration = formData.get('CallDuration') as string;
     const From = formData.get('From') as string;
     const To = formData.get('To') as string;
@@ -59,6 +56,7 @@ export async function POST(req: Request) {
     console.log(`📊 Call status update: ${CallStatus}`, {
       CallSid,
       CallStatus,
+      AnsweredBy: AnsweredBy || undefined,
       CallDuration: CallDuration ? `${CallDuration}s` : undefined,
       From,
       To,
@@ -66,9 +64,32 @@ export async function POST(req: Request) {
       callType: callType || 'standard',
     });
 
-    if (callType === 'simring-cell' && conferenceName) {
-      const client = twilio(ACCOUNT_SID, TWILIO_AUTH_TOKEN!);
+    const client = twilio(ACCOUNT_SID, TWILIO_AUTH_TOKEN!);
 
+    // ─────────────────────────────────────────────────────────────
+    // AMD CALLBACK — voicemail detected, cancel cell leg
+    // ─────────────────────────────────────────────────────────────
+    if (callType === 'simring-amd') {
+      if (AnsweredBy === 'machine_start' || AnsweredBy === 'machine_end_beep' || AnsweredBy === 'machine_end_silence') {
+        console.log(`🤖 Voicemail detected (${AnsweredBy}) — canceling cell leg: ${CallSid}`);
+        try {
+          await client.calls(CallSid).update({ status: 'canceled' });
+          console.log(`✅ Cell leg canceled — caller will roll to next agent`);
+        } catch (err) {
+          console.warn(`⚠️ Could not cancel cell leg:`, (err as Error).message);
+        }
+      } else {
+        console.log(`👤 Human answered (${AnsweredBy}) — no action needed`);
+      }
+      return new Response(null, { status: 204 });
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // SIMULTANEOUS RING cell leg handling
+    // ─────────────────────────────────────────────────────────────
+    if (callType === 'simring-cell' && conferenceName) {
+
+      // ── Cell answered ──
       if (CallStatus === 'in-progress') {
         console.log(`📱 Cell answered - bridging caller into conference: ${conferenceName}`);
 
@@ -102,30 +123,26 @@ export async function POST(req: Request) {
         if (contactUri) {
           try {
             console.log(`🔍 Looking for ringing GPP2 call to: ${contactUri}`);
-            const ringingCalls = await client.calls.list({
-              to: contactUri,
-              status: 'ringing',
-            });
-
+            const ringingCalls = await client.calls.list({ to: contactUri, status: 'ringing' });
             if (ringingCalls.length > 0) {
               for (const call of ringingCalls) {
-                console.log(`📵 Canceling GPP2 ringing call: ${call.sid}`);
                 try {
                   await client.calls(call.sid).update({ status: 'canceled' });
-                  console.log(`✅ GPP2 call canceled`);
+                  console.log(`✅ GPP2 call ${call.sid} canceled`);
                 } catch (err) {
                   console.warn(`⚠️ Could not cancel GPP2 call:`, (err as Error).message);
                 }
               }
             } else {
-              console.log('ℹ️ No ringing GPP2 calls found — may have already stopped');
+              console.log('ℹ️ No ringing GPP2 calls found');
             }
           } catch (err) {
-            console.error('❌ Failed to find/cancel GPP2 call:', (err as Error).message);
+            console.error('❌ Failed to cancel GPP2 call:', (err as Error).message);
           }
         }
       }
 
+      // ── Cell still ringing but GPP2 already answered ──
       if (CallStatus === 'initiated' || CallStatus === 'ringing') {
         try {
           const conferences = await client.conferences.list({
@@ -133,16 +150,10 @@ export async function POST(req: Request) {
             status: 'in-progress',
             limit: 1,
           });
-
           if (conferences.length > 0) {
-            const participants = await client
-              .conferences(conferences[0].sid)
-              .participants.list();
-
+            const participants = await client.conferences(conferences[0].sid).participants.list();
             if (participants.length >= 2) {
-              console.log(
-                `📵 GPP2 already answered (${participants.length} participants) - canceling cell leg ${CallSid}`
-              );
+              console.log(`📵 GPP2 already answered — canceling cell leg ${CallSid}`);
               await client.calls(CallSid).update({ status: 'canceled' });
             }
           }

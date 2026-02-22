@@ -1,104 +1,227 @@
 /**
- * Conference Status Callback
+ * TaskRouter Assignment Callback
  *
- * Called when conference events occur (start, end, join, leave).
- * Completes the task when the conference ends.
+ * Called when TaskRouter needs to assign a task to a worker.
+ * Returns instructions to dial the worker's browser client.
+ * For workers with simultaneous_ring=true, also dials their cell phone
+ * into the same named conference so they can answer either way.
  *
- * For simultaneous ring (simring-* conferences):
- * When conference-start fires, GPP2 has answered — cancel the cell leg
- * directly by its call SID.
+ * Uses a top-level Twilio client instead of dynamic import to avoid
+ * silent failures in Vercel's serverless environment.
  */
 import twilio from 'twilio';
 
+// Increase Vercel function timeout to handle Twilio API calls
+export const maxDuration = 30;
+
+const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
-const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
-const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!;
-const client = twilio(ACCOUNT_SID, AUTH_TOKEN);
+
+// Top-level client — avoids dynamic import issues in Vercel serverless
+const twilioClient = twilio(ACCOUNT_SID, TWILIO_AUTH_TOKEN);
 
 export async function POST(req: Request) {
   try {
+    const clonedReq = req.clone();
+    const bodyText = await clonedReq.text();
     const formData = await req.formData();
 
-    const statusCallbackEvent = formData.get('StatusCallbackEvent') as string;
-    const conferenceSid = formData.get('ConferenceSid') as string;
-    const callSid = formData.get('CallSid') as string;
-    const conferenceFriendlyName = formData.get('FriendlyName') as string;
+    // --- Signature validation ---
+    if (TWILIO_AUTH_TOKEN) {
+      const twilioSignature = req.headers.get('X-Twilio-Signature') || '';
+      const url = new URL(req.url);
+      const webhookUrl = url.toString();
+      const params: Record<string, string> = {};
+      new URLSearchParams(bodyText).forEach((value, key) => {
+        params[key] = value;
+      });
+      const isValid = twilio.validateRequest(
+        TWILIO_AUTH_TOKEN,
+        twilioSignature,
+        webhookUrl,
+        params
+      );
+      if (!isValid) {
+        console.error('❌ Invalid Twilio signature on assignment callback');
+        // Not blocking due to proxy/load balancer issues
+      }
+    }
+
+    const taskSid = formData.get('TaskSid') as string;
+    const reservationSid = formData.get('ReservationSid') as string;
+    const workerSid = formData.get('WorkerSid') as string;
+    const workerAttributes = formData.get('WorkerAttributes') as string;
+    const taskAttributes = formData.get('TaskAttributes') as string;
+
+    console.log('═══════════════════════════════════════════');
+    console.log('📋 TASKROUTER ASSIGNMENT CALLBACK');
+    console.log('═══════════════════════════════════════════');
+    console.log('TaskSid:', taskSid);
+    console.log('ReservationSid:', reservationSid);
+    console.log('WorkerSid:', workerSid);
+
+    let workerAttrs: {
+      email?: string;
+      contact_uri?: string;
+      simultaneous_ring?: boolean;
+      cell_phone?: string;
+    } = {};
+    let taskAttrs: { call_sid?: string; from?: string } = {};
+
+    try {
+      workerAttrs = JSON.parse(workerAttributes || '{}');
+      taskAttrs = JSON.parse(taskAttributes || '{}');
+    } catch {
+      console.error('Failed to parse attributes');
+    }
+
+    console.log('Worker email:', workerAttrs.email);
+    console.log('Simultaneous ring:', workerAttrs.simultaneous_ring ?? false);
+    console.log('Cell phone:', workerAttrs.cell_phone ?? 'none');
+    console.log('Call from:', taskAttrs.from);
+    console.log('Caller call_sid:', taskAttrs.call_sid ?? 'none');
+    console.log('═══════════════════════════════════════════');
 
     const url = new URL(req.url);
-    const taskSid = url.searchParams.get('taskSid');
-    const workspaceSid = url.searchParams.get('workspaceSid') || WORKSPACE_SID;
-    const cellCallSid = url.searchParams.get('cellCallSid');
+    const appUrl = `${url.protocol}//${url.host}`;
+    const workspaceSid = formData.get('WorkspaceSid') as string;
 
-    console.log('═══════════════════════════════════════════');
-    console.log('📞 CONFERENCE STATUS CALLBACK');
-    console.log('═══════════════════════════════════════════');
-    console.log('StatusCallbackEvent:', statusCallbackEvent);
-    console.log('ConferenceSid:', conferenceSid);
-    console.log('CallSid:', callSid);
-    console.log('FriendlyName:', conferenceFriendlyName);
-    console.log('TaskSid:', taskSid);
-    console.log('CellCallSid:', cellCallSid ?? 'none');
-    console.log('═══════════════════════════════════════════');
+    const bypassToken = process.env.VERCEL_BYPASS_TOKEN || '';
+    const bypassParam = bypassToken ? `&x-vercel-protection-bypass=${bypassToken}` : '';
 
-    if (!taskSid || !workspaceSid) {
-      console.error('❌ Missing taskSid or workspaceSid');
-      return new Response('Missing parameters', { status: 400 });
+    // ─────────────────────────────────────────────
+    // VOICEMAIL WORKER (unchanged)
+    // ─────────────────────────────────────────────
+    if (workerAttrs.email === 'voicemail@system') {
+      console.log('📼 Voicemail worker assigned - using redirect instruction');
+      const voicemailUrl = `${appUrl}/api/taskrouter/voicemail?taskSid=${taskSid}&workspaceSid=${workspaceSid}${bypassParam}`;
+      const callSid = taskAttrs.call_sid;
+
+      if (!callSid) {
+        console.error('❌ No call_sid in task attributes - cannot redirect');
+        return Response.json({ instruction: 'reject' });
+      }
+
+      const instruction = {
+        instruction: 'redirect',
+        call_sid: callSid,
+        url: voicemailUrl,
+        accept: true,
+        post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
+      };
+
+      console.log('📞 Redirect instruction:', instruction);
+
+      twilioClient.taskrouter.v1
+        .workspaces(workspaceSid)
+        .tasks(taskSid)
+        .update({
+          assignmentStatus: 'completed',
+          reason: 'Redirected to voicemail',
+        })
+        .then(() => console.log(`✅ Voicemail task ${taskSid} completed`))
+        .catch((err: Error) =>
+          console.error('⚠️ Failed to complete voicemail task:', err.message)
+        );
+
+      return Response.json(instruction);
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // SIMULTANEOUS RING: GPP2 answered — cancel the cell leg by SID
-    // ─────────────────────────────────────────────────────────────
-    if (
-      statusCallbackEvent === 'conference-start' && cellCallSid
-    ) {
-      console.log(`📵 GPP2 answered — canceling cell leg: ${cellCallSid}`);
+    // ─────────────────────────────────────────────
+    // SIMULTANEOUS RING
+    // ─────────────────────────────────────────────
+    if (workerAttrs.simultaneous_ring && workerAttrs.cell_phone) {
+      console.log(
+        '📱 Simultaneous ring enabled - dialing GPP2 + cell:',
+        workerAttrs.cell_phone
+      );
+
+      const conferenceName = `simring-${reservationSid}`;
+      const contactUri = workerAttrs.contact_uri || `client:${workerAttrs.email}`;
+      const callerCallSid = taskAttrs.call_sid || '';
+
+      const cellTwiml = `<?xml version="1.0" encoding="UTF-8"?>
+        <Response>
+          <Dial>
+            <Conference
+              startConferenceOnEnter="true"
+              endConferenceOnExit="true"
+              beep="false"
+              waitUrl="">
+              ${conferenceName}
+            </Conference>
+          </Dial>
+        </Response>`;
+
+      const cellStatusCallback = `${appUrl}/api/twilio-status?type=simring-cell&conferenceName=${encodeURIComponent(conferenceName)}&reservationSid=${reservationSid}&taskSid=${taskSid}&workspaceSid=${workspaceSid}&callerCallSid=${callerCallSid}&contactUri=${encodeURIComponent(contactUri)}${bypassParam}`;
+
+      // Dial cell — machineDetection cancels call if voicemail answers
+      // so the caller rolls over to the next available agent instead
+      let cellCallSid = '';
       try {
-        await client.calls(cellCallSid).update({ status: 'canceled' });
-        console.log(`✅ Cell leg ${cellCallSid} canceled`);
+        const call = await twilioClient.calls.create({
+          to: workerAttrs.cell_phone,
+          from: process.env.TWILIO_MAIN_NUMBER || '+18338547126',
+          twiml: cellTwiml,
+          timeout: 20,
+          machineDetection: 'Enable',
+          asyncAmd: 'true',
+          asyncAmdStatusCallback: `${appUrl}/api/twilio-status?type=simring-amd&conferenceName=${encodeURIComponent(conferenceName)}${bypassParam}`,
+          asyncAmdStatusCallbackMethod: 'POST',
+          statusCallback: cellStatusCallback,
+          statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
+          statusCallbackMethod: 'POST',
+        });
+        cellCallSid = call.sid;
+        console.log(`📱 Cell leg initiated: ${cellCallSid}`);
       } catch (err) {
-        console.warn(`⚠️ Could not cancel cell leg ${cellCallSid}:`, (err as Error).message);
+        console.error('❌ Failed to dial cell phone:', (err as Error).message);
       }
+
+      // Pass cellCallSid to conference callback so it can cancel
+      // the cell leg when GPP2 answers or hangs up
+      const conferenceStatusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}&cellCallSid=${cellCallSid}${bypassParam}`;
+
+      const instruction = {
+        instruction: 'conference',
+        to: contactUri,
+        from: taskAttrs.from || process.env.TWILIO_MAIN_NUMBER || '+18338547126',
+        post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
+        timeout: 20,
+        conference_friendly_name: conferenceName,
+        conference_status_callback: conferenceStatusCallbackUrl,
+        conference_status_callback_event: 'start, end, join, leave',
+        end_conference_on_exit: true,
+        end_conference_on_customer_exit: true,
+        reject_pending_reservations: true,
+      };
+
+      console.log('📞 Simultaneous ring conference instruction:', instruction);
+      return Response.json(instruction);
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // Complete the task when the conference ends (unchanged)
-    // ─────────────────────────────────────────────────────────────
-    if (statusCallbackEvent === 'conference-end') {
-      try {
-        const task = await client.taskrouter.v1
-          .workspaces(workspaceSid)
-          .tasks(taskSid)
-          .fetch();
+    // ─────────────────────────────────────────────
+    // NORMAL WORKER (unchanged)
+    // ─────────────────────────────────────────────
+    const conferenceStatusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}${bypassParam}`;
 
-        if (
-          task.assignmentStatus === 'assigned' ||
-          task.assignmentStatus === 'wrapping'
-        ) {
-          await client.taskrouter.v1
-            .workspaces(workspaceSid)
-            .tasks(taskSid)
-            .update({
-              assignmentStatus: 'completed',
-              reason: 'Conference ended',
-            });
-          console.log(
-            `✅ Task ${taskSid} completed (was ${task.assignmentStatus})`
-          );
-        } else {
-          console.log(
-            `ℹ️ Task is ${task.assignmentStatus}, skipping completion`
-          );
-        }
-      } catch (error) {
-        console.error('❌ Failed to complete task:', error);
-      }
-    } else {
-      console.log(`ℹ️ Conference event: ${statusCallbackEvent}`);
-    }
+    const instruction = {
+      instruction: 'conference',
+      to: workerAttrs.contact_uri || `client:${workerAttrs.email}`,
+      from: taskAttrs.from || process.env.TWILIO_MAIN_NUMBER || '+18338547126',
+      post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
+      timeout: 20,
+      conference_status_callback: conferenceStatusCallbackUrl,
+      conference_status_callback_event: 'start, end, join, leave',
+      end_conference_on_exit: true,
+      end_conference_on_customer_exit: true,
+      reject_pending_reservations: true,
+    };
 
-    return new Response('OK', { status: 200 });
+    console.log('📞 Conference instruction:', instruction);
+    return Response.json(instruction);
   } catch (error) {
-    console.error('❌ Conference status callback error:', error);
+    console.error('❌ Assignment callback error:', error);
     return new Response('Error', { status: 500 });
   }
 }
