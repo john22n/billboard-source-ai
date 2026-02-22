@@ -20,7 +20,7 @@ export async function POST(req: Request) {
     const bodyText = await clonedReq.text();
     const formData = await req.formData();
 
-    // Signature validation
+    // Signature validation — log only, not blocking
     if (TWILIO_AUTH_TOKEN) {
       const twilioSignature = req.headers.get('X-Twilio-Signature') || '';
       const webhookUrl = new URL(req.url).toString();
@@ -28,16 +28,14 @@ export async function POST(req: Request) {
       new URLSearchParams(bodyText).forEach(
         (value, key) => (params[key] = value)
       );
-      if (
-        !twilio.validateRequest(
-          TWILIO_AUTH_TOKEN,
-          twilioSignature,
-          webhookUrl,
-          params
-        )
-      ) {
-        console.error('❌ Invalid Twilio signature');
-        return new Response('Forbidden', { status: 403 });
+      const isValid = twilio.validateRequest(
+        TWILIO_AUTH_TOKEN,
+        twilioSignature,
+        webhookUrl,
+        params
+      );
+      if (!isValid) {
+        console.error('❌ Invalid Twilio signature on twilio-status (not blocking)');
       }
     }
 
@@ -108,7 +106,7 @@ export async function POST(req: Request) {
           }
         }
 
-        // Step 3 — Cancel the GPP2 ringing call by finding it via contactUri
+        // Step 3 — Cancel the GPP2 ringing call by contactUri
         if (contactUri) {
           try {
             console.log(`🔍 Looking for ringing GPP2 call to: ${contactUri}`);
@@ -139,7 +137,6 @@ export async function POST(req: Request) {
       }
 
       // ── Cell still ringing but GPP2 already answered ──
-      // Conference already has 2+ participants — cancel cell leg
       if (CallStatus === 'initiated' || CallStatus === 'ringing') {
         try {
           const conferences = await client.conferences.list({
