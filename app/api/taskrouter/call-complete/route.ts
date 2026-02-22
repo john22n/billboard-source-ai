@@ -5,7 +5,8 @@
  * Completes the task when the conference ends.
  *
  * For simultaneous ring (simring-* conferences):
- * When conference-start fires, GPP2 has answered — cancel the cell leg.
+ * When conference-start fires, GPP2 has answered — cancel the cell leg
+ * directly by its call SID.
  */
 import twilio from 'twilio';
 
@@ -26,7 +27,7 @@ export async function POST(req: Request) {
     const url = new URL(req.url);
     const taskSid = url.searchParams.get('taskSid');
     const workspaceSid = url.searchParams.get('workspaceSid') || WORKSPACE_SID;
-    const cellPhone = url.searchParams.get('cellPhone');
+    const cellCallSid = url.searchParams.get('cellCallSid');
 
     console.log('═══════════════════════════════════════════');
     console.log('📞 CONFERENCE STATUS CALLBACK');
@@ -36,7 +37,7 @@ export async function POST(req: Request) {
     console.log('CallSid:', callSid);
     console.log('FriendlyName:', conferenceFriendlyName);
     console.log('TaskSid:', taskSid);
-    console.log('CellPhone:', cellPhone ?? 'none');
+    console.log('CellCallSid:', cellCallSid ?? 'none');
     console.log('═══════════════════════════════════════════');
 
     if (!taskSid || !workspaceSid) {
@@ -45,39 +46,19 @@ export async function POST(req: Request) {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // SIMULTANEOUS RING: GPP2 answered — cancel the cell leg
-    //
-    // conference-start fires when the first agent leg answers.
-    // For simring conferences, that means GPP2 answered.
-    // Cancel the still-ringing cell leg immediately.
+    // SIMULTANEOUS RING: GPP2 answered — cancel the cell leg by SID
     // ─────────────────────────────────────────────────────────────
     if (
       statusCallbackEvent === 'conference-start' &&
       conferenceFriendlyName?.startsWith('simring-') &&
-      cellPhone
+      cellCallSid
     ) {
-      console.log(`📵 GPP2 answered — canceling cell leg to: ${cellPhone}`);
+      console.log(`📵 GPP2 answered — canceling cell leg: ${cellCallSid}`);
       try {
-        const ringingCalls = await client.calls.list({
-          to: cellPhone,
-          status: 'ringing',
-        });
-
-        if (ringingCalls.length > 0) {
-          for (const call of ringingCalls) {
-            console.log(`📵 Canceling cell ringing call: ${call.sid}`);
-            try {
-              await client.calls(call.sid).update({ status: 'canceled' });
-              console.log(`✅ Cell leg canceled`);
-            } catch (err) {
-              console.warn(`⚠️ Could not cancel cell leg:`, (err as Error).message);
-            }
-          }
-        } else {
-          console.log('ℹ️ No ringing cell calls found — may have already stopped');
-        }
+        await client.calls(cellCallSid).update({ status: 'canceled' });
+        console.log(`✅ Cell leg ${cellCallSid} canceled`);
       } catch (err) {
-        console.error('❌ Failed to cancel cell leg:', (err as Error).message);
+        console.warn(`⚠️ Could not cancel cell leg ${cellCallSid}:`, (err as Error).message);
       }
     }
 

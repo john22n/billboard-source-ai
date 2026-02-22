@@ -141,11 +141,6 @@ export async function POST(req: Request) {
       const conferenceName = `simring-${reservationSid}`;
       const contactUri = workerAttrs.contact_uri || `client:${workerAttrs.email}`;
       const callerCallSid = taskAttrs.call_sid || '';
-      const cellPhone = workerAttrs.cell_phone;
-
-      // Pass cellPhone to call-complete so it can cancel the cell leg
-      // when GPP2 answers first
-      const conferenceStatusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}&cellPhone=${encodeURIComponent(cellPhone)}${bypassParam}`;
 
       const cellTwiml = `<?xml version="1.0" encoding="UTF-8"?>
         <Response>
@@ -162,9 +157,11 @@ export async function POST(req: Request) {
 
       const cellStatusCallback = `${appUrl}/api/twilio-status?type=simring-cell&conferenceName=${encodeURIComponent(conferenceName)}&reservationSid=${reservationSid}&taskSid=${taskSid}&workspaceSid=${workspaceSid}&callerCallSid=${callerCallSid}&contactUri=${encodeURIComponent(contactUri)}${bypassParam}`;
 
+      // Dial cell and get its SID so we can pass it to the conference callback
+      let cellCallSid = '';
       try {
         const call = await twilioClient.calls.create({
-          to: cellPhone,
+          to: workerAttrs.cell_phone,
           from: process.env.TWILIO_MAIN_NUMBER || '+18338547126',
           twiml: cellTwiml,
           timeout: 20,
@@ -172,10 +169,15 @@ export async function POST(req: Request) {
           statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
           statusCallbackMethod: 'POST',
         });
-        console.log(`📱 Cell leg initiated: ${call.sid}`);
+        cellCallSid = call.sid;
+        console.log(`📱 Cell leg initiated: ${cellCallSid}`);
       } catch (err) {
         console.error('❌ Failed to dial cell phone:', (err as Error).message);
       }
+
+      // Pass cellCallSid to conference callback so it can cancel
+      // the cell leg immediately when GPP2 answers
+      const conferenceStatusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}&cellCallSid=${cellCallSid}${bypassParam}`;
 
       const instruction = {
         instruction: 'conference',
