@@ -49,9 +49,7 @@ export async function POST(req: Request) {
     // SIMULTANEOUS RING: GPP2 answered — cancel the cell leg by SID
     // ─────────────────────────────────────────────────────────────
     if (
-      statusCallbackEvent === 'conference-start' &&
-      conferenceFriendlyName?.startsWith('simring-') &&
-      cellCallSid
+      statusCallbackEvent === 'conference-start' && cellCallSid
     ) {
       console.log(`📵 GPP2 answered — canceling cell leg: ${cellCallSid}`);
       try {
