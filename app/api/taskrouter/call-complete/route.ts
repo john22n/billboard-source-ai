@@ -5,9 +5,7 @@
  * Completes the task when the conference ends.
  *
  * For simultaneous ring (simring-* conferences):
- * When a participant joins and the count reaches 2, it means one of
- * McDonald's legs (GPP2 or cell) has answered. The third leg still
- * ringing gets kicked so it doesn't keep ringing or hit voicemail.
+ * When conference-start fires, GPP2 has answered — cancel the cell leg.
  */
 import twilio from 'twilio';
 
@@ -28,6 +26,7 @@ export async function POST(req: Request) {
     const url = new URL(req.url);
     const taskSid = url.searchParams.get('taskSid');
     const workspaceSid = url.searchParams.get('workspaceSid') || WORKSPACE_SID;
+    const cellPhone = url.searchParams.get('cellPhone');
 
     console.log('═══════════════════════════════════════════');
     console.log('📞 CONFERENCE STATUS CALLBACK');
@@ -37,6 +36,7 @@ export async function POST(req: Request) {
     console.log('CallSid:', callSid);
     console.log('FriendlyName:', conferenceFriendlyName);
     console.log('TaskSid:', taskSid);
+    console.log('CellPhone:', cellPhone ?? 'none');
     console.log('═══════════════════════════════════════════');
 
     if (!taskSid || !workspaceSid) {
@@ -45,54 +45,39 @@ export async function POST(req: Request) {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // SIMULTANEOUS RING: Cancel the losing leg when one side answers.
+    // SIMULTANEOUS RING: GPP2 answered — cancel the cell leg
     //
-    // Participant count when participant-join fires:
-    //   1 = inbound caller just entered (waiting)
-    //   2 = one of McDonald's legs answered → kick the still-ringing leg
-    //   3 = both legs answered at almost the same time (race condition)
-    //       → kick the extra non-customer leg
-    //
-    // The inbound caller is always the oldest participant (joined first),
-    // so we use dateCreated to identify and protect them.
+    // conference-start fires when the first agent leg answers.
+    // For simring conferences, that means GPP2 answered.
+    // Cancel the still-ringing cell leg immediately.
     // ─────────────────────────────────────────────────────────────
     if (
-      statusCallbackEvent === 'participant-join' &&
-      conferenceFriendlyName?.startsWith('simring-')
+      statusCallbackEvent === 'conference-start' &&
+      conferenceFriendlyName?.startsWith('simring-') &&
+      cellPhone
     ) {
+      console.log(`📵 GPP2 answered — canceling cell leg to: ${cellPhone}`);
       try {
-        const participants = await client
-          .conferences(conferenceSid)
-          .participants.list();
+        const ringingCalls = await client.calls.list({
+          to: cellPhone,
+          status: 'ringing',
+        });
 
-        console.log(`👥 Simring conference participants: ${participants.length}`);
-
-        // Need at least 3 participants before there's a leg to kick:
-        // inbound caller + answering leg + still-ringing leg
-        if (participants.length >= 3) {
-          // Protect the inbound caller (oldest participant)
-          const oldest = participants.reduce((a, b) =>
-            new Date(a.dateCreated) < new Date(b.dateCreated) ? a : b
-          );
-
-          // The participant who just triggered this event answered
-          // Everyone else who isn't the caller and isn't the answering leg gets kicked
-          const toKick = participants.filter(
-            (p) => p.callSid !== callSid && p.callSid !== oldest.callSid
-          );
-
-          for (const leg of toKick) {
-            console.log(`📵 Canceling losing simring leg: ${leg.callSid}`);
+        if (ringingCalls.length > 0) {
+          for (const call of ringingCalls) {
+            console.log(`📵 Canceling cell ringing call: ${call.sid}`);
             try {
-              await client.calls(leg.callSid).update({ status: 'canceled' });
+              await client.calls(call.sid).update({ status: 'canceled' });
+              console.log(`✅ Cell leg canceled`);
             } catch (err) {
-              // Call may have already ended — not a problem
-              console.warn(`⚠️ Could not cancel leg ${leg.callSid}:`, err);
+              console.warn(`⚠️ Could not cancel cell leg:`, (err as Error).message);
             }
           }
+        } else {
+          console.log('ℹ️ No ringing cell calls found — may have already stopped');
         }
       } catch (err) {
-        console.error('⚠️ Simring leg cleanup error:', err);
+        console.error('❌ Failed to cancel cell leg:', (err as Error).message);
       }
     }
 

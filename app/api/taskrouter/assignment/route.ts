@@ -91,8 +91,6 @@ export async function POST(req: Request) {
     const bypassToken = process.env.VERCEL_BYPASS_TOKEN || '';
     const bypassParam = bypassToken ? `&x-vercel-protection-bypass=${bypassToken}` : '';
 
-    const conferenceStatusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}${bypassParam}`;
-
     // ─────────────────────────────────────────────
     // VOICEMAIL WORKER (unchanged)
     // ─────────────────────────────────────────────
@@ -143,6 +141,11 @@ export async function POST(req: Request) {
       const conferenceName = `simring-${reservationSid}`;
       const contactUri = workerAttrs.contact_uri || `client:${workerAttrs.email}`;
       const callerCallSid = taskAttrs.call_sid || '';
+      const cellPhone = workerAttrs.cell_phone;
+
+      // Pass cellPhone to call-complete so it can cancel the cell leg
+      // when GPP2 answers first
+      const conferenceStatusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}&cellPhone=${encodeURIComponent(cellPhone)}${bypassParam}`;
 
       const cellTwiml = `<?xml version="1.0" encoding="UTF-8"?>
         <Response>
@@ -157,13 +160,11 @@ export async function POST(req: Request) {
           </Dial>
         </Response>`;
 
-      // Pass callerCallSid and contactUri so twilio-status can bridge
-      // the caller and cancel the GPP2 ringing call when cell answers
       const cellStatusCallback = `${appUrl}/api/twilio-status?type=simring-cell&conferenceName=${encodeURIComponent(conferenceName)}&reservationSid=${reservationSid}&taskSid=${taskSid}&workspaceSid=${workspaceSid}&callerCallSid=${callerCallSid}&contactUri=${encodeURIComponent(contactUri)}${bypassParam}`;
 
       try {
         const call = await twilioClient.calls.create({
-          to: workerAttrs.cell_phone,
+          to: cellPhone,
           from: process.env.TWILIO_MAIN_NUMBER || '+18338547126',
           twiml: cellTwiml,
           timeout: 20,
@@ -197,6 +198,8 @@ export async function POST(req: Request) {
     // ─────────────────────────────────────────────
     // NORMAL WORKER (unchanged)
     // ─────────────────────────────────────────────
+    const conferenceStatusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}${bypassParam}`;
+
     const instruction = {
       instruction: 'conference',
       to: workerAttrs.contact_uri || `client:${workerAttrs.email}`,
