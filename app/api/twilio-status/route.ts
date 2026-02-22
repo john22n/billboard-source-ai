@@ -4,9 +4,8 @@
  * Handles general call status updates.
  *
  * For simultaneous ring cell legs (type=simring-cell):
- * - Cell answers (in-progress): accept the reservation with a conference
- *   instruction pointing to the named room so the caller gets dequeued
- *   into that conference. Then cancel the GPP2 leg.
+ * - Cell answers (in-progress): find and cancel the GPP2 leg since
+ *   the caller is already in the conference and connected to cell.
  * - Cell still ringing but GPP2 already answered: cancel the cell leg.
  */
 import twilio from 'twilio';
@@ -52,9 +51,6 @@ export async function POST(req: Request) {
     const url = new URL(req.url);
     const callType = url.searchParams.get('type');
     const conferenceName = url.searchParams.get('conferenceName');
-    const reservationSid = url.searchParams.get('reservationSid');
-    const taskSid = url.searchParams.get('taskSid');
-    const workspaceSid = url.searchParams.get('workspaceSid') || WORKSPACE_SID;
 
     console.log(`📊 Call status update: ${CallStatus}`, {
       CallSid,
@@ -73,28 +69,13 @@ export async function POST(req: Request) {
       const client = twilio(ACCOUNT_SID, TWILIO_AUTH_TOKEN!);
 
       // ── Cell answered ──
-      // Accept the reservation with a conference instruction pointing to
-      // the named room — this dequeues the caller into that conference.
-      // Then cancel the GPP2 leg so it stops ringing.
-      if (CallStatus === 'in-progress' && reservationSid && taskSid) {
-        console.log(`📱 Cell answered - bridging caller into conference: ${conferenceName}`);
+      // Caller is already in the conference and now connected to cell.
+      // Find and cancel the GPP2 leg so it stops ringing.
+      if (CallStatus === 'in-progress') {
+        console.log(`📱 Cell answered - canceling GPP2 leg`);
         try {
-          await client.taskrouter.v1
-            .workspaces(workspaceSid)
-            .tasks(taskSid)
-            .reservations(reservationSid)
-            .update({
-              reservationStatus: 'accepted',
-              instruction: 'conference',
-              conferenceFriendlyName: conferenceName,
-              endConferenceOnExit: true,
-              postWorkActivitySid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
-            }as any);
-          console.log(`✅ Caller dequeued into conference via cell answer`);
-
-          // Now cancel the GPP2 leg — find it in the conference
-          // Give Twilio a moment to update conference state
-          await new Promise((resolve) => setTimeout(resolve, 1000));
+          // Give conference a moment to fully establish
+          await new Promise((resolve) => setTimeout(resolve, 1500));
 
           const conferences = await client.conferences.list({
             friendlyName: conferenceName,
@@ -109,26 +90,28 @@ export async function POST(req: Request) {
 
             console.log(`👥 Conference participants: ${participants.length}`);
 
+            // Cancel all legs except the cell (current CallSid)
             for (const participant of participants) {
               if (participant.callSid !== CallSid) {
                 console.log(`📵 Canceling GPP2 leg: ${participant.callSid}`);
                 try {
                   await client.calls(participant.callSid).update({ status: 'canceled' });
+                  console.log(`✅ GPP2 leg canceled`);
                 } catch (err) {
                   console.warn(`⚠️ Could not cancel GPP2 leg:`, (err as Error).message);
                 }
               }
             }
           } else {
-            console.log('ℹ️ Conference not yet in-progress when trying to cancel GPP2');
+            console.log('ℹ️ Conference not in-progress yet — GPP2 will timeout naturally');
           }
         } catch (err) {
-          console.error('❌ Failed to bridge caller on cell answer:', (err as Error).message);
+          console.error('❌ Failed to cancel GPP2 on cell answer:', (err as Error).message);
         }
       }
 
       // ── Cell still ringing but GPP2 already answered ──
-      // Conference is already in-progress with 2+ participants — cancel cell
+      // Conference already has 2+ participants — cancel cell leg
       if (CallStatus === 'initiated' || CallStatus === 'ringing') {
         try {
           const conferences = await client.conferences.list({

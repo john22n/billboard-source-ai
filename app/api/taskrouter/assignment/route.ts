@@ -136,13 +136,16 @@ export async function POST(req: Request) {
     // SIMULTANEOUS RING
     //
     // Both GPP2 and cell join the same named conference room.
+    // TaskRouter puts the caller in the conference when it processes
+    // the conference instruction — so the caller is already waiting
+    // in the room when either device answers.
     //
-    // GPP2 answers → conference instruction connects caller automatically.
+    // GPP2 answers → conference starts, caller connects automatically.
     //   twilio-status sees cell still ringing and cancels it.
     //
-    // Cell answers → twilio-status accepts reservation with conference
-    //   instruction pointing to the named room, which dequeues the caller
-    //   into that same conference. GPP2 leg gets canceled.
+    // Cell answers (startConferenceOnEnter=true) → cell joins the room
+    //   where caller is already waiting, call connects immediately.
+    //   twilio-status finds GPP2 in conference and cancels it.
     // ─────────────────────────────────────────────
     if (workerAttrs.simultaneous_ring && workerAttrs.cell_phone) {
       console.log(
@@ -150,17 +153,15 @@ export async function POST(req: Request) {
         workerAttrs.cell_phone
       );
 
-      // Unique conference name tied to this reservation
       const conferenceName = `simring-${reservationSid}`;
 
-      // TwiML for the cell leg — joins the named conference room
-      // startConferenceOnEnter="false" means cell waits until GPP2 or
-      // caller joins before the conference starts
+      // Cell TwiML — startConferenceOnEnter=true so when cell answers
+      // it joins the conference where the caller is already waiting
       const cellTwiml = `<?xml version="1.0" encoding="UTF-8"?>
         <Response>
           <Dial>
             <Conference
-              startConferenceOnEnter="false"
+              startConferenceOnEnter="true"
               endConferenceOnExit="true"
               beep="false"
               waitUrl="">
@@ -187,10 +188,9 @@ export async function POST(req: Request) {
         console.error('❌ Failed to dial cell phone:', (err as Error).message);
       }
 
-      // Return conference instruction for GPP2 (browser client)
-      // conference_friendly_name links GPP2 to the same named room
-      // startConferenceOnEnter="true" on this leg starts the conference
-      // and dequeues the caller in when GPP2 answers
+      // Return conference instruction for GPP2
+      // TaskRouter puts the caller into this named conference room
+      // so they're waiting when either device answers
       const instruction = {
         instruction: 'conference',
         to: workerAttrs.contact_uri || `client:${workerAttrs.email}`,
