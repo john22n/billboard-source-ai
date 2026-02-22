@@ -20,23 +20,24 @@ export async function POST(req: Request) {
     const bodyText = await clonedReq.text();
     const formData = await req.formData();
 
-    // Proper signature validation — includes query params in URL
+    // Proper signature validation using forwarded host headers
+    // Vercel's req.url uses internal host — x-forwarded-host has the real external host
     if (TWILIO_AUTH_TOKEN) {
       const twilioSignature = req.headers.get('X-Twilio-Signature') || '';
-      const fullUrl = req.url; // full URL with query params — matches what Twilio signed
+      const proto = req.headers.get('x-forwarded-proto') || 'https';
+      const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || '';
+      const { pathname, search } = new URL(req.url);
+      const fullUrl = `${proto}://${host}${pathname}${search}`;
+
       const params: Record<string, string> = {};
-      new URLSearchParams(bodyText).forEach(
-        (value, key) => (params[key] = value)
-      );
-      const isValid = twilio.validateRequest(
-        TWILIO_AUTH_TOKEN,
-        twilioSignature,
-        fullUrl,
-        params
-      );
+      new URLSearchParams(bodyText).forEach((value, key) => (params[key] = value));
+
+      const isValid = twilio.validateRequest(TWILIO_AUTH_TOKEN, twilioSignature, fullUrl, params);
       if (!isValid) {
         console.error('❌ Invalid Twilio signature on twilio-status (not blocking)');
-        // Not blocking — proxy/load balancer may alter host header
+        console.error('URL used for validation:', fullUrl);
+      } else {
+        console.log('✅ Twilio signature valid');
       }
     }
 
