@@ -5,8 +5,7 @@
  *
  * For simultaneous ring cell legs (type=simring-cell):
  * - Cell answers (in-progress): redirect the inbound caller into the
- *   named conference, complete the task so TaskRouter stops routing,
- *   then cancel the GPP2 leg.
+ *   named conference, complete the task, then cancel the GPP2 ringing call.
  * - Cell still ringing but GPP2 already answered: cancel the cell leg.
  */
 import twilio from 'twilio';
@@ -53,6 +52,7 @@ export async function POST(req: Request) {
     const callType = url.searchParams.get('type');
     const conferenceName = url.searchParams.get('conferenceName');
     const callerCallSid = url.searchParams.get('callerCallSid');
+    const contactUri = url.searchParams.get('contactUri');
     const taskSid = url.searchParams.get('taskSid');
     const workspaceSid = url.searchParams.get('workspaceSid') || WORKSPACE_SID;
 
@@ -74,8 +74,8 @@ export async function POST(req: Request) {
 
       // ── Cell answered ──
       // 1. Redirect caller into the named conference
-      // 2. Complete the task so TaskRouter stops creating new reservations
-      // 3. Cancel the GPP2 leg
+      // 2. Complete the task so TaskRouter stops routing
+      // 3. Cancel the GPP2 ringing call directly by contactUri
       if (CallStatus === 'in-progress') {
         console.log(`📱 Cell answered - bridging caller into conference: ${conferenceName}`);
 
@@ -86,7 +86,7 @@ export async function POST(req: Request) {
             await client.calls(callerCallSid).update({ twiml: callerTwiml });
             console.log(`✅ Caller ${callerCallSid} redirected into conference`);
           } catch (err) {
-            console.error('❌ Failed to redirect caller into conference:', (err as Error).message);
+            console.error('❌ Failed to redirect caller:', (err as Error).message);
           }
         } else {
           console.warn('⚠️ No callerCallSid — cannot bridge caller');
@@ -102,45 +102,39 @@ export async function POST(req: Request) {
                 assignmentStatus: 'completed',
                 reason: 'Answered on cell phone',
               });
-            console.log(`✅ Task ${taskSid} completed — TaskRouter will stop routing`);
+            console.log(`✅ Task ${taskSid} completed`);
           } catch (err) {
             console.error('❌ Failed to complete task:', (err as Error).message);
           }
         }
 
-        // Step 3 — Cancel the GPP2 leg
-        try {
-          await new Promise((resolve) => setTimeout(resolve, 1500));
+        // Step 3 — Cancel the GPP2 ringing call by finding it via contactUri
+        if (contactUri) {
+          try {
+            console.log(`🔍 Looking for ringing GPP2 call to: ${contactUri}`);
+            const ringingCalls = await client.calls.list({
+              to: contactUri,
+              status: 'ringing',
+            });
 
-          const conferences = await client.conferences.list({
-            friendlyName: conferenceName,
-            status: 'in-progress',
-            limit: 1,
-          });
-
-          if (conferences.length > 0) {
-            const participants = await client
-              .conferences(conferences[0].sid)
-              .participants.list();
-
-            console.log(`👥 Conference participants: ${participants.length}`);
-
-            for (const participant of participants) {
-              if (participant.callSid !== CallSid && participant.callSid !== callerCallSid) {
-                console.log(`📵 Canceling GPP2 leg: ${participant.callSid}`);
+            if (ringingCalls.length > 0) {
+              for (const call of ringingCalls) {
+                console.log(`📵 Canceling GPP2 ringing call: ${call.sid}`);
                 try {
-                  await client.calls(participant.callSid).update({ status: 'canceled' });
-                  console.log(`✅ GPP2 leg canceled`);
+                  await client.calls(call.sid).update({ status: 'canceled' });
+                  console.log(`✅ GPP2 call canceled`);
                 } catch (err) {
-                  console.warn(`⚠️ Could not cancel GPP2 leg:`, (err as Error).message);
+                  console.warn(`⚠️ Could not cancel GPP2 call:`, (err as Error).message);
                 }
               }
+            } else {
+              console.log('ℹ️ No ringing GPP2 calls found — may have already stopped');
             }
-          } else {
-            console.log('ℹ️ Conference not in-progress yet — GPP2 will timeout naturally');
+          } catch (err) {
+            console.error('❌ Failed to find/cancel GPP2 call:', (err as Error).message);
           }
-        } catch (err) {
-          console.error('❌ Failed to cancel GPP2 on cell answer:', (err as Error).message);
+        } else {
+          console.warn('⚠️ No contactUri — cannot cancel GPP2 call');
         }
       }
 

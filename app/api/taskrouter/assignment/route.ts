@@ -88,8 +88,6 @@ export async function POST(req: Request) {
     const appUrl = `${url.protocol}//${url.host}`;
     const workspaceSid = formData.get('WorkspaceSid') as string;
 
-    // Append Vercel bypass token to all callback URLs so Twilio can reach
-    // them on preview deployments. No-op in production (token will be empty).
     const bypassToken = process.env.VERCEL_BYPASS_TOKEN || '';
     const bypassParam = bypassToken ? `&x-vercel-protection-bypass=${bypassToken}` : '';
 
@@ -135,15 +133,6 @@ export async function POST(req: Request) {
 
     // ─────────────────────────────────────────────
     // SIMULTANEOUS RING
-    //
-    // Both GPP2 and cell join the same named conference room.
-    //
-    // GPP2 answers → TaskRouter bridges caller into conference automatically.
-    //   twilio-status cancels cell leg.
-    //
-    // Cell answers → twilio-status redirects caller into the same conference
-    //   using the caller's call_sid passed via the status callback URL.
-    //   GPP2 leg gets canceled.
     // ─────────────────────────────────────────────
     if (workerAttrs.simultaneous_ring && workerAttrs.cell_phone) {
       console.log(
@@ -152,6 +141,8 @@ export async function POST(req: Request) {
       );
 
       const conferenceName = `simring-${reservationSid}`;
+      const contactUri = workerAttrs.contact_uri || `client:${workerAttrs.email}`;
+      const callerCallSid = taskAttrs.call_sid || '';
 
       const cellTwiml = `<?xml version="1.0" encoding="UTF-8"?>
         <Response>
@@ -166,12 +157,10 @@ export async function POST(req: Request) {
           </Dial>
         </Response>`;
 
-      // Pass caller's call_sid so twilio-status can bridge them into
-      // the conference if cell answers before GPP2
-      const callerCallSid = taskAttrs.call_sid || '';
-      const cellStatusCallback = `${appUrl}/api/twilio-status?type=simring-cell&conferenceName=${encodeURIComponent(conferenceName)}&reservationSid=${reservationSid}&taskSid=${taskSid}&workspaceSid=${workspaceSid}&callerCallSid=${callerCallSid}${bypassParam}`;
+      // Pass callerCallSid and contactUri so twilio-status can bridge
+      // the caller and cancel the GPP2 ringing call when cell answers
+      const cellStatusCallback = `${appUrl}/api/twilio-status?type=simring-cell&conferenceName=${encodeURIComponent(conferenceName)}&reservationSid=${reservationSid}&taskSid=${taskSid}&workspaceSid=${workspaceSid}&callerCallSid=${callerCallSid}&contactUri=${encodeURIComponent(contactUri)}${bypassParam}`;
 
-      // Dial cell phone — await so Vercel doesn't kill it
       try {
         const call = await twilioClient.calls.create({
           to: workerAttrs.cell_phone,
@@ -189,7 +178,7 @@ export async function POST(req: Request) {
 
       const instruction = {
         instruction: 'conference',
-        to: workerAttrs.contact_uri || `client:${workerAttrs.email}`,
+        to: contactUri,
         from: taskAttrs.from || process.env.TWILIO_MAIN_NUMBER || '+18338547126',
         post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
         timeout: 20,
