@@ -132,8 +132,9 @@ export async function POST(req: Request) {
           </Dial>
         </Response>`;
 
-      const cellStatusCallback = `${appUrl}/api/twilio-status?type=simring-cell&conferenceName=${encodeURIComponent(conferenceName)}&reservationSid=${reservationSid}&taskSid=${taskSid}&workspaceSid=${workspaceSid}&workerSid=${workerSid}&callerCallSid=${callerCallSid}&contactUri=${encodeURIComponent(contactUri)}${bypassParam}`;
-
+      // Note: cellCallSid is obtained after the call is created, so we build the
+      // conference callback URL after dialing the cell phone below.
+      
       let cellCallSid = '';
       try {
         const call = await twilioClient.calls.create({
@@ -145,14 +146,30 @@ export async function POST(req: Request) {
           asyncAmd: 'true',
           asyncAmdStatusCallback: `${appUrl}/api/twilio-status?type=simring-amd&conferenceName=${encodeURIComponent(conferenceName)}${bypassParam}`,
           asyncAmdStatusCallbackMethod: 'POST',
-          statusCallback: cellStatusCallback,
           statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
           statusCallbackMethod: 'POST',
+          // statusCallback is set below after we have cellCallSid
         });
         cellCallSid = call.sid;
         console.log(`📱 Cell leg initiated: ${cellCallSid}`);
       } catch (err) {
         console.error('❌ Failed to dial cell phone:', (err as Error).message);
+      }
+
+      // Now that we have cellCallSid, build the cell status callback URL with it
+      const cellStatusCallback = `${appUrl}/api/twilio-status?type=simring-cell&conferenceName=${encodeURIComponent(conferenceName)}&reservationSid=${reservationSid}&taskSid=${taskSid}&workspaceSid=${workspaceSid}&workerSid=${workerSid}&cellCallSid=${cellCallSid}&callerCallSid=${callerCallSid}&contactUri=${encodeURIComponent(contactUri)}${bypassParam}`;
+
+      // Update the cell call with the status callback (now that we have cellCallSid in the URL)
+      if (cellCallSid) {
+        try {
+          await twilioClient.calls(cellCallSid).update({
+            statusCallback: cellStatusCallback,
+            statusCallbackMethod: 'POST',
+          });
+          console.log(`✅ Cell status callback updated with cellCallSid`);
+        } catch (err) {
+          console.warn(`⚠️ Failed to update cell status callback: ${(err as Error).message}`);
+        }
       }
 
       const conferenceStatusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}&cellCallSid=${cellCallSid}&workerSid=${workerSid}${bypassParam}`;
