@@ -5,19 +5,14 @@
  * Returns instructions to dial the worker's browser client.
  * For workers with simultaneous_ring=true, also dials their cell phone
  * into the same named conference so they can answer either way.
- *
- * Uses a top-level Twilio client instead of dynamic import to avoid
- * silent failures in Vercel's serverless environment.
  */
 import twilio from 'twilio';
 
-// Increase Vercel function timeout to handle Twilio API calls
 export const maxDuration = 30;
 
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
 
-// Top-level client — avoids dynamic import issues in Vercel serverless
 const twilioClient = twilio(ACCOUNT_SID, TWILIO_AUTH_TOKEN);
 
 export async function POST(req: Request) {
@@ -26,24 +21,14 @@ export async function POST(req: Request) {
     const bodyText = await clonedReq.text();
     const formData = await req.formData();
 
-    // --- Signature validation ---
     if (TWILIO_AUTH_TOKEN) {
       const twilioSignature = req.headers.get('X-Twilio-Signature') || '';
-      const url = new URL(req.url);
-      const webhookUrl = url.toString();
+      const webhookUrl = new URL(req.url).toString();
       const params: Record<string, string> = {};
-      new URLSearchParams(bodyText).forEach((value, key) => {
-        params[key] = value;
-      });
-      const isValid = twilio.validateRequest(
-        TWILIO_AUTH_TOKEN,
-        twilioSignature,
-        webhookUrl,
-        params
-      );
+      new URLSearchParams(bodyText).forEach((value, key) => { params[key] = value; });
+      const isValid = twilio.validateRequest(TWILIO_AUTH_TOKEN, twilioSignature, webhookUrl, params);
       if (!isValid) {
         console.error('❌ Invalid Twilio signature on assignment callback');
-        // Not blocking due to proxy/load balancer issues
       }
     }
 
@@ -90,7 +75,7 @@ export async function POST(req: Request) {
     const bypassParam = bypassToken ? `&x-vercel-protection-bypass=${bypassToken}` : '';
 
     // ─────────────────────────────────────────────
-    // VOICEMAIL WORKER (unchanged)
+    // VOICEMAIL WORKER
     // ─────────────────────────────────────────────
     if (workerAttrs.email === 'voicemail@system') {
       console.log('📼 Voicemail worker assigned - using redirect instruction');
@@ -110,19 +95,12 @@ export async function POST(req: Request) {
         post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
       };
 
-      console.log('📞 Redirect instruction:', instruction);
-
       twilioClient.taskrouter.v1
         .workspaces(workspaceSid)
         .tasks(taskSid)
-        .update({
-          assignmentStatus: 'completed',
-          reason: 'Redirected to voicemail',
-        })
+        .update({ assignmentStatus: 'completed', reason: 'Redirected to voicemail' })
         .then(() => console.log(`✅ Voicemail task ${taskSid} completed`))
-        .catch((err: Error) =>
-          console.error('⚠️ Failed to complete voicemail task:', err.message)
-        );
+        .catch((err: Error) => console.error('⚠️ Failed to complete voicemail task:', err.message));
 
       return Response.json(instruction);
     }
@@ -131,20 +109,19 @@ export async function POST(req: Request) {
     // SIMULTANEOUS RING
     // ─────────────────────────────────────────────
     if (workerAttrs.simultaneous_ring && workerAttrs.cell_phone) {
-      console.log(
-        '📱 Simultaneous ring enabled - dialing GPP2 + cell:',
-        workerAttrs.cell_phone
-      );
+      console.log('📱 Simultaneous ring enabled - dialing GPP2 + cell:', workerAttrs.cell_phone);
 
       const conferenceName = `simring-${reservationSid}`;
       const contactUri = workerAttrs.contact_uri || `client:${workerAttrs.email}`;
       const callerCallSid = taskAttrs.call_sid || '';
 
+      // startConferenceOnEnter="false" — cell waits in room without bridging
+      // so AMD can detect and cancel voicemail before it connects to caller
       const cellTwiml = `<?xml version="1.0" encoding="UTF-8"?>
         <Response>
           <Dial>
             <Conference
-              startConferenceOnEnter="true"
+              startConferenceOnEnter="false"
               endConferenceOnExit="true"
               beep="false"
               waitUrl="">
@@ -155,8 +132,6 @@ export async function POST(req: Request) {
 
       const cellStatusCallback = `${appUrl}/api/twilio-status?type=simring-cell&conferenceName=${encodeURIComponent(conferenceName)}&reservationSid=${reservationSid}&taskSid=${taskSid}&workspaceSid=${workspaceSid}&callerCallSid=${callerCallSid}&contactUri=${encodeURIComponent(contactUri)}${bypassParam}`;
 
-      // Dial cell — machineDetection cancels call if voicemail answers
-      // so the caller rolls over to the next available agent instead
       let cellCallSid = '';
       try {
         const call = await twilioClient.calls.create({
@@ -178,8 +153,6 @@ export async function POST(req: Request) {
         console.error('❌ Failed to dial cell phone:', (err as Error).message);
       }
 
-      // Pass cellCallSid to conference callback so it can cancel
-      // the cell leg when GPP2 answers or hangs up
       const conferenceStatusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}&cellCallSid=${cellCallSid}${bypassParam}`;
 
       const instruction = {
@@ -201,7 +174,7 @@ export async function POST(req: Request) {
     }
 
     // ─────────────────────────────────────────────
-    // NORMAL WORKER (unchanged)
+    // NORMAL WORKER
     // ─────────────────────────────────────────────
     const conferenceStatusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}${bypassParam}`;
 

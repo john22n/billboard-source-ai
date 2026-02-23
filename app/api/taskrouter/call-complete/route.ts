@@ -2,11 +2,11 @@
  * Conference Status Callback
  *
  * Called when conference events occur (start, end, join, leave).
- * Completes the task when the conference ends.
  *
- * For simultaneous ring (simring conferences):
+ * For simultaneous ring:
  * - conference-start: GPP2 answered — cancel cell leg by SID
- * - conference-end: call ended — cancel cell leg in case it's still ringing
+ * - participant-leave: someone left — cancel cell leg in case GPP2 hung up
+ * - conference-end: clean up cell leg and complete the task
  */
 import twilio from 'twilio';
 
@@ -14,6 +14,16 @@ const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
 const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
 const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!;
 const client = twilio(ACCOUNT_SID, AUTH_TOKEN);
+
+async function cancelCellLeg(cellCallSid: string, reason: string) {
+  try {
+    await client.calls(cellCallSid).update({ status: 'canceled' });
+    console.log(`✅ Cell leg ${cellCallSid} canceled (${reason})`);
+  } catch (err) {
+    // Cell may have already ended — not a problem
+    console.log(`ℹ️ Cell leg already ended (${reason}): ${(err as Error).message}`);
+  }
+}
 
 export async function POST(req: Request) {
   try {
@@ -45,55 +55,35 @@ export async function POST(req: Request) {
       return new Response('Missing parameters', { status: 400 });
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // GPP2 answered — cancel cell leg immediately
-    // ─────────────────────────────────────────────────────────────
+    // ── GPP2 answered — cancel cell immediately ──
     if (statusCallbackEvent === 'conference-start' && cellCallSid) {
       console.log(`📵 GPP2 answered — canceling cell leg: ${cellCallSid}`);
-      try {
-        await client.calls(cellCallSid).update({ status: 'canceled' });
-        console.log(`✅ Cell leg ${cellCallSid} canceled`);
-      } catch (err) {
-        console.warn(`⚠️ Could not cancel cell leg ${cellCallSid}:`, (err as Error).message);
-      }
+      await cancelCellLeg(cellCallSid, 'GPP2 answered');
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // Conference ended — cancel cell leg if still ringing,
-    // then complete the task
-    // ─────────────────────────────────────────────────────────────
-    if (statusCallbackEvent === 'conference-end') {
+    // ── Someone left the conference — cancel cell in case GPP2 hung up ──
+    if (statusCallbackEvent === 'participant-leave' && cellCallSid) {
+      console.log(`📵 Participant left — canceling cell leg: ${cellCallSid}`);
+      await cancelCellLeg(cellCallSid, 'participant-leave');
+    }
 
-      // Cancel cell leg in case it's still ringing (e.g. GPP2 hung up)
+    // ── Conference ended — cancel cell and complete task ──
+    if (statusCallbackEvent === 'conference-end') {
       if (cellCallSid) {
-        console.log(`📵 Conference ended — canceling cell leg: ${cellCallSid}`);
-        try {
-          await client.calls(cellCallSid).update({ status: 'canceled' });
-          console.log(`✅ Cell leg ${cellCallSid} canceled on conference end`);
-        } catch (err) {
-          // Cell may have already ended — not a problem
-          console.log(`ℹ️ Cell leg already ended: ${(err as Error).message}`);
-        }
+        await cancelCellLeg(cellCallSid, 'conference-end');
       }
 
-      // Complete the task
       try {
         const task = await client.taskrouter.v1
           .workspaces(workspaceSid)
           .tasks(taskSid)
           .fetch();
 
-        if (
-          task.assignmentStatus === 'assigned' ||
-          task.assignmentStatus === 'wrapping'
-        ) {
+        if (task.assignmentStatus === 'assigned' || task.assignmentStatus === 'wrapping') {
           await client.taskrouter.v1
             .workspaces(workspaceSid)
             .tasks(taskSid)
-            .update({
-              assignmentStatus: 'completed',
-              reason: 'Conference ended',
-            });
+            .update({ assignmentStatus: 'completed', reason: 'Conference ended' });
           console.log(`✅ Task ${taskSid} completed (was ${task.assignmentStatus})`);
         } else {
           console.log(`ℹ️ Task already ${task.assignmentStatus}, skipping completion`);
@@ -106,7 +96,6 @@ export async function POST(req: Request) {
           console.error('❌ Failed to complete task:', error);
         }
       }
-
     } else {
       console.log(`ℹ️ Conference event: ${statusCallbackEvent}`);
     }
