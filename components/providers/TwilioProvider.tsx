@@ -45,13 +45,16 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
   const hasInitialized = useRef(false);
   const registrationTime = useRef<number>(0);
 
+  // ✅ Refs to store cell call info passed from assignment callback
+  const cellCallSidRef = useRef<string>('');
+  const conferenceNameRef = useRef<string>('');
+  const reservationSidRef = useRef<string>('');
+
   const onCallAcceptedRef = useRef<((call: Call) => void) | null>(null);
   const onCallDisconnectedRef = useRef<(() => void) | null>(null);
 
-  // Get worker status to determine if user is available for calls
   const { status: workerStatus } = useWorkerStatus();
 
-  // Debug: Log worker status changes
   useEffect(() => {
     console.log('👷 Worker status in TwilioProvider:', workerStatus);
   }, [workerStatus]);
@@ -64,16 +67,38 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
   const [deviceError, setDeviceError] = useState<string | null>(null);
   const [isDestroyed, setIsDestroyed] = useState(false);
 
-  // Helper to get appropriate status message based on worker availability
   const getReadyStatus = useCallback(() => {
     console.log('🔍 getReadyStatus called, workerStatus:', workerStatus);
     if (workerStatus === 'available') {
-      console.log('✅ Worker is available, returning "Ready to receive calls"');
       return 'Ready to receive calls';
     }
-    console.log('❌ Worker not available, returning "Offline"');
     return 'Offline';
   }, [workerStatus]);
+
+  // ✅ Helper to cancel the cell leg via our API endpoint
+  const cancelCellLeg = useCallback(async (reason: string) => {
+    const sid = cellCallSidRef.current;
+    if (!sid) {
+      console.log(`ℹ️ No cellCallSid to cancel (${reason})`);
+      return;
+    }
+    console.log(`📵 Canceling cell leg ${sid} (${reason})`);
+    try {
+      await fetch('/api/taskrouter/cancel-cell', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cellCallSid: sid }),
+      });
+      console.log(`✅ Cell leg cancel request sent (${reason})`);
+    } catch (err) {
+      console.error(`⚠️ Failed to cancel cell leg (${reason}):`, err);
+    } finally {
+      // Clear refs after use
+      cellCallSidRef.current = '';
+      conferenceNameRef.current = '';
+      reservationSidRef.current = '';
+    }
+  }, []);
 
   const initTwilio = useCallback(async () => {
     if (isInitializing.current) {
@@ -151,6 +176,14 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
           callSid: call.parameters.CallSid,
         });
 
+        // ✅ Capture cell call info from custom parameters set by assignment callback
+        cellCallSidRef.current = call.customParameters?.get('cellCallSid') || '';
+        conferenceNameRef.current = call.customParameters?.get('conferenceName') || '';
+        reservationSidRef.current = call.customParameters?.get('reservationSid') || '';
+
+        console.log('📱 Cell call SID from custom params:', cellCallSidRef.current || 'none (not a simring call)');
+        console.log('🏠 Conference name from custom params:', conferenceNameRef.current || 'none');
+
         setIncomingCall(call);
         setStatus(`Incoming call from ${call.parameters.From}`);
 
@@ -159,6 +192,10 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
           setCallActive(false);
           setIncomingCall(null);
           activeCall.current = null;
+          // Clear cell refs on disconnect too
+          cellCallSidRef.current = '';
+          conferenceNameRef.current = '';
+          reservationSidRef.current = '';
           onCallDisconnectedRef.current?.();
         });
 
@@ -175,6 +212,10 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
           console.log('📵 Call canceled (caller hung up)');
           setIncomingCall(null);
           setStatus('Call canceled');
+          // Clear cell refs on cancel too
+          cellCallSidRef.current = '';
+          conferenceNameRef.current = '';
+          reservationSidRef.current = '';
         });
 
         call.on('error', (error: Error) => {
@@ -285,18 +326,13 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
   useEffect(() => {
     console.log('🎬 TwilioProvider mounted - initializing device');
     console.log('Environment:', process.env.NODE_ENV);
-
     initTwilio();
-
-    // NO cleanup - device should persist for the lifetime of the app
-    // Only destroy when user logs out explicitly
   }, [initTwilio]);
 
   useEffect(() => {
     const checkInterval = setInterval(() => {
       if (twilioDevice.current) {
         const state = twilioDevice.current.state;
-
         if (state === 'destroyed' && hasInitialized.current) {
           console.error('⚠️ DEVICE WAS DESTROYED!');
           setIsDestroyed(true);
@@ -311,7 +347,6 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
     return () => clearInterval(checkInterval);
   }, []);
 
-  // Update status when worker availability changes
   useEffect(() => {
     console.log('🔄 Worker status changed:', {
       workerStatus,
@@ -363,15 +398,21 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
     }
   }, [incomingCall]);
 
+  // ✅ rejectCall now also cancels the cell leg since conference-end won't fire
   const rejectCall = useCallback(() => {
     if (incomingCall) {
       console.log('🚫 Rejecting call');
       incomingCall.reject();
       setIncomingCall(null);
       setStatus(twilioReady ? getReadyStatus() : "Idle");
-    }
-  }, [incomingCall, twilioReady, getReadyStatus]);
 
+      // Cancel the cell leg — conference never forms on reject so conference-end won't fire
+      cancelCellLeg('app-rejected');
+    }
+  }, [incomingCall, twilioReady, getReadyStatus, cancelCellLeg]);
+
+  // ✅ hangupCall now also cancels the cell leg as a safety net
+  // (conference-end should handle this too, but this ensures immediate cancellation)
   const hangupCall = useCallback(() => {
     if (activeCall.current) {
       console.log('📴 Hanging up call');
@@ -379,8 +420,11 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
       activeCall.current = null;
       setCallActive(false);
       onCallDisconnectedRef.current?.();
+
+      // Cancel the cell leg as a safety net in case conference-end is delayed/missed
+      cancelCellLeg('app-hangup');
     }
-  }, []);
+  }, [cancelCellLeg]);
 
   const destroyDevice = useCallback(() => {
     console.log('🧹 Destroying Twilio device for logout');
@@ -398,6 +442,9 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
     setDeviceError(null);
     setStatus('Idle');
     hasInitialized.current = false;
+    cellCallSidRef.current = '';
+    conferenceNameRef.current = '';
+    reservationSidRef.current = '';
   }, []);
 
   const updateStatus = useCallback((newStatus: string) => {

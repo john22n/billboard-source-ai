@@ -6,6 +6,7 @@
  * For simultaneous ring cell legs (type=simring-cell):
  * - Cell answers (in-progress): redirect caller into conference, complete task, cancel GPP2
  * - Cell still ringing but GPP2 answered: cancel cell leg
+ * - Cell declined / no-answer: reject the TaskRouter reservation so app stops ringing
  *
  * For AMD detection (type=simring-amd):
  * - Voicemail detected: cancel the cell leg so caller rolls to next agent
@@ -53,6 +54,7 @@ export async function POST(req: Request) {
     const taskSid = url.searchParams.get('taskSid');
     const workspaceSid = url.searchParams.get('workspaceSid') || WORKSPACE_SID;
     const workerSid = url.searchParams.get('workerSid');
+    const reservationSid = url.searchParams.get('reservationSid'); // ✅ used to stop app ringing on cell decline
 
     console.log(`📊 Call status update: ${CallStatus}`, {
       CallSid,
@@ -71,7 +73,11 @@ export async function POST(req: Request) {
     // AMD CALLBACK — voicemail detected, cancel cell leg
     // ─────────────────────────────────────────────────────────────
     if (callType === 'simring-amd') {
-      if (AnsweredBy === 'machine_start' || AnsweredBy === 'machine_end_beep' || AnsweredBy === 'machine_end_silence') {
+      if (
+        AnsweredBy === 'machine_start' ||
+        AnsweredBy === 'machine_end_beep' ||
+        AnsweredBy === 'machine_end_silence'
+      ) {
         console.log(`🤖 Voicemail detected (${AnsweredBy}) — canceling cell leg: ${CallSid}`);
         try {
           await client.calls(CallSid).update({ status: 'canceled' });
@@ -125,21 +131,17 @@ export async function POST(req: Request) {
         if (contactUri) {
           try {
             console.log(`🔍 Looking for ringing/in-progress GPP2 calls to: ${contactUri}`);
-            
-            // Check for both ringing AND in-progress calls (edge case: both answering simultaneously)
+
             const [ringingCalls, inProgressCalls] = await Promise.all([
               client.calls.list({ to: contactUri, status: 'ringing', limit: 10 }),
               client.calls.list({ to: contactUri, status: 'in-progress', limit: 10 }),
             ]);
-            
+
             const callsToCancel = [...ringingCalls, ...inProgressCalls];
-            
+
             if (callsToCancel.length > 0) {
               for (const call of callsToCancel) {
-                // Don't cancel the cell call itself
-                if (call.sid === CallSid) {
-                  continue;
-                }
+                if (call.sid === CallSid) continue;
                 try {
                   await client.calls(call.sid).update({ status: 'canceled' });
                   console.log(`✅ GPP2 call ${call.sid} canceled (status was ${call.status})`);
@@ -156,7 +158,7 @@ export async function POST(req: Request) {
         }
       }
 
-      // ── Cell still ringing but GPP2 already answered — cancel cell to prevent both ringing ──
+      // ── Cell still ringing but GPP2 already answered — cancel cell ──
       if (CallStatus === 'initiated' || CallStatus === 'ringing') {
         try {
           const conferences = await client.conferences.list({
@@ -165,8 +167,10 @@ export async function POST(req: Request) {
             limit: 1,
           });
           if (conferences.length > 0) {
-            const participants = await client.conferences(conferences[0].sid).participants.list();
-            // If 2+ participants: caller + GPP2 already in conference
+            const participants = await client
+              .conferences(conferences[0].sid)
+              .participants.list();
+            // 2+ participants means caller + GPP2 already in — cell is the odd one out
             if (participants.length >= 2) {
               console.log(`📵 GPP2 already answered — canceling cell leg ${CallSid}`);
               await client.calls(CallSid).update({ status: 'canceled' });
@@ -177,11 +181,45 @@ export async function POST(req: Request) {
         }
       }
 
-      // ── Cell no-answer / did not pick up (completed without in-progress) ──
-      if (CallStatus === 'completed' && CallDuration === '0') {
-        console.log(`⏱️  Cell call completed without being answered (no-answer timeout)`);
-        // If worker is offline/unavailable, task will be rejected by conference timeout
-        // No additional action needed — TaskRouter will reject and move to next agent
+      // ── Cell declined or no-answer — reject the reservation so app stops ringing ──
+      // This is the symmetric counterpart to rejectCall/hangupCall on the app side.
+      // When the agent presses ignore/decline on their cell, the app would keep ringing
+      // indefinitely without this. Rejecting the reservation tells TaskRouter to move on.
+      if (
+        CallStatus === 'no-answer' ||
+        CallStatus === 'canceled' ||
+        CallStatus === 'busy' ||
+        (CallStatus === 'completed' && (!CallDuration || CallDuration === '0'))
+      ) {
+        console.log(`📵 Cell declined/no-answer (${CallStatus}) — rejecting reservation to stop app ringing`);
+
+        if (reservationSid && workspaceSid && workerSid) {
+          try {
+            await client.taskrouter.v1
+              .workspaces(workspaceSid)
+              .workers(workerSid)
+              .reservations(reservationSid)
+              .update({ reservationStatus: 'rejected' });
+            console.log(`✅ Reservation ${reservationSid} rejected — app will stop ringing`);
+          } catch (err) {
+            const msg = (err as Error).message || '';
+            // Reservation may already be accepted/completed if app answered simultaneously
+            if (
+              msg.includes('already') ||
+              msg.includes('completed') ||
+              msg.includes('accepted')
+            ) {
+              console.log(`ℹ️ Reservation ${reservationSid} already resolved — no action needed`);
+            } else {
+              console.error('❌ Failed to reject reservation:', msg);
+            }
+          }
+        } else {
+          console.warn(
+            `⚠️ Cannot reject reservation — missing params:`,
+            { reservationSid, workspaceSid, workerSid }
+          );
+        }
       }
     }
 
