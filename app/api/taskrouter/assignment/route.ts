@@ -117,12 +117,14 @@ export async function POST(req: Request) {
 
       // startConferenceOnEnter="false" — cell waits in room without bridging
       // so AMD can detect and cancel voicemail before it connects to caller
+      // endConferenceOnExit="false" — cell exiting doesn't end conference, allowing
+      // caller to stay in conference if cell times out (rolls to next agent via TaskRouter)
       const cellTwiml = `<?xml version="1.0" encoding="UTF-8"?>
         <Response>
           <Dial>
             <Conference
               startConferenceOnEnter="false"
-              endConferenceOnExit="true"
+              endConferenceOnExit="false"
               beep="false"
               waitUrl="">
               ${conferenceName}

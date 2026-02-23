@@ -18,8 +18,15 @@ const client = twilio(ACCOUNT_SID, AUTH_TOKEN);
 
 async function cancelCellLeg(cellCallSid: string, reason: string) {
   try {
-    await client.calls(cellCallSid).update({ status: 'canceled' });
-    console.log(`✅ Cell leg ${cellCallSid} canceled (${reason})`);
+    // First, try to get the call status to determine which termination method to use
+    const call = await client.calls(cellCallSid).fetch();
+    
+    // For ringing/unanswered calls, use 'canceled'
+    // For in-progress calls, use 'completed'
+    const status = call.status === 'in-progress' ? 'completed' : 'canceled';
+    
+    await client.calls(cellCallSid).update({ status });
+    console.log(`✅ Cell leg ${cellCallSid} ${status} (${reason})`);
   } catch (err) {
     // Cell may have already ended — not a problem
     console.log(`ℹ️ Cell leg already ended (${reason}): ${(err as Error).message}`);
