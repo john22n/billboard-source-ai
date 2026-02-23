@@ -17,19 +17,27 @@ const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!;
 const client = twilio(ACCOUNT_SID, AUTH_TOKEN);
 
 async function cancelCellLeg(cellCallSid: string, reason: string) {
+  if (!cellCallSid) {
+    console.warn(`⚠️ cancelCellLeg called with empty cellCallSid (${reason})`);
+    return;
+  }
+
   try {
+    console.log(`🔍 Fetching cell call status for ${cellCallSid}...`);
     // First, try to get the call status to determine which termination method to use
     const call = await client.calls(cellCallSid).fetch();
+    console.log(`📞 Cell call status: ${call.status}`);
     
     // For ringing/unanswered calls, use 'canceled'
     // For in-progress calls, use 'completed'
     const status = call.status === 'in-progress' ? 'completed' : 'canceled';
+    console.log(`📤 Updating cell call to status: ${status}`);
     
     await client.calls(cellCallSid).update({ status });
     console.log(`✅ Cell leg ${cellCallSid} ${status} (${reason})`);
   } catch (err) {
     // Cell may have already ended — not a problem
-    console.log(`ℹ️ Cell leg already ended (${reason}): ${(err as Error).message}`);
+    console.error(`❌ Error canceling cell leg (${reason}): ${(err as Error).message}`);
   }
 }
 
@@ -70,7 +78,7 @@ export async function POST(req: Request) {
     console.log('FriendlyName:', conferenceFriendlyName);
     console.log('TaskSid:', taskSid);
     console.log('WorkerSid:', workerSid ?? 'none');
-    console.log('CellCallSid:', cellCallSid ?? 'none');
+    console.log('CellCallSid from URL:', cellCallSid ?? 'NONE - NOT PASSED');
     console.log('═══════════════════════════════════════════');
 
     if (!taskSid || !workspaceSid) {
@@ -79,18 +87,30 @@ export async function POST(req: Request) {
     }
 
     // ── Someone answered — cancel cell leg if it exists ──
-    if (statusCallbackEvent === 'conference-start' && cellCallSid) {
-      console.log(`📱 Someone answered the call — canceling cell leg: ${cellCallSid}`);
-      await cancelCellLeg(cellCallSid, 'conference-start');
+    if (statusCallbackEvent === 'conference-start') {
+      console.log(`📱 conference-start event fired`);
+      if (cellCallSid) {
+        console.log(`📱 Someone answered the call — canceling cell leg: ${cellCallSid}`);
+        await cancelCellLeg(cellCallSid, 'conference-start');
+      } else {
+        console.warn(`⚠️ conference-start fired but cellCallSid is empty`);
+      }
     }
 
     // ── Someone left the conference ──
-    if (statusCallbackEvent === 'participant-leave' && conferenceSid && cellCallSid) {
-      // The callSid in the participant-leave event is the call that LEFT the conference.
-      // If it's not the cell call, then the GPP2 worker left, so we should cancel the cell.
-      if (callSid !== cellCallSid) {
-        console.log(`📵 Worker left conference (${callSid}) — canceling cell leg: ${cellCallSid}`);
-        await cancelCellLeg(cellCallSid, 'worker-left');
+    if (statusCallbackEvent === 'participant-leave') {
+      console.log(`📵 participant-leave event fired. CallSid: ${callSid}`);
+      if (cellCallSid) {
+        // The callSid in the participant-leave event is the call that LEFT the conference.
+        // If it's not the cell call, then the GPP2 worker left, so we should cancel the cell.
+        if (callSid !== cellCallSid) {
+          console.log(`📵 Worker left conference (${callSid}) — canceling cell leg: ${cellCallSid}`);
+          await cancelCellLeg(cellCallSid, 'worker-left');
+        } else {
+          console.log(`📵 Cell itself left the conference, no action needed`);
+        }
+      } else {
+        console.warn(`⚠️ participant-leave fired but cellCallSid is empty`);
       }
     }
 
