@@ -85,13 +85,11 @@ export async function POST(req: Request) {
     }
 
     // ── Someone left the conference ──
-    if (statusCallbackEvent === 'participant-leave' && conferenceSid) {
-      const participants = await getConferenceParticipants(conferenceSid);
-      console.log(`👤 Participant left. Remaining participants: ${participants.length}`);
-
-      // If only 1 participant left (caller or worker), cancel cell leg
-      if (participants.length === 1 && cellCallSid) {
-        console.log(`📵 Worker left conference — canceling cell leg: ${cellCallSid}`);
+    if (statusCallbackEvent === 'participant-leave' && conferenceSid && cellCallSid) {
+      // The callSid in the participant-leave event is the call that LEFT the conference.
+      // If it's not the cell call, then the GPP2 worker left, so we should cancel the cell.
+      if (callSid !== cellCallSid) {
+        console.log(`📵 Worker left conference (${callSid}) — canceling cell leg: ${cellCallSid}`);
         await cancelCellLeg(cellCallSid, 'worker-left');
       }
     }
