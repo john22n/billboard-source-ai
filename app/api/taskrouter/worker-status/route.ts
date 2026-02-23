@@ -6,6 +6,9 @@
  *
  * Preserves existing worker attributes (e.g. simultaneous_ring, cell_phone)
  * by merging instead of replacing when updating.
+ *
+ * When a worker goes offline/unavailable with simultaneous_ring enabled:
+ * - Cancels any pending cell phone calls so caller doesn't hang indefinitely
  */
 
 import twilio from 'twilio';
@@ -195,6 +198,74 @@ export async function POST(req: Request) {
         taskRouterWorkerSid: workerSid,
       })
       .where(eq(user.id, currentUser.id));
+
+    // ─────────────────────────────────────────────
+    // CLEANUP: Going offline/unavailable with simring enabled
+    // Cancel any ringing cell calls to prevent caller hanging
+    // ─────────────────────────────────────────────
+    if ((effectiveStatus === 'offline' || effectiveStatus === 'unavailable') && workerSid) {
+      try {
+        // Fetch worker attributes to check simultaneous_ring flag
+        let workerAttrs: Record<string, unknown> = {};
+        try {
+          const existingWorker = await client.taskrouter.v1
+            .workspaces(WORKSPACE_SID)
+            .workers(workerSid)
+            .fetch();
+          workerAttrs = JSON.parse(existingWorker.attributes || '{}');
+        } catch (err) {
+          console.warn('⚠️ Could not fetch worker attributes during offline cleanup:', err);
+        }
+
+        // If simultaneous_ring is enabled, cancel ringing cell calls
+        if ((workerAttrs as any).simultaneous_ring && (workerAttrs as any).cell_phone) {
+          console.log(`📱 Worker going ${effectiveStatus} with simring enabled — canceling ringing cell calls`);
+          
+          const contactUri = (workerAttrs as any).contact_uri || `client:${currentUser.email}`;
+          try {
+            const ringingCalls = await client.calls.list({ 
+              to: (workerAttrs as any).cell_phone, 
+              status: 'ringing', 
+              limit: 10 
+            });
+            
+            if (ringingCalls.length > 0) {
+              for (const call of ringingCalls) {
+                try {
+                  await client.calls(call.sid).update({ status: 'canceled' });
+                  console.log(`✅ Cell call ${call.sid} canceled on worker ${effectiveStatus}`);
+                } catch (err) {
+                  console.warn(`⚠️ Could not cancel cell call:`, (err as Error).message);
+                }
+              }
+            }
+
+            // Also cancel any in-progress GPP2 calls (clean shutdown)
+            const inProgressGPP2 = await client.calls.list({
+              to: contactUri,
+              status: 'in-progress',
+              limit: 10,
+            });
+            
+            if (inProgressGPP2.length > 0) {
+              console.log(`⏹️  Worker ${effectiveStatus} — canceling ${inProgressGPP2.length} in-progress GPP2 calls`);
+              for (const call of inProgressGPP2) {
+                try {
+                  await client.calls(call.sid).update({ status: 'canceled' });
+                  console.log(`✅ GPP2 call ${call.sid} canceled on worker ${effectiveStatus}`);
+                } catch (err) {
+                  console.warn(`⚠️ Could not cancel GPP2 call:`, (err as Error).message);
+                }
+              }
+            }
+          } catch (err) {
+            console.warn('⚠️ Simring cleanup on offline failed:', (err as Error).message);
+          }
+        }
+      } catch (err) {
+        console.warn('⚠️ Offline cleanup error:', err);
+      }
+    }
 
     // Broadcast to SSE clients immediately
     if (sseManager.hasConnections(currentUser.id)) {

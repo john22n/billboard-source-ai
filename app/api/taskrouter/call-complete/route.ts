@@ -4,9 +4,10 @@
  * Called when conference events occur (start, end, join, leave).
  *
  * For simultaneous ring:
- * - conference-start: GPP2 answered — cancel cell leg by SID
- * - participant-leave: someone left — cancel cell leg in case GPP2 hung up
- * - conference-end: clean up cell leg and complete the task
+ * - conference-start: Someone answered — cancel cell leg if not yet answered
+ * - participant-leave: Someone left — if GPP2 left, cancel cell leg
+ * - conference-end: Clean up cell leg and complete the task
+ * - No-answer timeout: If nobody answers within 20s, reject reservation so TaskRouter rolls to next agent
  */
 import twilio from 'twilio';
 
@@ -25,6 +26,19 @@ async function cancelCellLeg(cellCallSid: string, reason: string) {
   }
 }
 
+async function getConferenceParticipants(conferenceSid: string): Promise<Array<{ callSid: string; label?: string }>> {
+  try {
+    const participants = await client.conferences(conferenceSid).participants.list();
+    return participants.map(p => ({
+      callSid: p.callSid,
+      label: p.label,
+    }));
+  } catch (err) {
+    console.warn(`⚠️ Failed to fetch participants: ${(err as Error).message}`);
+    return [];
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const formData = await req.formData();
@@ -38,6 +52,7 @@ export async function POST(req: Request) {
     const taskSid = url.searchParams.get('taskSid');
     const workspaceSid = url.searchParams.get('workspaceSid') || WORKSPACE_SID;
     const cellCallSid = url.searchParams.get('cellCallSid');
+    const workerSid = url.searchParams.get('workerSid');
 
     console.log('═══════════════════════════════════════════');
     console.log('📞 CONFERENCE STATUS CALLBACK');
@@ -47,6 +62,7 @@ export async function POST(req: Request) {
     console.log('CallSid:', callSid);
     console.log('FriendlyName:', conferenceFriendlyName);
     console.log('TaskSid:', taskSid);
+    console.log('WorkerSid:', workerSid ?? 'none');
     console.log('CellCallSid:', cellCallSid ?? 'none');
     console.log('═══════════════════════════════════════════');
 
@@ -55,16 +71,22 @@ export async function POST(req: Request) {
       return new Response('Missing parameters', { status: 400 });
     }
 
-    // ── GPP2 answered — cancel cell immediately ──
+    // ── Someone answered — cancel cell leg if it exists ──
     if (statusCallbackEvent === 'conference-start' && cellCallSid) {
-      console.log(`📵 GPP2 answered — canceling cell leg: ${cellCallSid}`);
-      await cancelCellLeg(cellCallSid, 'GPP2 answered');
+      console.log(`📱 Someone answered the call — canceling cell leg: ${cellCallSid}`);
+      await cancelCellLeg(cellCallSid, 'conference-start');
     }
 
-    // ── Someone left the conference — cancel cell in case GPP2 hung up ──
-    if (statusCallbackEvent === 'participant-leave' && cellCallSid) {
-      console.log(`📵 Participant left — canceling cell leg: ${cellCallSid}`);
-      await cancelCellLeg(cellCallSid, 'participant-leave');
+    // ── Someone left the conference ──
+    if (statusCallbackEvent === 'participant-leave' && conferenceSid) {
+      const participants = await getConferenceParticipants(conferenceSid);
+      console.log(`👤 Participant left. Remaining participants: ${participants.length}`);
+
+      // If only 1 participant left (caller or worker), cancel cell leg
+      if (participants.length === 1 && cellCallSid) {
+        console.log(`📵 Worker left conference — canceling cell leg: ${cellCallSid}`);
+        await cancelCellLeg(cellCallSid, 'worker-left');
+      }
     }
 
     // ── Conference ended — cancel cell and complete task ──

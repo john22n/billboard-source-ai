@@ -37,6 +37,7 @@ export async function POST(req: Request) {
     const workerSid = formData.get('WorkerSid') as string;
     const workerAttributes = formData.get('WorkerAttributes') as string;
     const taskAttributes = formData.get('TaskAttributes') as string;
+    const workspaceSid = formData.get('WorkspaceSid') as string;
 
     console.log('═══════════════════════════════════════════');
     console.log('📋 TASKROUTER ASSIGNMENT CALLBACK');
@@ -69,7 +70,6 @@ export async function POST(req: Request) {
 
     const url = new URL(req.url);
     const appUrl = `${url.protocol}//${url.host}`;
-    const workspaceSid = formData.get('WorkspaceSid') as string;
 
     const bypassToken = process.env.VERCEL_BYPASS_TOKEN || '';
     const bypassParam = bypassToken ? `&x-vercel-protection-bypass=${bypassToken}` : '';
@@ -130,7 +130,7 @@ export async function POST(req: Request) {
           </Dial>
         </Response>`;
 
-      const cellStatusCallback = `${appUrl}/api/twilio-status?type=simring-cell&conferenceName=${encodeURIComponent(conferenceName)}&reservationSid=${reservationSid}&taskSid=${taskSid}&workspaceSid=${workspaceSid}&callerCallSid=${callerCallSid}&contactUri=${encodeURIComponent(contactUri)}${bypassParam}`;
+      const cellStatusCallback = `${appUrl}/api/twilio-status?type=simring-cell&conferenceName=${encodeURIComponent(conferenceName)}&reservationSid=${reservationSid}&taskSid=${taskSid}&workspaceSid=${workspaceSid}&workerSid=${workerSid}&callerCallSid=${callerCallSid}&contactUri=${encodeURIComponent(contactUri)}${bypassParam}`;
 
       let cellCallSid = '';
       try {
@@ -153,7 +153,7 @@ export async function POST(req: Request) {
         console.error('❌ Failed to dial cell phone:', (err as Error).message);
       }
 
-      const conferenceStatusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}&cellCallSid=${cellCallSid}${bypassParam}`;
+      const conferenceStatusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}&cellCallSid=${cellCallSid}&workerSid=${workerSid}${bypassParam}`;
 
       const instruction = {
         instruction: 'conference',

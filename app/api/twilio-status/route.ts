@@ -52,6 +52,7 @@ export async function POST(req: Request) {
     const contactUri = url.searchParams.get('contactUri');
     const taskSid = url.searchParams.get('taskSid');
     const workspaceSid = url.searchParams.get('workspaceSid') || WORKSPACE_SID;
+    const workerSid = url.searchParams.get('workerSid');
 
     console.log(`📊 Call status update: ${CallStatus}`, {
       CallSid,
@@ -120,21 +121,34 @@ export async function POST(req: Request) {
           }
         }
 
+        // ── Cancel any ringing GPP2 devices ──
         if (contactUri) {
           try {
-            console.log(`🔍 Looking for ringing GPP2 call to: ${contactUri}`);
-            const ringingCalls = await client.calls.list({ to: contactUri, status: 'ringing' });
-            if (ringingCalls.length > 0) {
-              for (const call of ringingCalls) {
+            console.log(`🔍 Looking for ringing/in-progress GPP2 calls to: ${contactUri}`);
+            
+            // Check for both ringing AND in-progress calls (edge case: both answering simultaneously)
+            const [ringingCalls, inProgressCalls] = await Promise.all([
+              client.calls.list({ to: contactUri, status: 'ringing', limit: 10 }),
+              client.calls.list({ to: contactUri, status: 'in-progress', limit: 10 }),
+            ]);
+            
+            const callsToCancel = [...ringingCalls, ...inProgressCalls];
+            
+            if (callsToCancel.length > 0) {
+              for (const call of callsToCancel) {
+                // Don't cancel the cell call itself
+                if (call.sid === CallSid) {
+                  continue;
+                }
                 try {
                   await client.calls(call.sid).update({ status: 'canceled' });
-                  console.log(`✅ GPP2 call ${call.sid} canceled`);
+                  console.log(`✅ GPP2 call ${call.sid} canceled (status was ${call.status})`);
                 } catch (err) {
                   console.warn(`⚠️ Could not cancel GPP2 call:`, (err as Error).message);
                 }
               }
             } else {
-              console.log('ℹ️ No ringing GPP2 calls found');
+              console.log('ℹ️ No ringing or in-progress GPP2 calls found');
             }
           } catch (err) {
             console.error('❌ Failed to cancel GPP2 call:', (err as Error).message);
@@ -142,7 +156,7 @@ export async function POST(req: Request) {
         }
       }
 
-      // ── Cell still ringing but GPP2 already answered ──
+      // ── Cell still ringing but GPP2 already answered — cancel cell to prevent both ringing ──
       if (CallStatus === 'initiated' || CallStatus === 'ringing') {
         try {
           const conferences = await client.conferences.list({
@@ -152,6 +166,7 @@ export async function POST(req: Request) {
           });
           if (conferences.length > 0) {
             const participants = await client.conferences(conferences[0].sid).participants.list();
+            // If 2+ participants: caller + GPP2 already in conference
             if (participants.length >= 2) {
               console.log(`📵 GPP2 already answered — canceling cell leg ${CallSid}`);
               await client.calls(CallSid).update({ status: 'canceled' });
@@ -160,6 +175,13 @@ export async function POST(req: Request) {
         } catch (err) {
           console.warn('⚠️ Simring cleanup failed:', (err as Error).message);
         }
+      }
+
+      // ── Cell no-answer / did not pick up (completed without in-progress) ──
+      if (CallStatus === 'completed' && CallDuration === '0') {
+        console.log(`⏱️  Cell call completed without being answered (no-answer timeout)`);
+        // If worker is offline/unavailable, task will be rejected by conference timeout
+        // No additional action needed — TaskRouter will reject and move to next agent
       }
     }
 
