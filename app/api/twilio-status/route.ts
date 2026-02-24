@@ -138,18 +138,11 @@ export async function POST(req: Request) {
           console.warn('⚠️ No callerCallSid — cannot bridge caller');
         }
 
-        // Complete the task in TaskRouter
-        if (taskSid) {
-          try {
-            await client.taskrouter.v1
-              .workspaces(workspaceSid)
-              .tasks(taskSid)
-              .update({ assignmentStatus: 'completed', reason: 'Answered on cell phone' });
-            console.log(`✅ Task ${taskSid} completed`);
-          } catch (err) {
-            console.error('❌ Failed to complete task:', (err as Error).message);
-          }
-        }
+        // ✅ Do NOT complete the task here — keeping it alive keeps the caller connected.
+        // If we complete the task now, TaskRouter drops the caller leg immediately.
+        // Task is completed either by call-complete (conference-end) or
+        // by the cell-hangup block below when we re-enqueue the caller.
+        console.log(`ℹ️ Task ${taskSid} left alive — caller stays connected until cell hangs up`);
 
         // ✅ Cancel any ringing GPP2 app calls using raw fetch (avoids SDK type issues)
         if (contactUri) {
@@ -227,54 +220,64 @@ export async function POST(req: Request) {
           console.warn('⚠️ No callerCallSid — cannot re-enqueue caller');
         }
 
-        // Reject the reservation so TaskRouter reassigns to next available agent
-        if (reservationSid && workspaceSid && workerSid) {
+        // ✅ Complete the original task now that caller is being re-enqueued
+        // This is safe here because the caller is still connected (endConferenceOnExit=false)
+        if (taskSid) {
           try {
             await client.taskrouter.v1
               .workspaces(workspaceSid)
-              .workers(workerSid)
-              .reservations(reservationSid)
-              .update({ reservationStatus: 'rejected' });
-            console.log(`✅ Reservation ${reservationSid} rejected — next agent will ring`);
+              .tasks(taskSid)
+              .update({ assignmentStatus: 'completed', reason: 'Cell phone hung up — re-enqueued' });
+            console.log(`✅ Original task ${taskSid} completed`);
           } catch (err) {
             const msg = (err as Error).message || '';
-            if (msg.includes('already') || msg.includes('completed') || msg.includes('accepted')) {
-              console.log(`ℹ️ Reservation already resolved — skipping`);
-            } else {
-              console.error('❌ Failed to reject reservation:', msg);
+            if (!msg.includes('already') && !msg.includes('completed')) {
+              console.error('❌ Failed to complete original task:', msg);
             }
           }
         }
       }
 
 
-      // ── Cell declined or no-answer — reject reservation so app stops ringing ──
+      // ── Cell declined or no-answer — complete the task so app stops ringing ──
+      // Reservations are already in 'accepted' state by the time we get here
+      // (TaskRouter moves them from pending→accepted when assignment callback fires),
+      // so we cannot reject them. Completing the task is the correct way to stop
+      // the app ringing and free the worker for the next call.
       if (
         CallStatus === 'no-answer' ||
         CallStatus === 'busy' ||
         (CallStatus === 'canceled' && (!CallDuration || CallDuration === '0')) ||
         (CallStatus === 'completed' && (!CallDuration || CallDuration === '0'))
       ) {
-        console.log(`📵 Cell declined/no-answer (${CallStatus}) — rejecting reservation to stop app ringing`);
+        console.log(`📵 Cell declined/no-answer (${CallStatus}) — completing task to stop app ringing`);
 
-        if (reservationSid && workspaceSid && workerSid) {
+        if (taskSid && workspaceSid) {
           try {
-            await client.taskrouter.v1
+            const task = await client.taskrouter.v1
               .workspaces(workspaceSid)
-              .workers(workerSid)
-              .reservations(reservationSid)
-              .update({ reservationStatus: 'rejected' });
-            console.log(`✅ Reservation ${reservationSid} rejected — app will stop ringing`);
+              .tasks(taskSid)
+              .fetch();
+
+            if (task.assignmentStatus === 'assigned' || task.assignmentStatus === 'wrapping') {
+              await client.taskrouter.v1
+                .workspaces(workspaceSid)
+                .tasks(taskSid)
+                .update({ assignmentStatus: 'completed', reason: 'Cell declined — no answer' });
+              console.log(`✅ Task ${taskSid} completed — app will stop ringing`);
+            } else {
+              console.log(`ℹ️ Task already ${task.assignmentStatus} — skipping`);
+            }
           } catch (err) {
             const msg = (err as Error).message || '';
-            if (msg.includes('already') || msg.includes('completed') || msg.includes('accepted')) {
-              console.log(`ℹ️ Reservation ${reservationSid} already resolved — no action needed`);
+            if (msg.includes('already') || msg.includes('completed')) {
+              console.log(`ℹ️ Task ${taskSid} already resolved — no action needed`);
             } else {
-              console.error('❌ Failed to reject reservation:', msg);
+              console.error('❌ Failed to complete task:', msg);
             }
           }
         } else {
-          console.warn(`⚠️ Cannot reject reservation — missing params:`, { reservationSid, workspaceSid, workerSid });
+          console.warn(`⚠️ Cannot complete task — missing params:`, { taskSid, workspaceSid });
         }
       }
     }
