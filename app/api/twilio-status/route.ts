@@ -202,43 +202,49 @@ export async function POST(req: Request) {
         }
       }
 
-      // ── Cell hung up mid-call (answered then hung up) — end the conference ──
-      // duration > 0 means they actually answered and then ended the call
+      // ── Cell hung up mid-call (answered then hung up) — re-enqueue caller ──
+      // duration > 0 means they actually answered and then ended the call.
+      // Do NOT complete the task — reject the reservation so TaskRouter
+      // reassigns to the next available agent and the caller stays in queue.
       if (CallStatus === 'completed' && CallDuration && parseInt(CallDuration) > 0) {
-        console.log(`📵 Cell hung up mid-call (duration: ${CallDuration}s) — ending conference`);
-        try {
-          // Find the active conference and end it so the app disconnects too
-          const conferences = await client.conferences.list({
-            friendlyName: conferenceName,
-            status: 'in-progress',
-            limit: 1,
-          });
-          if (conferences.length > 0) {
-            await client.conferences(conferences[0].sid).update({ status: 'completed' });
-            console.log(`✅ Conference ${conferences[0].sid} ended — app will disconnect`);
-          } else {
-            console.log('ℹ️ No active conference found — already ended');
+        console.log(`📵 Cell hung up mid-call (duration: ${CallDuration}s) — re-enqueueing caller`);
+
+        // Redirect the caller back to the inbound handler — treated as a fresh call,
+        // creates a new TaskRouter task and re-enqueues into the round robin
+        if (callerCallSid) {
+          try {
+            const { protocol, host } = new URL(req.url);
+            const inboundUrl = `${protocol}//${host}/api/twilio-inbound`;
+            const requeueTwiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Redirect method="POST">${inboundUrl}</Redirect></Response>`;
+            await client.calls(callerCallSid).update({ twiml: requeueTwiml });
+            console.log(`✅ Caller ${callerCallSid} redirected to /api/twilio-inbound for re-enqueue`);
+          } catch (err) {
+            console.error('❌ Failed to re-enqueue caller:', (err as Error).message);
           }
-        } catch (err) {
-          console.error('❌ Failed to end conference:', (err as Error).message);
+        } else {
+          console.warn('⚠️ No callerCallSid — cannot re-enqueue caller');
         }
 
-        // Also complete the task
-        if (taskSid) {
+        // Reject the reservation so TaskRouter reassigns to next available agent
+        if (reservationSid && workspaceSid && workerSid) {
           try {
             await client.taskrouter.v1
               .workspaces(workspaceSid)
-              .tasks(taskSid)
-              .update({ assignmentStatus: 'completed', reason: 'Cell phone hung up' });
-            console.log(`✅ Task ${taskSid} completed`);
+              .workers(workerSid)
+              .reservations(reservationSid)
+              .update({ reservationStatus: 'rejected' });
+            console.log(`✅ Reservation ${reservationSid} rejected — next agent will ring`);
           } catch (err) {
             const msg = (err as Error).message || '';
-            if (!msg.includes('already') && !msg.includes('completed')) {
-              console.error('❌ Failed to complete task:', msg);
+            if (msg.includes('already') || msg.includes('completed') || msg.includes('accepted')) {
+              console.log(`ℹ️ Reservation already resolved — skipping`);
+            } else {
+              console.error('❌ Failed to reject reservation:', msg);
             }
           }
         }
       }
+
 
       // ── Cell declined or no-answer — reject reservation so app stops ringing ──
       if (
