@@ -5,7 +5,8 @@
  * - Cell answers (in-progress): bridge caller into conference, cancel app ringing
  * - Cell still ringing but GPP2 answered: cancel cell leg
  * - Cell declined/no-answer: reject reservation — TaskRouter reassigns automatically
- * - Cell hangs up mid-call (completed, duration > 0): end conference so app disconnects
+ * - Cell hangs up mid-call (completed, duration > 0, caller in conference): end conference so app disconnects
+ * - Cell slow decline (completed, duration > 0, caller NOT in conference): reject reservation only
  *
  * For AMD detection (type=simring-amd):
  * - Voicemail detected: cancel cell leg so caller rolls to next agent
@@ -64,22 +65,22 @@ export async function POST(req: Request) {
       }
     }
 
-    const CallSid       = formData.get('CallSid') as string;
-    const CallStatus    = formData.get('CallStatus') as string;
-    const AnsweredBy    = formData.get('AnsweredBy') as string;
-    const CallDuration  = formData.get('CallDuration') as string;
-    const From          = formData.get('From') as string;
-    const To            = formData.get('To') as string;
-    const Timestamp     = formData.get('Timestamp') as string;
+    const CallSid      = formData.get('CallSid') as string;
+    const CallStatus   = formData.get('CallStatus') as string;
+    const AnsweredBy   = formData.get('AnsweredBy') as string;
+    const CallDuration = formData.get('CallDuration') as string;
+    const From         = formData.get('From') as string;
+    const To           = formData.get('To') as string;
+    const Timestamp    = formData.get('Timestamp') as string;
 
-    const url           = new URL(req.url);
-    const callType      = url.searchParams.get('type');
+    const url            = new URL(req.url);
+    const callType       = url.searchParams.get('type');
     const conferenceName = url.searchParams.get('conferenceName');
-    const callerCallSid = url.searchParams.get('callerCallSid');
-    const contactUri    = url.searchParams.get('contactUri');
-    const taskSid       = url.searchParams.get('taskSid');
-    const workspaceSid  = url.searchParams.get('workspaceSid') || WORKSPACE_SID;
-    const workerSid     = url.searchParams.get('workerSid');
+    const callerCallSid  = url.searchParams.get('callerCallSid');
+    const contactUri     = url.searchParams.get('contactUri');
+    const taskSid        = url.searchParams.get('taskSid');
+    const workspaceSid   = url.searchParams.get('workspaceSid') || WORKSPACE_SID;
+    const workerSid      = url.searchParams.get('workerSid');
     const reservationSid = url.searchParams.get('reservationSid');
 
     console.log(`📊 Call status update: ${CallStatus}`, {
@@ -201,11 +202,46 @@ export async function POST(req: Request) {
         }
       }
 
-      // ── Cell hung up mid-call (answered then hung up) — re-enqueue caller ──
+      // ── Cell completed with duration > 0 ──
+      // Could be a genuine mid-call hangup (caller was bridged into conference)
+      // OR a slow decline (phone rang for a second or two before declining).
+      // We check conference participants to tell the difference:
+      //   - Caller IS in conference  → cell answered then hung up mid-call → re-enqueue caller
+      //   - Caller NOT in conference → still in <Enqueue>, cell just declined slowly → reject reservation only
       if (CallStatus === 'completed' && CallDuration && parseInt(CallDuration) > 0) {
-        console.log(`📵 Cell hung up mid-call (duration: ${CallDuration}s) — re-enqueueing caller`);
+        console.log(`📵 Cell call completed (duration: ${CallDuration}s) — checking if caller was bridged into conference`);
 
-        if (callerCallSid) {
+        let callerWasInConference = false;
+
+        if (callerCallSid && conferenceName) {
+          try {
+            const conferences = await client.conferences.list({
+              friendlyName: conferenceName,
+              status: 'in-progress',
+              limit: 1,
+            });
+
+            if (conferences.length > 0) {
+              const participants = await client
+                .conferences(conferences[0].sid)
+                .participants.list();
+              callerWasInConference = participants.some(p => p.callSid === callerCallSid);
+              console.log(
+                callerWasInConference
+                  ? `✅ Caller ${callerCallSid} IS in conference — this was a mid-call hangup`
+                  : `ℹ️ Caller ${callerCallSid} NOT in conference — this was a slow decline`
+              );
+            } else {
+              console.log(`ℹ️ No active conference found for "${conferenceName}" — treating as decline`);
+            }
+          } catch (err) {
+            console.warn(`⚠️ Could not check conference participants:`, (err as Error).message);
+          }
+        }
+
+        if (callerWasInConference && callerCallSid) {
+          // Caller was actually bridged — cell answered then hung up mid-call → re-enqueue
+          console.log(`📵 Cell hung up mid-call — re-enqueueing caller ${callerCallSid}`);
           try {
             const { protocol, host } = new URL(req.url);
             const inboundUrl = `${protocol}//${host}/api/twilio-inbound`;
@@ -216,9 +252,12 @@ export async function POST(req: Request) {
             console.error('❌ Failed to re-enqueue caller:', (err as Error).message);
           }
         } else {
-          console.warn('⚠️ No callerCallSid — cannot re-enqueue caller');
+          // Caller is still in <Enqueue> — cell just declined slowly
+          // Rejecting the reservation is enough — TaskRouter reassigns automatically
+          console.log(`ℹ️ Cell declined after ${CallDuration}s — caller still in queue, TaskRouter will reassign`);
         }
 
+        // Always reject the reservation so TaskRouter rings the next agent
         if (reservationSid && workspaceSid && workerSid) {
           try {
             await client.taskrouter.v1
@@ -226,7 +265,7 @@ export async function POST(req: Request) {
               .workers(workerSid)
               .reservations(reservationSid)
               .update({ reservationStatus: 'rejected' });
-            console.log(`✅ Reservation ${reservationSid} rejected — next agent will ring`);
+            console.log(`✅ Reservation ${reservationSid} rejected — TaskRouter will ring next agent`);
           } catch (err) {
             const msg = (err as Error).message || '';
             if (msg.includes('already') || msg.includes('completed') || msg.includes('accepted')) {
@@ -235,6 +274,8 @@ export async function POST(req: Request) {
               console.error('❌ Failed to reject reservation:', msg);
             }
           }
+        } else {
+          console.warn(`⚠️ Cannot reject reservation — missing params:`, { reservationSid, workspaceSid, workerSid });
         }
       }
 
@@ -249,7 +290,6 @@ export async function POST(req: Request) {
         (CallStatus === 'completed' && (!CallDuration || CallDuration === '0'))
       ) {
         console.log(`📵 Cell declined/no-answer (${CallStatus}) — rejecting reservation so TaskRouter reassigns`);
-
         if (reservationSid && workspaceSid && workerSid) {
           try {
             await client.taskrouter.v1
