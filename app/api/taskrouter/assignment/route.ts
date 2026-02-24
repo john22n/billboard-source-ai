@@ -177,12 +177,6 @@ export async function POST(req: Request) {
         end_conference_on_exit: true,
         end_conference_on_customer_exit: true,
         reject_pending_reservations: true,
-        // ✅ Pass cell call info to the browser client so it can cancel on reject/hangup
-        custom_parameters: {
-          cellCallSid: cellCallSid,
-          reservationSid: reservationSid,
-          conferenceName: conferenceName,
-        },
       };
 
       console.log('📞 Simultaneous ring conference instruction:', instruction);

@@ -45,10 +45,7 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
   const hasInitialized = useRef(false);
   const registrationTime = useRef<number>(0);
 
-  // ✅ Refs to store cell call info passed from assignment callback
-  const cellCallSidRef = useRef<string>('');
-  const conferenceNameRef = useRef<string>('');
-  const reservationSidRef = useRef<string>('');
+  // No cell call refs needed — cancel-cell endpoint looks up cell phone via workerIdentity
 
   const onCallAcceptedRef = useRef<((call: Call) => void) | null>(null);
   const onCallDisconnectedRef = useRef<(() => void) | null>(null);
@@ -75,30 +72,26 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
     return 'Offline';
   }, [workerStatus]);
 
-  // ✅ Helper to cancel the cell leg via our API endpoint
+  // ✅ Cancel the cell leg by sending workerIdentity to the cancel-cell endpoint.
+  // The endpoint looks up the worker's cell_phone from TaskRouter attributes and
+  // cancels any active calls to it — no need to pass cellCallSid from the browser.
   const cancelCellLeg = useCallback(async (reason: string) => {
-    const sid = cellCallSidRef.current;
-    if (!sid) {
-      console.log(`ℹ️ No cellCallSid to cancel (${reason})`);
+    if (!userEmail) {
+      console.log(`ℹ️ cancelCellLeg: no userEmail yet (${reason})`);
       return;
     }
-    console.log(`📵 Canceling cell leg ${sid} (${reason})`);
+    console.log(`📵 Canceling cell leg via workerIdentity: ${userEmail} (${reason})`);
     try {
       await fetch('/api/taskrouter/cancel-cell', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cellCallSid: sid }),
+        body: JSON.stringify({ workerIdentity: userEmail }),
       });
       console.log(`✅ Cell leg cancel request sent (${reason})`);
     } catch (err) {
       console.error(`⚠️ Failed to cancel cell leg (${reason}):`, err);
-    } finally {
-      // Clear refs after use
-      cellCallSidRef.current = '';
-      conferenceNameRef.current = '';
-      reservationSidRef.current = '';
     }
-  }, []);
+  }, [userEmail]);
 
   const initTwilio = useCallback(async () => {
     if (isInitializing.current) {
@@ -176,14 +169,6 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
           callSid: call.parameters.CallSid,
         });
 
-        // ✅ Capture cell call info from custom parameters set by assignment callback
-        cellCallSidRef.current = call.customParameters?.get('cellCallSid') || '';
-        conferenceNameRef.current = call.customParameters?.get('conferenceName') || '';
-        reservationSidRef.current = call.customParameters?.get('reservationSid') || '';
-
-        console.log('📱 Cell call SID from custom params:', cellCallSidRef.current || 'none (not a simring call)');
-        console.log('🏠 Conference name from custom params:', conferenceNameRef.current || 'none');
-
         setIncomingCall(call);
         setStatus(`Incoming call from ${call.parameters.From}`);
 
@@ -192,10 +177,6 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
           setCallActive(false);
           setIncomingCall(null);
           activeCall.current = null;
-          // Clear cell refs on disconnect too
-          cellCallSidRef.current = '';
-          conferenceNameRef.current = '';
-          reservationSidRef.current = '';
           onCallDisconnectedRef.current?.();
         });
 
@@ -212,10 +193,6 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
           console.log('📵 Call canceled (caller hung up)');
           setIncomingCall(null);
           setStatus('Call canceled');
-          // Clear cell refs on cancel too
-          cellCallSidRef.current = '';
-          conferenceNameRef.current = '';
-          reservationSidRef.current = '';
         });
 
         call.on('error', (error: Error) => {
@@ -442,9 +419,6 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
     setDeviceError(null);
     setStatus('Idle');
     hasInitialized.current = false;
-    cellCallSidRef.current = '';
-    conferenceNameRef.current = '';
-    reservationSidRef.current = '';
   }, []);
 
   const updateStatus = useCallback((newStatus: string) => {

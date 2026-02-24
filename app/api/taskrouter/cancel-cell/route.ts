@@ -4,47 +4,84 @@
  * Called by TwilioProvider when the agent rejects or hangs up on the app,
  * to ensure the simultaneous ring cell leg is terminated immediately.
  *
- * This is necessary because:
- * - rejectCall: conference never forms, so conference-end never fires
- * - hangupCall: conference-end fires but this acts as an immediate safety net
+ * Accepts the worker's identity (email), looks up their cell_phone from
+ * TaskRouter worker attributes, then cancels any active calls to that number.
  */
 import twilio from 'twilio';
 
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
 const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
+const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!;
 const client = twilio(ACCOUNT_SID, AUTH_TOKEN);
 
 export async function POST(req: Request) {
   try {
-    const { cellCallSid } = await req.json();
+    const { workerIdentity } = await req.json();
 
-    if (!cellCallSid) {
-      console.error('❌ cancel-cell: Missing cellCallSid in request body');
-      return new Response('Missing cellCallSid', { status: 400 });
+    if (!workerIdentity) {
+      console.error('❌ cancel-cell: Missing workerIdentity in request body');
+      return new Response('Missing workerIdentity', { status: 400 });
     }
 
-    console.log(`🔍 cancel-cell: Fetching status for cell call ${cellCallSid}...`);
+    console.log(`🔍 cancel-cell: Looking up worker attributes for ${workerIdentity}...`);
 
-    const call = await client.calls(cellCallSid).fetch();
-    console.log(`📞 cancel-cell: Cell call status is "${call.status}"`);
+    const workers = await client.taskrouter.v1
+      .workspaces(WORKSPACE_SID)
+      .workers.list({ friendlyName: workerIdentity, limit: 1 });
 
-    // Use 'completed' for in-progress calls, 'canceled' for calls still ringing/initiated
-    const newStatus = call.status === 'in-progress' ? 'completed' : 'canceled';
+    if (workers.length === 0) {
+      console.error(`❌ cancel-cell: No worker found for identity ${workerIdentity}`);
+      return new Response('Worker not found', { status: 404 });
+    }
 
-    await client.calls(cellCallSid).update({ status: newStatus });
-    console.log(`✅ cancel-cell: Cell leg ${cellCallSid} → ${newStatus}`);
+    let attrs: { cell_phone?: string; simultaneous_ring?: boolean } = {};
+    try {
+      attrs = JSON.parse(workers[0].attributes);
+    } catch {
+      console.error('❌ cancel-cell: Failed to parse worker attributes');
+      return new Response('Bad worker attributes', { status: 500 });
+    }
 
-    return new Response('OK', { status: 200 });
-  } catch (err) {
-    const msg = (err as Error).message || '';
-
-    // If the call is already ended, that's fine — not a real error
-    if (msg.includes('completed') || msg.includes('canceled') || msg.includes('no-answer')) {
-      console.log(`ℹ️ cancel-cell: Cell leg already ended — ${msg}`);
+    if (!attrs.simultaneous_ring || !attrs.cell_phone) {
+      console.log(`ℹ️ cancel-cell: Worker ${workerIdentity} is not a simring worker — nothing to cancel`);
       return new Response('OK', { status: 200 });
     }
 
-    console.error('❌ cancel-cell error:', msg);
+    const cellPhone = attrs.cell_phone;
+    console.log(`📱 cancel-cell: Checking active calls to cell ${cellPhone}...`);
+
+    // Fetch recent calls to this number and filter for active ones in JS
+    // to avoid Twilio SDK CallStatus type issues
+    const recentCalls = await client.calls.list({ to: cellPhone, limit: 10 });
+    const activeCalls = recentCalls.filter((c) =>
+      ['initiated', 'ringing', 'in-progress'].includes(c.status)
+    );
+
+    if (activeCalls.length === 0) {
+      console.log(`ℹ️ cancel-cell: No active calls found to ${cellPhone} — already ended`);
+      return new Response('OK', { status: 200 });
+    }
+
+    console.log(`📵 cancel-cell: Found ${activeCalls.length} active call(s) to ${cellPhone} — canceling...`);
+
+    for (const call of activeCalls) {
+      try {
+        const newStatus = call.status === 'in-progress' ? 'completed' : 'canceled';
+        await client.calls(call.sid).update({ status: newStatus });
+        console.log(`✅ cancel-cell: Call ${call.sid} → ${newStatus}`);
+      } catch (err) {
+        const msg = (err as Error).message || '';
+        if (msg.includes('completed') || msg.includes('canceled') || msg.includes('no-answer')) {
+          console.log(`ℹ️ cancel-cell: Call ${call.sid} already ended — ${msg}`);
+        } else {
+          console.error(`❌ cancel-cell: Failed to cancel call ${call.sid}:`, msg);
+        }
+      }
+    }
+
+    return new Response('OK', { status: 200 });
+  } catch (err) {
+    console.error('❌ cancel-cell error:', (err as Error).message);
     return new Response('Error', { status: 500 });
   }
 }
