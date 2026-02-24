@@ -194,7 +194,12 @@ export async function POST(req: Request) {
         conference_friendly_name: conferenceName,
         conference_status_callback: conferenceStatusCallbackUrl,
         conference_status_callback_event: 'start, end, join, leave',
-        end_conference_on_exit: true,
+        // ✅ CRITICAL: Must be false for simring so the caller stays connected
+        // when the worker (cell or app) exits. If true, TaskRouter tears down
+        // the conference the moment the cell hangs up, dropping the caller
+        // before our re-enqueue redirect can fire.
+        // The call-complete callback handles conference cleanup explicitly.
+        end_conference_on_exit: false,
         end_conference_on_customer_exit: true,
         reject_pending_reservations: true,
       };
