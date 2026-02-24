@@ -46,6 +46,8 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
   const registrationTime = useRef<number>(0);
 
   // No cell call refs needed — cancel-cell endpoint looks up cell phone via workerIdentity
+  // ✅ Ref mirror of userEmail so cancelCellLeg never captures a stale empty string
+  const userEmailRef = useRef<string>('');
 
   const onCallAcceptedRef = useRef<((call: Call) => void) | null>(null);
   const onCallDisconnectedRef = useRef<(() => void) | null>(null);
@@ -72,26 +74,24 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
     return 'Offline';
   }, [workerStatus]);
 
-  // ✅ Cancel the cell leg by sending workerIdentity to the cancel-cell endpoint.
-  // The endpoint looks up the worker's cell_phone from TaskRouter attributes and
-  // cancels any active calls to it — no need to pass cellCallSid from the browser.
   const cancelCellLeg = useCallback(async (reason: string) => {
-    if (!userEmail) {
+    const identity = userEmailRef.current;
+    if (!identity) {
       console.log(`ℹ️ cancelCellLeg: no userEmail yet (${reason})`);
       return;
     }
-    console.log(`📵 Canceling cell leg via workerIdentity: ${userEmail} (${reason})`);
+    console.log(`📵 Canceling cell leg via workerIdentity: ${identity} (${reason})`);
     try {
       await fetch('/api/taskrouter/cancel-cell', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workerIdentity: userEmail }),
+        body: JSON.stringify({ workerIdentity: identity }),
       });
       console.log(`✅ Cell leg cancel request sent (${reason})`);
     } catch (err) {
       console.error(`⚠️ Failed to cancel cell leg (${reason}):`, err);
     }
-  }, [userEmail]);
+  }, []); // ✅ No dependency on userEmail state — reads from ref directly
 
   const initTwilio = useCallback(async () => {
     if (isInitializing.current) {
@@ -150,6 +150,7 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
       }
 
       setUserEmail(email);
+      userEmailRef.current = email; // ✅ Keep ref in sync so cancelCellLeg never stales
       console.log('4️⃣ User identity:', email);
 
       console.log('5️⃣ Creating Device with token...');
