@@ -4,8 +4,8 @@
  * For simultaneous ring cell legs (type=simring-cell):
  * - Cell answers (in-progress): bridge caller into conference, cancel app ringing
  * - Cell still ringing but GPP2 answered: cancel cell leg
- * - Cell declined/no-answer: re-enqueue caller then reject reservation so next agent rings
- * - Cell hangs up mid-call (completed, duration > 0): re-enqueue caller
+ * - Cell declined/no-answer: reject reservation so app stops ringing
+ * - Cell hangs up mid-call (completed, duration > 0): end conference so app disconnects
  *
  * For AMD detection (type=simring-amd):
  * - Voicemail detected: cancel cell leg so caller rolls to next agent
@@ -135,7 +135,18 @@ export async function POST(req: Request) {
           console.warn('⚠️ No callerCallSid — cannot bridge caller');
         }
 
-        console.log(`ℹ️ Task ${taskSid} left alive — caller stays connected until cell hangs up`);
+        // Complete the task in TaskRouter
+        if (taskSid) {
+          try {
+            await client.taskrouter.v1
+              .workspaces(workspaceSid)
+              .tasks(taskSid)
+              .update({ assignmentStatus: 'completed', reason: 'Answered on cell phone' });
+            console.log(`✅ Task ${taskSid} completed`);
+          } catch (err) {
+            console.error('❌ Failed to complete task:', (err as Error).message);
+          }
+        }
 
         // Cancel any ringing GPP2 app calls
         if (contactUri) {
@@ -208,27 +219,26 @@ export async function POST(req: Request) {
           console.warn('⚠️ No callerCallSid — cannot re-enqueue caller');
         }
 
-        if (taskSid) {
+        if (reservationSid && workspaceSid && workerSid) {
           try {
             await client.taskrouter.v1
               .workspaces(workspaceSid)
-              .tasks(taskSid)
-              .update({ assignmentStatus: 'completed', reason: 'Cell phone hung up — re-enqueued' });
-            console.log(`✅ Original task ${taskSid} completed`);
+              .workers(workerSid)
+              .reservations(reservationSid)
+              .update({ reservationStatus: 'rejected' });
+            console.log(`✅ Reservation ${reservationSid} rejected — next agent will ring`);
           } catch (err) {
             const msg = (err as Error).message || '';
-            if (!msg.includes('already') && !msg.includes('completed')) {
-              console.error('❌ Failed to complete original task:', msg);
+            if (msg.includes('already') || msg.includes('completed') || msg.includes('accepted')) {
+              console.log(`ℹ️ Reservation already resolved — skipping`);
+            } else {
+              console.error('❌ Failed to reject reservation:', msg);
             }
           }
         }
       }
 
       // ── Cell declined or no-answer — re-enqueue caller then reject reservation ──
-      //
-      // ✅ FIX: Previously this block only rejected the reservation, which orphaned
-      // the caller and let them fall through to voicemail. Now we re-enqueue the
-      // caller FIRST (same as mid-call hangup) so they go to the next available agent.
       if (
         CallStatus === 'no-answer' ||
         CallStatus === 'busy' ||
@@ -237,10 +247,9 @@ export async function POST(req: Request) {
       ) {
         console.log(`📵 Cell declined/no-answer (${CallStatus}) — re-enqueueing caller then rejecting reservation`);
 
-        // ── Step 1: Re-enqueue the caller so they go to the next agent ──
+        // ✅ Re-enqueue the caller FIRST so they go to the next agent instead of voicemail
         if (callerCallSid) {
           try {
-            // Verify the caller's call is still active before attempting redirect
             const callerCall = await client.calls(callerCallSid).fetch();
             if (callerCall.status === 'in-progress') {
               const { protocol, host } = new URL(req.url);
@@ -258,7 +267,7 @@ export async function POST(req: Request) {
           console.warn('⚠️ No callerCallSid — cannot re-enqueue caller');
         }
 
-        // ── Step 2: Reject the reservation so this worker is freed up ──
+        // Then reject the reservation so this worker is freed
         if (reservationSid && workspaceSid && workerSid) {
           try {
             await client.taskrouter.v1
