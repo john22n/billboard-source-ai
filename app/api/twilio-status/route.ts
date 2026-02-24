@@ -4,8 +4,8 @@
  * For simultaneous ring cell legs (type=simring-cell):
  * - Cell answers (in-progress): bridge caller into conference, cancel app ringing
  * - Cell still ringing but GPP2 answered: cancel cell leg
- * - Cell declined/no-answer: reject reservation so app stops ringing
- * - Cell hangs up mid-call (completed, duration > 0): end conference so app disconnects
+ * - Cell declined/no-answer: re-enqueue caller then reject reservation so next agent rings
+ * - Cell hangs up mid-call (completed, duration > 0): re-enqueue caller
  *
  * For AMD detection (type=simring-amd):
  * - Voicemail detected: cancel cell leg so caller rolls to next agent
@@ -123,11 +123,8 @@ export async function POST(req: Request) {
       if (CallStatus === 'in-progress') {
         console.log(`📱 Cell answered — bridging caller into conference: ${conferenceName}`);
 
-        // Redirect caller into the conference — use SDK here (raw fetch has casing issues)
         if (callerCallSid) {
           try {
-            // ✅ endConferenceOnExit="false" keeps the caller alive in the conference
-            // even if the cell hangs up, so we can redirect them to the next agent
             const callerTwiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Dial><Conference startConferenceOnEnter="true" endConferenceOnExit="false" beep="false" waitUrl="">${conferenceName}</Conference></Dial></Response>`;
             await client.calls(callerCallSid).update({ twiml: callerTwiml });
             console.log(`✅ Caller ${callerCallSid} redirected into conference`);
@@ -138,13 +135,9 @@ export async function POST(req: Request) {
           console.warn('⚠️ No callerCallSid — cannot bridge caller');
         }
 
-        // ✅ Do NOT complete the task here — keeping it alive keeps the caller connected.
-        // If we complete the task now, TaskRouter drops the caller leg immediately.
-        // Task is completed either by call-complete (conference-end) or
-        // by the cell-hangup block below when we re-enqueue the caller.
         console.log(`ℹ️ Task ${taskSid} left alive — caller stays connected until cell hangs up`);
 
-        // ✅ Cancel any ringing GPP2 app calls using raw fetch (avoids SDK type issues)
+        // Cancel any ringing GPP2 app calls
         if (contactUri) {
           try {
             console.log(`🔍 Looking for active app calls to: ${contactUri}`);
@@ -198,14 +191,9 @@ export async function POST(req: Request) {
       }
 
       // ── Cell hung up mid-call (answered then hung up) — re-enqueue caller ──
-      // duration > 0 means they actually answered and then ended the call.
-      // Do NOT complete the task — reject the reservation so TaskRouter
-      // reassigns to the next available agent and the caller stays in queue.
       if (CallStatus === 'completed' && CallDuration && parseInt(CallDuration) > 0) {
         console.log(`📵 Cell hung up mid-call (duration: ${CallDuration}s) — re-enqueueing caller`);
 
-        // Redirect the caller back to the inbound handler — treated as a fresh call,
-        // creates a new TaskRouter task and re-enqueues into the round robin
         if (callerCallSid) {
           try {
             const { protocol, host } = new URL(req.url);
@@ -220,8 +208,6 @@ export async function POST(req: Request) {
           console.warn('⚠️ No callerCallSid — cannot re-enqueue caller');
         }
 
-        // ✅ Complete the original task now that caller is being re-enqueued
-        // This is safe here because the caller is still connected (endConferenceOnExit=false)
         if (taskSid) {
           try {
             await client.taskrouter.v1
@@ -238,46 +224,59 @@ export async function POST(req: Request) {
         }
       }
 
-
-      // ── Cell declined or no-answer — complete the task so app stops ringing ──
-      // Reservations are already in 'accepted' state by the time we get here
-      // (TaskRouter moves them from pending→accepted when assignment callback fires),
-      // so we cannot reject them. Completing the task is the correct way to stop
-      // the app ringing and free the worker for the next call.
+      // ── Cell declined or no-answer — re-enqueue caller then reject reservation ──
+      //
+      // ✅ FIX: Previously this block only rejected the reservation, which orphaned
+      // the caller and let them fall through to voicemail. Now we re-enqueue the
+      // caller FIRST (same as mid-call hangup) so they go to the next available agent.
       if (
         CallStatus === 'no-answer' ||
         CallStatus === 'busy' ||
         (CallStatus === 'canceled' && (!CallDuration || CallDuration === '0')) ||
         (CallStatus === 'completed' && (!CallDuration || CallDuration === '0'))
       ) {
-        console.log(`📵 Cell declined/no-answer (${CallStatus}) — completing task to stop app ringing`);
+        console.log(`📵 Cell declined/no-answer (${CallStatus}) — re-enqueueing caller then rejecting reservation`);
 
-        if (taskSid && workspaceSid) {
+        // ── Step 1: Re-enqueue the caller so they go to the next agent ──
+        if (callerCallSid) {
           try {
-            const task = await client.taskrouter.v1
-              .workspaces(workspaceSid)
-              .tasks(taskSid)
-              .fetch();
-
-            if (task.assignmentStatus === 'assigned' || task.assignmentStatus === 'wrapping') {
-              await client.taskrouter.v1
-                .workspaces(workspaceSid)
-                .tasks(taskSid)
-                .update({ assignmentStatus: 'completed', reason: 'Cell declined — no answer' });
-              console.log(`✅ Task ${taskSid} completed — app will stop ringing`);
+            // Verify the caller's call is still active before attempting redirect
+            const callerCall = await client.calls(callerCallSid).fetch();
+            if (callerCall.status === 'in-progress') {
+              const { protocol, host } = new URL(req.url);
+              const inboundUrl = `${protocol}//${host}/api/twilio-inbound`;
+              const requeueTwiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Redirect method="POST">${inboundUrl}</Redirect></Response>`;
+              await client.calls(callerCallSid).update({ twiml: requeueTwiml });
+              console.log(`✅ Caller ${callerCallSid} re-enqueued — will ring next available agent`);
             } else {
-              console.log(`ℹ️ Task already ${task.assignmentStatus} — skipping`);
+              console.log(`ℹ️ Caller ${callerCallSid} is no longer in-progress (${callerCall.status}) — skipping re-enqueue`);
             }
           } catch (err) {
+            console.error('❌ Failed to re-enqueue caller:', (err as Error).message);
+          }
+        } else {
+          console.warn('⚠️ No callerCallSid — cannot re-enqueue caller');
+        }
+
+        // ── Step 2: Reject the reservation so this worker is freed up ──
+        if (reservationSid && workspaceSid && workerSid) {
+          try {
+            await client.taskrouter.v1
+              .workspaces(workspaceSid)
+              .workers(workerSid)
+              .reservations(reservationSid)
+              .update({ reservationStatus: 'rejected' });
+            console.log(`✅ Reservation ${reservationSid} rejected — app will stop ringing`);
+          } catch (err) {
             const msg = (err as Error).message || '';
-            if (msg.includes('already') || msg.includes('completed')) {
-              console.log(`ℹ️ Task ${taskSid} already resolved — no action needed`);
+            if (msg.includes('already') || msg.includes('completed') || msg.includes('accepted')) {
+              console.log(`ℹ️ Reservation ${reservationSid} already resolved — no action needed`);
             } else {
-              console.error('❌ Failed to complete task:', msg);
+              console.error('❌ Failed to reject reservation:', msg);
             }
           }
         } else {
-          console.warn(`⚠️ Cannot complete task — missing params:`, { taskSid, workspaceSid });
+          console.warn(`⚠️ Cannot reject reservation — missing params:`, { reservationSid, workspaceSid, workerSid });
         }
       }
     }

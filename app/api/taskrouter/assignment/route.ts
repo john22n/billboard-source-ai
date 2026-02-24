@@ -68,6 +68,38 @@ export async function POST(req: Request) {
     console.log('Caller call_sid:', taskAttrs.call_sid ?? 'none');
     console.log('═══════════════════════════════════════════');
 
+    // ─────────────────────────────────────────────────────────────
+    // DUPLICATE RESERVATION GUARD
+    //
+    // If this task already has an accepted reservation belonging to a
+    // DIFFERENT worker, that means another agent's simring is still
+    // active. Reject this new reservation immediately so we don't
+    // ring two workers at the same time.
+    // ─────────────────────────────────────────────────────────────
+    if (workerAttrs.email !== 'voicemail@system') {
+      try {
+        const existingReservations = await twilioClient.taskrouter.v1
+          .workspaces(workspaceSid)
+          .tasks(taskSid)
+          .reservations
+          .list({ reservationStatus: 'accepted' });
+
+        const otherAccepted = existingReservations.filter(
+          (r) => r.workerSid !== workerSid && r.sid !== reservationSid
+        );
+
+        if (otherAccepted.length > 0) {
+          console.warn(
+            `⚠️ Task ${taskSid} already has an accepted reservation for a different worker (${otherAccepted.map(r => r.workerSid).join(', ')}) — rejecting this reservation for ${workerAttrs.email}`
+          );
+          return Response.json({ instruction: 'reject' });
+        }
+      } catch (err) {
+        // Non-fatal — log and continue so the call isn't dropped
+        console.error('❌ Failed to check existing reservations:', (err as Error).message);
+      }
+    }
+
     const url      = new URL(req.url);
     const appUrl   = `${url.protocol}//${url.host}`;
     const bypassToken = process.env.VERCEL_BYPASS_TOKEN || '';
@@ -127,11 +159,6 @@ export async function POST(req: Request) {
           </Dial>
         </Response>`;
 
-      // ✅ Build the full statusCallback URL BEFORE creating the call.
-      // Previously we created the call first then updated it with the callback URL,
-      // which caused the 'answered' (in-progress) event to fire before the URL was set.
-      // Now we build the URL upfront — CallSid in the callback IS the cell call SID,
-      // so we don't need to put cellCallSid in the URL at all.
       const cellStatusCallback = `${appUrl}/api/twilio-status?type=simring-cell&conferenceName=${encodeURIComponent(conferenceName)}&reservationSid=${reservationSid}&taskSid=${taskSid}&workspaceSid=${workspaceSid}&workerSid=${workerSid}&callerCallSid=${callerCallSid}&contactUri=${encodeURIComponent(contactUri)}${bypassParam}`;
 
       let cellCallSid = '';
@@ -145,7 +172,6 @@ export async function POST(req: Request) {
           asyncAmd: 'true',
           asyncAmdStatusCallback: `${appUrl}/api/twilio-status?type=simring-amd&conferenceName=${encodeURIComponent(conferenceName)}${bypassParam}`,
           asyncAmdStatusCallbackMethod: 'POST',
-          // ✅ statusCallback set at creation time so no events are missed
           statusCallback: cellStatusCallback,
           statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
           statusCallbackMethod: 'POST',
