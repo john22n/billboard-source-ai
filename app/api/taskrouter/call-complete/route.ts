@@ -6,7 +6,7 @@
  * For simultaneous ring:
  * - conference-start: Someone answered — cancel cell leg
  * - participant-leave: GPP2 left — cancel cell leg AND complete task
- * - conference-end: Clean up cell leg and complete the task
+ * - conference-end: Cancel cell leg only — task completion handled elsewhere
  */
 import twilio from 'twilio';
 
@@ -91,7 +91,7 @@ export async function POST(req: Request) {
       return new Response('Missing parameters', { status: 400 });
     }
 
-    // ── GPP2 answered — cancel cell leg ──
+    // ── App answered — cancel cell leg ──
     if (statusCallbackEvent === 'conference-start') {
       console.log(`📱 conference-start fired`);
       if (cellCallSid) {
@@ -102,15 +102,13 @@ export async function POST(req: Request) {
       }
     }
 
-    // ── GPP2 hung up — cancel cell AND complete task ──
+    // ── App worker hung up — cancel cell AND complete task ──
     if (statusCallbackEvent === 'participant-leave') {
       console.log(`📵 participant-leave fired. CallSid: ${callSid}`);
       if (cellCallSid) {
         if (callSid !== cellCallSid) {
           console.log(`📵 Worker left (${callSid}) — canceling cell leg: ${cellCallSid}`);
           await cancelCellLeg(cellCallSid, 'worker-left');
-
-          // Complete the task so TaskRouter doesn't reassign to this worker again
           await completeTask(taskSid, workspaceSid, 'Worker hung up');
         } else {
           console.log(`📵 Cell itself left — no action needed`);
@@ -120,13 +118,23 @@ export async function POST(req: Request) {
       }
     }
 
-    // ── Conference ended — cancel cell and complete task ──
+    // ── Conference ended — cancel cell leg only ──
+    // Do NOT complete the task here. Caller is held in <Enqueue> by TaskRouter.
+    // Completing the task here kicks them out of the queue → voicemail.
+    // Task completion is handled by:
+    //   - twilio-status in-progress: cell answered
+    //   - participant-leave above: app worker hung up
+    //   - twilio-status no-answer: reservation rejected, TaskRouter reassigns automatically
+    //   - TaskRouter workflow timeout: voicemail worker assigned
     if (statusCallbackEvent === 'conference-end') {
+      console.log(`📵 conference-end fired — canceling cell leg only`);
       if (cellCallSid) {
         await cancelCellLeg(cellCallSid, 'conference-end');
       }
-      await completeTask(taskSid, workspaceSid, 'Conference ended');
-    } else {
+    } else if (
+      statusCallbackEvent !== 'conference-start' &&
+      statusCallbackEvent !== 'participant-leave'
+    ) {
       console.log(`ℹ️ Conference event: ${statusCallbackEvent}`);
     }
 

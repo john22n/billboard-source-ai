@@ -68,38 +68,6 @@ export async function POST(req: Request) {
     console.log('Caller call_sid:', taskAttrs.call_sid ?? 'none');
     console.log('═══════════════════════════════════════════');
 
-    // ─────────────────────────────────────────────────────────────
-    // DUPLICATE RESERVATION GUARD
-    //
-    // If this task already has an accepted reservation belonging to a
-    // DIFFERENT worker, that means another agent's simring is still
-    // active. Reject this new reservation immediately so we don't
-    // ring two workers at the same time.
-    // ─────────────────────────────────────────────────────────────
-    if (workerAttrs.email !== 'voicemail@system') {
-      try {
-        const existingReservations = await twilioClient.taskrouter.v1
-          .workspaces(workspaceSid)
-          .tasks(taskSid)
-          .reservations
-          .list({ reservationStatus: 'accepted' });
-
-        const otherAccepted = existingReservations.filter(
-          (r) => r.workerSid !== workerSid && r.sid !== reservationSid
-        );
-
-        if (otherAccepted.length > 0) {
-          console.warn(
-            `⚠️ Task ${taskSid} already has an accepted reservation for a different worker (${otherAccepted.map(r => r.workerSid).join(', ')}) — rejecting this reservation for ${workerAttrs.email}`
-          );
-          return Response.json({ instruction: 'reject' });
-        }
-      } catch (err) {
-        // Non-fatal — log and continue so the call isn't dropped
-        console.error('❌ Failed to check existing reservations:', (err as Error).message);
-      }
-    }
-
     const url      = new URL(req.url);
     const appUrl   = `${url.protocol}//${url.host}`;
     const bypassToken = process.env.VERCEL_BYPASS_TOKEN || '';
