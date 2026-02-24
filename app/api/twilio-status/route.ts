@@ -126,7 +126,9 @@ export async function POST(req: Request) {
         // Redirect caller into the conference — use SDK here (raw fetch has casing issues)
         if (callerCallSid) {
           try {
-            const callerTwiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Dial><Conference startConferenceOnEnter="true" endConferenceOnExit="true" beep="false" waitUrl="">${conferenceName}</Conference></Dial></Response>`;
+            // ✅ endConferenceOnExit="false" keeps the caller alive in the conference
+            // even if the cell hangs up, so we can redirect them to the next agent
+            const callerTwiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Dial><Conference startConferenceOnEnter="true" endConferenceOnExit="false" beep="false" waitUrl="">${conferenceName}</Conference></Dial></Response>`;
             await client.calls(callerCallSid).update({ twiml: callerTwiml });
             console.log(`✅ Caller ${callerCallSid} redirected into conference`);
           } catch (err) {
