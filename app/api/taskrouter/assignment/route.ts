@@ -32,12 +32,12 @@ export async function POST(req: Request) {
       }
     }
 
-    const taskSid = formData.get('TaskSid') as string;
-    const reservationSid = formData.get('ReservationSid') as string;
-    const workerSid = formData.get('WorkerSid') as string;
+    const taskSid         = formData.get('TaskSid') as string;
+    const reservationSid  = formData.get('ReservationSid') as string;
+    const workerSid       = formData.get('WorkerSid') as string;
     const workerAttributes = formData.get('WorkerAttributes') as string;
-    const taskAttributes = formData.get('TaskAttributes') as string;
-    const workspaceSid = formData.get('WorkspaceSid') as string;
+    const taskAttributes  = formData.get('TaskAttributes') as string;
+    const workspaceSid    = formData.get('WorkspaceSid') as string;
 
     console.log('═══════════════════════════════════════════');
     console.log('📋 TASKROUTER ASSIGNMENT CALLBACK');
@@ -56,7 +56,7 @@ export async function POST(req: Request) {
 
     try {
       workerAttrs = JSON.parse(workerAttributes || '{}');
-      taskAttrs = JSON.parse(taskAttributes || '{}');
+      taskAttrs   = JSON.parse(taskAttributes || '{}');
     } catch {
       console.error('Failed to parse attributes');
     }
@@ -68,9 +68,8 @@ export async function POST(req: Request) {
     console.log('Caller call_sid:', taskAttrs.call_sid ?? 'none');
     console.log('═══════════════════════════════════════════');
 
-    const url = new URL(req.url);
-    const appUrl = `${url.protocol}//${url.host}`;
-
+    const url      = new URL(req.url);
+    const appUrl   = `${url.protocol}//${url.host}`;
     const bypassToken = process.env.VERCEL_BYPASS_TOKEN || '';
     const bypassParam = bypassToken ? `&x-vercel-protection-bypass=${bypassToken}` : '';
 
@@ -111,9 +110,9 @@ export async function POST(req: Request) {
     if (workerAttrs.simultaneous_ring && workerAttrs.cell_phone) {
       console.log('📱 Simultaneous ring enabled - dialing GPP2 + cell:', workerAttrs.cell_phone);
 
-      const conferenceName = `simring-${reservationSid}`;
-      const contactUri = workerAttrs.contact_uri || `client:${workerAttrs.email}`;
-      const callerCallSid = taskAttrs.call_sid || '';
+      const conferenceName  = `simring-${reservationSid}`;
+      const contactUri      = workerAttrs.contact_uri || `client:${workerAttrs.email}`;
+      const callerCallSid   = taskAttrs.call_sid || '';
 
       const cellTwiml = `<?xml version="1.0" encoding="UTF-8"?>
         <Response>
@@ -128,6 +127,13 @@ export async function POST(req: Request) {
           </Dial>
         </Response>`;
 
+      // ✅ Build the full statusCallback URL BEFORE creating the call.
+      // Previously we created the call first then updated it with the callback URL,
+      // which caused the 'answered' (in-progress) event to fire before the URL was set.
+      // Now we build the URL upfront — CallSid in the callback IS the cell call SID,
+      // so we don't need to put cellCallSid in the URL at all.
+      const cellStatusCallback = `${appUrl}/api/twilio-status?type=simring-cell&conferenceName=${encodeURIComponent(conferenceName)}&reservationSid=${reservationSid}&taskSid=${taskSid}&workspaceSid=${workspaceSid}&workerSid=${workerSid}&callerCallSid=${callerCallSid}&contactUri=${encodeURIComponent(contactUri)}${bypassParam}`;
+
       let cellCallSid = '';
       try {
         const call = await twilioClient.calls.create({
@@ -139,28 +145,16 @@ export async function POST(req: Request) {
           asyncAmd: 'true',
           asyncAmdStatusCallback: `${appUrl}/api/twilio-status?type=simring-amd&conferenceName=${encodeURIComponent(conferenceName)}${bypassParam}`,
           asyncAmdStatusCallbackMethod: 'POST',
+          // ✅ statusCallback set at creation time so no events are missed
+          statusCallback: cellStatusCallback,
           statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
           statusCallbackMethod: 'POST',
         });
         cellCallSid = call.sid;
         console.log(`📱 Cell leg initiated: ${cellCallSid}`);
+        console.log(`✅ Cell statusCallback set at creation time`);
       } catch (err) {
         console.error('❌ Failed to dial cell phone:', (err as Error).message);
-      }
-
-      // Update the cell call with status callback now that we have cellCallSid
-      const cellStatusCallback = `${appUrl}/api/twilio-status?type=simring-cell&conferenceName=${encodeURIComponent(conferenceName)}&reservationSid=${reservationSid}&taskSid=${taskSid}&workspaceSid=${workspaceSid}&workerSid=${workerSid}&cellCallSid=${cellCallSid}&callerCallSid=${callerCallSid}&contactUri=${encodeURIComponent(contactUri)}${bypassParam}`;
-
-      if (cellCallSid) {
-        try {
-          await twilioClient.calls(cellCallSid).update({
-            statusCallback: cellStatusCallback,
-            statusCallbackMethod: 'POST',
-          });
-          console.log(`✅ Cell status callback updated with cellCallSid`);
-        } catch (err) {
-          console.warn(`⚠️ Failed to update cell status callback: ${(err as Error).message}`);
-        }
       }
 
       const conferenceStatusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}&cellCallSid=${cellCallSid}&workerSid=${workerSid}${bypassParam}`;
