@@ -1,21 +1,47 @@
 /**
  * Twilio Call Status Callback
  *
- * Handles general call status updates.
- *
  * For simultaneous ring cell legs (type=simring-cell):
- * - Cell answers (in-progress): redirect caller into conference, complete task, cancel GPP2
+ * - Cell answers (in-progress): bridge caller into conference, cancel app ringing
  * - Cell still ringing but GPP2 answered: cancel cell leg
- * - Cell declined / no-answer: reject the TaskRouter reservation so app stops ringing
+ * - Cell declined/no-answer: reject reservation so app stops ringing
+ * - Cell hangs up mid-call (completed, duration > 0): end conference so app disconnects
  *
  * For AMD detection (type=simring-amd):
- * - Voicemail detected: cancel the cell leg so caller rolls to next agent
+ * - Voicemail detected: cancel cell leg so caller rolls to next agent
  */
 import twilio from 'twilio';
 
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
 const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!;
+
+// ── Raw Twilio REST helpers (avoids SDK TypeScript overload issues) ──────────
+const twilioAuth = () =>
+  'Basic ' + Buffer.from(`${ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64');
+
+async function twilioGet(path: string) {
+  const res = await fetch(
+    `https://api.twilio.com/2010-04-01/Accounts/${ACCOUNT_SID}/${path}`,
+    { headers: { Authorization: twilioAuth() } }
+  );
+  return res.json();
+}
+
+async function twilioPost(path: string, body: Record<string, string>) {
+  const res = await fetch(
+    `https://api.twilio.com/2010-04-01/Accounts/${ACCOUNT_SID}/${path}`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: twilioAuth(),
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams(body).toString(),
+    }
+  );
+  return res.json();
+}
 
 export async function POST(req: Request) {
   try {
@@ -38,32 +64,29 @@ export async function POST(req: Request) {
       }
     }
 
-    const CallSid = formData.get('CallSid') as string;
-    const CallStatus = formData.get('CallStatus') as string;
-    const AnsweredBy = formData.get('AnsweredBy') as string;
-    const CallDuration = formData.get('CallDuration') as string;
-    const From = formData.get('From') as string;
-    const To = formData.get('To') as string;
-    const Timestamp = formData.get('Timestamp') as string;
+    const CallSid       = formData.get('CallSid') as string;
+    const CallStatus    = formData.get('CallStatus') as string;
+    const AnsweredBy    = formData.get('AnsweredBy') as string;
+    const CallDuration  = formData.get('CallDuration') as string;
+    const From          = formData.get('From') as string;
+    const To            = formData.get('To') as string;
+    const Timestamp     = formData.get('Timestamp') as string;
 
-    const url = new URL(req.url);
-    const callType = url.searchParams.get('type');
+    const url           = new URL(req.url);
+    const callType      = url.searchParams.get('type');
     const conferenceName = url.searchParams.get('conferenceName');
     const callerCallSid = url.searchParams.get('callerCallSid');
-    const contactUri = url.searchParams.get('contactUri');
-    const taskSid = url.searchParams.get('taskSid');
-    const workspaceSid = url.searchParams.get('workspaceSid') || WORKSPACE_SID;
-    const workerSid = url.searchParams.get('workerSid');
-    const reservationSid = url.searchParams.get('reservationSid'); // ✅ used to stop app ringing on cell decline
+    const contactUri    = url.searchParams.get('contactUri');
+    const taskSid       = url.searchParams.get('taskSid');
+    const workspaceSid  = url.searchParams.get('workspaceSid') || WORKSPACE_SID;
+    const workerSid     = url.searchParams.get('workerSid');
+    const reservationSid = url.searchParams.get('reservationSid');
 
     console.log(`📊 Call status update: ${CallStatus}`, {
-      CallSid,
-      CallStatus,
+      CallSid, CallStatus,
       AnsweredBy: AnsweredBy || undefined,
       CallDuration: CallDuration ? `${CallDuration}s` : undefined,
-      From,
-      To,
-      Timestamp,
+      From, To, Timestamp,
       callType: callType || 'standard',
     });
 
@@ -80,7 +103,7 @@ export async function POST(req: Request) {
       ) {
         console.log(`🤖 Voicemail detected (${AnsweredBy}) — canceling cell leg: ${CallSid}`);
         try {
-          await client.calls(CallSid).update({ status: 'canceled' });
+          await twilioPost(`Calls/${CallSid}.json`, { Status: 'canceled' });
           console.log(`✅ Cell leg canceled — caller will roll to next agent`);
         } catch (err) {
           console.warn(`⚠️ Could not cancel cell leg:`, (err as Error).message);
@@ -96,10 +119,11 @@ export async function POST(req: Request) {
     // ─────────────────────────────────────────────────────────────
     if (callType === 'simring-cell' && conferenceName) {
 
-      // ── Cell answered ──
+      // ── Cell answered — bridge caller in, cancel app ringing ──
       if (CallStatus === 'in-progress') {
-        console.log(`📱 Cell answered - bridging caller into conference: ${conferenceName}`);
+        console.log(`📱 Cell answered — bridging caller into conference: ${conferenceName}`);
 
+        // Redirect caller into the conference — use SDK here (raw fetch has casing issues)
         if (callerCallSid) {
           try {
             const callerTwiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Dial><Conference startConferenceOnEnter="true" endConferenceOnExit="true" beep="false" waitUrl="">${conferenceName}</Conference></Dial></Response>`;
@@ -112,48 +136,46 @@ export async function POST(req: Request) {
           console.warn('⚠️ No callerCallSid — cannot bridge caller');
         }
 
+        // Complete the task in TaskRouter
         if (taskSid) {
           try {
             await client.taskrouter.v1
               .workspaces(workspaceSid)
               .tasks(taskSid)
-              .update({
-                assignmentStatus: 'completed',
-                reason: 'Answered on cell phone',
-              });
+              .update({ assignmentStatus: 'completed', reason: 'Answered on cell phone' });
             console.log(`✅ Task ${taskSid} completed`);
           } catch (err) {
             console.error('❌ Failed to complete task:', (err as Error).message);
           }
         }
 
-        // ── Cancel any ringing GPP2 devices ──
+        // ✅ Cancel any ringing GPP2 app calls using raw fetch (avoids SDK type issues)
         if (contactUri) {
           try {
-            console.log(`🔍 Looking for ringing/in-progress GPP2 calls to: ${contactUri}`);
-
-            const [ringingCalls, inProgressCalls] = await Promise.all([
-              client.calls.list({ to: contactUri, status: 'ringing', limit: 10 }),
-              client.calls.list({ to: contactUri, status: 'in-progress', limit: 10 }),
-            ]);
-
-            const callsToCancel = [...ringingCalls, ...inProgressCalls];
-
-            if (callsToCancel.length > 0) {
-              for (const call of callsToCancel) {
-                if (call.sid === CallSid) continue;
+            console.log(`🔍 Looking for active app calls to: ${contactUri}`);
+            const callsData = await twilioGet(
+              `Calls.json?To=${encodeURIComponent(contactUri)}&PageSize=10`
+            );
+            const appCalls = (callsData.calls || []).filter(
+              (c: { sid: string; status: string }) =>
+                ['initiated', 'ringing', 'in-progress'].includes(c.status) &&
+                c.sid !== CallSid
+            );
+            if (appCalls.length > 0) {
+              for (const call of appCalls as Array<{ sid: string; status: string }>) {
                 try {
-                  await client.calls(call.sid).update({ status: 'canceled' });
-                  console.log(`✅ GPP2 call ${call.sid} canceled (status was ${call.status})`);
+                  const newStatus = call.status === 'in-progress' ? 'completed' : 'canceled';
+                  await twilioPost(`Calls/${call.sid}.json`, { Status: newStatus });
+                  console.log(`✅ App call ${call.sid} ${newStatus} — app will stop ringing`);
                 } catch (err) {
-                  console.warn(`⚠️ Could not cancel GPP2 call:`, (err as Error).message);
+                  console.warn(`⚠️ Could not cancel app call:`, (err as Error).message);
                 }
               }
             } else {
-              console.log('ℹ️ No ringing or in-progress GPP2 calls found');
+              console.log('ℹ️ No active app calls found to cancel');
             }
           } catch (err) {
-            console.error('❌ Failed to cancel GPP2 call:', (err as Error).message);
+            console.error('❌ Failed to cancel app calls:', (err as Error).message);
           }
         }
       }
@@ -170,10 +192,9 @@ export async function POST(req: Request) {
             const participants = await client
               .conferences(conferences[0].sid)
               .participants.list();
-            // 2+ participants means caller + GPP2 already in — cell is the odd one out
             if (participants.length >= 2) {
               console.log(`📵 GPP2 already answered — canceling cell leg ${CallSid}`);
-              await client.calls(CallSid).update({ status: 'canceled' });
+              await twilioPost(`Calls/${CallSid}.json`, { Status: 'canceled' });
             }
           }
         } catch (err) {
@@ -181,14 +202,49 @@ export async function POST(req: Request) {
         }
       }
 
-      // ── Cell declined or no-answer — reject the reservation so app stops ringing ──
-      // This is the symmetric counterpart to rejectCall/hangupCall on the app side.
-      // When the agent presses ignore/decline on their cell, the app would keep ringing
-      // indefinitely without this. Rejecting the reservation tells TaskRouter to move on.
+      // ── Cell hung up mid-call (answered then hung up) — end the conference ──
+      // duration > 0 means they actually answered and then ended the call
+      if (CallStatus === 'completed' && CallDuration && parseInt(CallDuration) > 0) {
+        console.log(`📵 Cell hung up mid-call (duration: ${CallDuration}s) — ending conference`);
+        try {
+          // Find the active conference and end it so the app disconnects too
+          const conferences = await client.conferences.list({
+            friendlyName: conferenceName,
+            status: 'in-progress',
+            limit: 1,
+          });
+          if (conferences.length > 0) {
+            await client.conferences(conferences[0].sid).update({ status: 'completed' });
+            console.log(`✅ Conference ${conferences[0].sid} ended — app will disconnect`);
+          } else {
+            console.log('ℹ️ No active conference found — already ended');
+          }
+        } catch (err) {
+          console.error('❌ Failed to end conference:', (err as Error).message);
+        }
+
+        // Also complete the task
+        if (taskSid) {
+          try {
+            await client.taskrouter.v1
+              .workspaces(workspaceSid)
+              .tasks(taskSid)
+              .update({ assignmentStatus: 'completed', reason: 'Cell phone hung up' });
+            console.log(`✅ Task ${taskSid} completed`);
+          } catch (err) {
+            const msg = (err as Error).message || '';
+            if (!msg.includes('already') && !msg.includes('completed')) {
+              console.error('❌ Failed to complete task:', msg);
+            }
+          }
+        }
+      }
+
+      // ── Cell declined or no-answer — reject reservation so app stops ringing ──
       if (
         CallStatus === 'no-answer' ||
-        CallStatus === 'canceled' ||
         CallStatus === 'busy' ||
+        (CallStatus === 'canceled' && (!CallDuration || CallDuration === '0')) ||
         (CallStatus === 'completed' && (!CallDuration || CallDuration === '0'))
       ) {
         console.log(`📵 Cell declined/no-answer (${CallStatus}) — rejecting reservation to stop app ringing`);
@@ -203,22 +259,14 @@ export async function POST(req: Request) {
             console.log(`✅ Reservation ${reservationSid} rejected — app will stop ringing`);
           } catch (err) {
             const msg = (err as Error).message || '';
-            // Reservation may already be accepted/completed if app answered simultaneously
-            if (
-              msg.includes('already') ||
-              msg.includes('completed') ||
-              msg.includes('accepted')
-            ) {
+            if (msg.includes('already') || msg.includes('completed') || msg.includes('accepted')) {
               console.log(`ℹ️ Reservation ${reservationSid} already resolved — no action needed`);
             } else {
               console.error('❌ Failed to reject reservation:', msg);
             }
           }
         } else {
-          console.warn(
-            `⚠️ Cannot reject reservation — missing params:`,
-            { reservationSid, workspaceSid, workerSid }
-          );
+          console.warn(`⚠️ Cannot reject reservation — missing params:`, { reservationSid, workspaceSid, workerSid });
         }
       }
     }
