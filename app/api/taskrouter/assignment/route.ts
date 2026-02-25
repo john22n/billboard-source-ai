@@ -171,7 +171,7 @@ export async function POST(req: Request) {
             // before AMD fires and cancels the cell leg.
             machineDetectionSpeechThreshold: 1000,   // ms of speech to classify as machine (default: 2400)
             machineDetectionSpeechEndThreshold: 500,  // ms of silence after speech (default: 1200)
-            machineDetectionSilenceTimeout: 3000,     // ms of silence before giving up (default: 5000)
+            machineDetectionSilenceTimeout: 2000,     // ms of silence before giving up (default: 5000)
             statusCallback: cellStatusCallback,
             statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
             statusCallbackMethod: 'POST',
