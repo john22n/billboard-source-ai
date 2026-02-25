@@ -5,6 +5,7 @@
  * Returns instructions to dial the worker's browser client.
  * For workers with simultaneous_ring=true, also dials their cell phone
  * into the same named conference so they can answer either way.
+ * Only rings cell phone if worker is currently in an Available/Online activity.
  */
 import twilio from 'twilio';
 
@@ -108,71 +109,92 @@ export async function POST(req: Request) {
     // SIMULTANEOUS RING
     // ─────────────────────────────────────────────
     if (workerAttrs.simultaneous_ring && workerAttrs.cell_phone) {
-      console.log('📱 Simultaneous ring enabled - dialing GPP2 + cell:', workerAttrs.cell_phone);
 
-      const conferenceName  = `simring-${reservationSid}`;
-      const contactUri      = workerAttrs.contact_uri || `client:${workerAttrs.email}`;
-      const callerCallSid   = taskAttrs.call_sid || '';
-
-      const cellTwiml = `<?xml version="1.0" encoding="UTF-8"?>
-        <Response>
-          <Dial>
-            <Conference
-              startConferenceOnEnter="false"
-              endConferenceOnExit="false"
-              beep="false"
-              waitUrl="">
-              ${conferenceName}
-            </Conference>
-          </Dial>
-        </Response>`;
-
-      const cellStatusCallback = `${appUrl}/api/twilio-status?type=simring-cell&conferenceName=${encodeURIComponent(conferenceName)}&reservationSid=${reservationSid}&taskSid=${taskSid}&workspaceSid=${workspaceSid}&workerSid=${workerSid}&callerCallSid=${callerCallSid}&contactUri=${encodeURIComponent(contactUri)}${bypassParam}`;
-
-      let cellCallSid = '';
+      // ✅ Fetch worker's live activity to verify they are online before ringing cell
+      let isOnline = false;
       try {
-        const call = await twilioClient.calls.create({
-          to: workerAttrs.cell_phone,
-          from: process.env.TWILIO_MAIN_NUMBER || '+18338547126',
-          twiml: cellTwiml,
-          timeout: 20,
-          machineDetection: 'Enable',
-          asyncAmd: 'true',
-          asyncAmdStatusCallback: `${appUrl}/api/twilio-status?type=simring-amd&conferenceName=${encodeURIComponent(conferenceName)}${bypassParam}`,
-          asyncAmdStatusCallbackMethod: 'POST',
-          statusCallback: cellStatusCallback,
-          statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
-          statusCallbackMethod: 'POST',
-        });
-        cellCallSid = call.sid;
-        console.log(`📱 Cell leg initiated: ${cellCallSid}`);
-        console.log(`✅ Cell statusCallback set at creation time`);
+        const workerData = await twilioClient.taskrouter.v1
+          .workspaces(workspaceSid)
+          .workers(workerSid)
+          .fetch();
+
+        console.log('👤 Worker current activity:', workerData.activityName);
+        isOnline = workerData.activityName === 'Available';
+
+        if (!isOnline) {
+          console.log(`⏭️ Worker is "${workerData.activityName}" - skipping cell ring, falling through to browser-only`);
+        }
       } catch (err) {
-        console.error('❌ Failed to dial cell phone:', (err as Error).message);
+        console.error('⚠️ Failed to fetch worker activity - skipping cell ring:', (err as Error).message);
       }
 
-      const conferenceStatusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}&cellCallSid=${cellCallSid}&workerSid=${workerSid}${bypassParam}`;
+      if (isOnline) {
+        console.log('📱 Simultaneous ring enabled - dialing browser + cell:', workerAttrs.cell_phone);
 
-      const instruction = {
-        instruction: 'conference',
-        to: contactUri,
-        from: taskAttrs.from || process.env.TWILIO_MAIN_NUMBER || '+18338547126',
-        post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
-        timeout: 20,
-        conference_friendly_name: conferenceName,
-        conference_status_callback: conferenceStatusCallbackUrl,
-        conference_status_callback_event: 'start, end, join, leave',
-        end_conference_on_exit: true,
-        end_conference_on_customer_exit: true,
-        reject_pending_reservations: true,
-      };
+        const conferenceName  = `simring-${reservationSid}`;
+        const contactUri      = workerAttrs.contact_uri || `client:${workerAttrs.email}`;
+        const callerCallSid   = taskAttrs.call_sid || '';
 
-      console.log('📞 Simultaneous ring conference instruction:', instruction);
-      return Response.json(instruction);
+        const cellTwiml = `<?xml version="1.0" encoding="UTF-8"?>
+          <Response>
+            <Dial>
+              <Conference
+                startConferenceOnEnter="false"
+                endConferenceOnExit="false"
+                beep="false"
+                waitUrl="">
+                ${conferenceName}
+              </Conference>
+            </Dial>
+          </Response>`;
+
+        const cellStatusCallback = `${appUrl}/api/twilio-status?type=simring-cell&conferenceName=${encodeURIComponent(conferenceName)}&reservationSid=${reservationSid}&taskSid=${taskSid}&workspaceSid=${workspaceSid}&workerSid=${workerSid}&callerCallSid=${callerCallSid}&contactUri=${encodeURIComponent(contactUri)}${bypassParam}`;
+
+        let cellCallSid = '';
+        try {
+          const call = await twilioClient.calls.create({
+            to: workerAttrs.cell_phone,
+            from: process.env.TWILIO_MAIN_NUMBER || '+18338547126',
+            twiml: cellTwiml,
+            timeout: 20,
+            machineDetection: 'Enable',
+            asyncAmd: 'true',
+            asyncAmdStatusCallback: `${appUrl}/api/twilio-status?type=simring-amd&conferenceName=${encodeURIComponent(conferenceName)}${bypassParam}`,
+            asyncAmdStatusCallbackMethod: 'POST',
+            statusCallback: cellStatusCallback,
+            statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
+            statusCallbackMethod: 'POST',
+          });
+          cellCallSid = call.sid;
+          console.log(`📱 Cell leg initiated: ${cellCallSid}`);
+          console.log(`✅ Cell statusCallback set at creation time`);
+        } catch (err) {
+          console.error('❌ Failed to dial cell phone:', (err as Error).message);
+        }
+
+        const conferenceStatusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}&cellCallSid=${cellCallSid}&workerSid=${workerSid}${bypassParam}`;
+
+        const instruction = {
+          instruction: 'conference',
+          to: contactUri,
+          from: taskAttrs.from || process.env.TWILIO_MAIN_NUMBER || '+18338547126',
+          post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
+          timeout: 20,
+          conference_friendly_name: conferenceName,
+          conference_status_callback: conferenceStatusCallbackUrl,
+          conference_status_callback_event: 'start, end, join, leave',
+          end_conference_on_exit: true,
+          end_conference_on_customer_exit: true,
+          reject_pending_reservations: true,
+        };
+
+        console.log('📞 Simultaneous ring conference instruction:', instruction);
+        return Response.json(instruction);
+      }
     }
 
     // ─────────────────────────────────────────────
-    // NORMAL WORKER
+    // NORMAL WORKER (browser only)
     // ─────────────────────────────────────────────
     const conferenceStatusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}${bypassParam}`;
 
@@ -189,7 +211,7 @@ export async function POST(req: Request) {
       reject_pending_reservations: true,
     };
 
-    console.log('📞 Conference instruction:', instruction);
+    console.log('📞 Conference instruction (browser only):', instruction);
     return Response.json(instruction);
   } catch (error) {
     console.error('❌ Assignment callback error:', error);
