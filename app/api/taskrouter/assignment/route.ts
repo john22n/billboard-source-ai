@@ -159,7 +159,7 @@ export async function POST(req: Request) {
             timeout: 20,
             machineDetection: 'Enable',
             asyncAmd: 'true',
-            asyncAmdStatusCallback: `${appUrl}/api/twilio-status?type=simring-amd&conferenceName=${encodeURIComponent(conferenceName)}${bypassParam}`,
+            asyncAmdStatusCallback: `${appUrl}/api/twilio-status?type=simring-amd&conferenceName=${encodeURIComponent(conferenceName)}&taskSid=${taskSid}&workspaceSid=${workspaceSid}&workerSid=${workerSid}&callerCallSid=${callerCallSid}${bypassParam}`,
             asyncAmdStatusCallbackMethod: 'POST',
             statusCallback: cellStatusCallback,
             statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
