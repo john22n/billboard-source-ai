@@ -6,10 +6,12 @@
  * For simultaneous ring:
  * - conference-start: Someone answered — cancel cell leg
  * - participant-leave: GPP2 left — cancel cell leg AND complete task
+ *   ✅ FIX: Check if cell is in-progress before canceling. When cell answers,
+ *   the app leg gets canceled which fires participant-leave with the app's
+ *   callSid. Without this check we'd cancel the cell that's actively talking.
  * - conference-end: Cancel cell leg only — task completion handled elsewhere
  */
 import twilio from 'twilio';
-
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
 const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
 const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!;
@@ -39,7 +41,6 @@ async function completeTask(taskSid: string, workspaceSid: string, reason: strin
       .workspaces(workspaceSid)
       .tasks(taskSid)
       .fetch();
-
     if (task.assignmentStatus === 'assigned' || task.assignmentStatus === 'wrapping') {
       await client.taskrouter.v1
         .workspaces(workspaceSid)
@@ -62,7 +63,6 @@ async function completeTask(taskSid: string, workspaceSid: string, reason: strin
 export async function POST(req: Request) {
   try {
     const formData = await req.formData();
-
     const statusCallbackEvent = formData.get('StatusCallbackEvent') as string;
     const conferenceSid = formData.get('ConferenceSid') as string;
     const callSid = formData.get('CallSid') as string;
@@ -102,14 +102,32 @@ export async function POST(req: Request) {
       }
     }
 
-    // ── App worker hung up — cancel cell AND complete task ──
+    // ── Participant left the conference ──
     if (statusCallbackEvent === 'participant-leave') {
       console.log(`📵 participant-leave fired. CallSid: ${callSid}`);
       if (cellCallSid) {
         if (callSid !== cellCallSid) {
-          console.log(`📵 Worker left (${callSid}) — canceling cell leg: ${cellCallSid}`);
-          await cancelCellLeg(cellCallSid, 'worker-left');
-          await completeTask(taskSid, workspaceSid, 'Worker hung up');
+          // ✅ FIX: Check if cell is already in-progress before canceling.
+          // When the cell answers, twilio-status cancels the app leg — that fires
+          // participant-leave with the app's callSid (≠ cellCallSid). Without this
+          // guard we'd incorrectly cancel the cell that's actively talking to the caller.
+          let cellIsActive = false;
+          try {
+            const cellCall = await client.calls(cellCallSid).fetch();
+            cellIsActive = cellCall.status === 'in-progress';
+            console.log(`📞 Cell call status: ${cellCall.status}`);
+          } catch (err) {
+            console.warn(`⚠️ Could not fetch cell call status:`, (err as Error).message);
+          }
+
+          if (cellIsActive) {
+            console.log(`ℹ️ App leg left but cell is in-progress — cell already answered, skipping cell cancel`);
+            // Task was already completed in twilio-status in-progress handler — no-op
+          } else {
+            console.log(`📵 Worker left app (${callSid}) — canceling cell leg: ${cellCallSid}`);
+            await cancelCellLeg(cellCallSid, 'worker-left');
+            await completeTask(taskSid, workspaceSid, 'Worker hung up');
+          }
         } else {
           console.log(`📵 Cell itself left — no action needed`);
         }
