@@ -95,12 +95,18 @@ export async function POST(req: Request) {
         post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
       };
 
-      twilioClient.taskrouter.v1
-        .workspaces(workspaceSid)
-        .tasks(taskSid)
-        .update({ assignmentStatus: 'completed', reason: 'Redirected to voicemail' })
-        .then(() => console.log(`✅ Voicemail task ${taskSid} completed`))
-        .catch((err: Error) => console.error('⚠️ Failed to complete voicemail task:', err.message));
+      // ✅ FIX: await this instead of fire-and-forget.
+      // On Vercel serverless, once the response is returned the function shuts down.
+      // Any unawaited async work gets killed mid-flight, causing "socket hang up".
+      try {
+        await twilioClient.taskrouter.v1
+          .workspaces(workspaceSid)
+          .tasks(taskSid)
+          .update({ assignmentStatus: 'completed', reason: 'Redirected to voicemail' });
+        console.log(`✅ Voicemail task ${taskSid} completed`);
+      } catch (err) {
+        console.error('⚠️ Failed to complete voicemail task:', (err as Error).message);
+      }
 
       return Response.json(instruction);
     }
