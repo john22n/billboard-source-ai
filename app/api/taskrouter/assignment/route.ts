@@ -95,9 +95,8 @@ export async function POST(req: Request) {
         post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
       };
 
-      // ✅ FIX: await this instead of fire-and-forget.
-      // On Vercel serverless, once the response is returned the function shuts down.
-      // Any unawaited async work gets killed mid-flight, causing "socket hang up".
+      // ✅ FIX: await instead of fire-and-forget — Vercel kills unawaited async work
+      // after the response is returned, causing "socket hang up".
       try {
         await twilioClient.taskrouter.v1
           .workspaces(workspaceSid)
@@ -167,6 +166,12 @@ export async function POST(req: Request) {
             asyncAmd: 'true',
             asyncAmdStatusCallback: `${appUrl}/api/twilio-status?type=simring-amd&conferenceName=${encodeURIComponent(conferenceName)}&taskSid=${taskSid}&workspaceSid=${workspaceSid}&workerSid=${workerSid}&callerCallSid=${callerCallSid}${bypassParam}`,
             asyncAmdStatusCallbackMethod: 'POST',
+            // ✅ Tuned AMD params — cuts voicemail detection from ~5s down to ~1-2s.
+            // Default values are much higher and cause callers to hear voicemail briefly
+            // before AMD fires and cancels the cell leg.
+            machineDetectionSpeechThreshold: 1000,   // ms of speech to classify as machine (default: 2400)
+            machineDetectionSpeechEndThreshold: 500,  // ms of silence after speech (default: 1200)
+            machineDetectionSilenceTimeout: 3000,     // ms of silence before giving up (default: 5000)
             statusCallback: cellStatusCallback,
             statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
             statusCallbackMethod: 'POST',
