@@ -5,13 +5,13 @@
  * - Cell answers (in-progress): bridge caller into conference, cancel app ringing
  * - Cell still ringing but GPP2 answered: cancel cell leg
  * - Cell declined/no-answer: complete task + redirect caller to re-enqueue
- *   ✅ FIX: reservation is already 'accepted' by this point — cannot reject.
- *   Instead complete the task and redirect caller back to /api/twilio-inbound.
- * - Cell hangs up mid-call (completed, duration > 0, caller in conference): end conference so app disconnects
- * - Cell slow decline (completed, duration > 0, caller NOT in conference): complete task + re-enqueue caller
+ * - Cell hangs up mid-call (completed, duration > 0, caller in conference): re-enqueue caller
+ * - Cell slow decline (completed, duration > 0, caller NOT in conference): complete task + re-enqueue
  *
  * For AMD detection (type=simring-amd):
- * - Voicemail detected: cancel cell leg so caller rolls to next agent
+ * - Voicemail detected: cancel cell leg, complete task, re-enqueue caller directly
+ *   ✅ FIX: Don't rely on follow-up simring-cell canceled callback — it never fires
+ *   after an AMD-triggered cancel. Handle everything in the AMD block itself.
  */
 import twilio from 'twilio';
 
@@ -19,7 +19,7 @@ const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
 const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!;
 
-// ── Raw Twilio REST helpers (avoids SDK TypeScript overload issues) ──────────
+// ── Raw Twilio REST helpers ──────────────────────────────────────────────────
 const twilioAuth = () =>
   'Basic ' + Buffer.from(`${ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64');
 
@@ -96,7 +96,10 @@ export async function POST(req: Request) {
     const client = twilio(ACCOUNT_SID, TWILIO_AUTH_TOKEN!);
 
     // ─────────────────────────────────────────────────────────────
-    // AMD CALLBACK — voicemail detected, cancel cell leg
+    // AMD CALLBACK — voicemail detected
+    // ✅ FIX: Re-enqueue caller directly here. The follow-up simring-cell
+    // canceled callback never fires after an AMD-triggered cancel, so we
+    // cannot rely on it. Handle cancel + task complete + re-enqueue all here.
     // ─────────────────────────────────────────────────────────────
     if (callType === 'simring-amd') {
       if (
@@ -105,15 +108,53 @@ export async function POST(req: Request) {
         AnsweredBy === 'machine_end_silence'
       ) {
         console.log(`🤖 Voicemail detected (${AnsweredBy}) — canceling cell leg: ${CallSid}`);
+
+        // Step 1: Cancel the cell leg
         try {
           await twilioPost(`Calls/${CallSid}.json`, { Status: 'canceled' });
-          console.log(`✅ Cell leg canceled — caller will roll to next agent`);
+          console.log(`✅ Cell leg canceled`);
         } catch (err) {
           console.warn(`⚠️ Could not cancel cell leg:`, (err as Error).message);
+        }
+
+        // Step 2: Complete the task to free the worker back to Available
+        if (taskSid) {
+          try {
+            await client.taskrouter.v1
+              .workspaces(workspaceSid)
+              .tasks(taskSid)
+              .update({ assignmentStatus: 'completed', reason: 'Voicemail detected — re-enqueueing' });
+            console.log(`✅ Task ${taskSid} completed`);
+          } catch (err) {
+            const msg = (err as Error).message || '';
+            if (msg.includes('not currently assigned') || msg.includes('already')) {
+              console.log(`ℹ️ Task already resolved — skipping`);
+            } else {
+              console.warn(`⚠️ Failed to complete task:`, msg);
+            }
+          }
+        } else {
+          console.warn(`⚠️ No taskSid in AMD callback — cannot complete task`);
+        }
+
+        // Step 3: Redirect caller back to inbound to re-enqueue to next available agent
+        if (callerCallSid) {
+          try {
+            const { protocol, host } = new URL(req.url);
+            const inboundUrl = `${protocol}//${host}/api/twilio-inbound`;
+            const requeueTwiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Redirect method="POST">${inboundUrl}</Redirect></Response>`;
+            await client.calls(callerCallSid).update({ twiml: requeueTwiml });
+            console.log(`✅ Caller ${callerCallSid} re-enqueued to next agent`);
+          } catch (err) {
+            console.error('❌ Failed to re-enqueue caller:', (err as Error).message);
+          }
+        } else {
+          console.warn(`⚠️ No callerCallSid in AMD callback — cannot re-enqueue`);
         }
       } else {
         console.log(`👤 Human answered (${AnsweredBy}) — no action needed`);
       }
+
       return new Response(null, { status: 204 });
     }
 
@@ -206,9 +247,6 @@ export async function POST(req: Request) {
       // ── Cell completed with duration > 0 ──
       // Could be a genuine mid-call hangup (caller was bridged into conference)
       // OR a slow decline (phone rang for a second or two before declining).
-      // We check conference participants to tell the difference:
-      //   - Caller IS in conference  → cell answered then hung up mid-call → re-enqueue caller
-      //   - Caller NOT in conference → still in <Enqueue>, cell just declined slowly → complete task + re-enqueue
       if (CallStatus === 'completed' && CallDuration && parseInt(CallDuration) > 0) {
         console.log(`📵 Cell call completed (duration: ${CallDuration}s) — checking if caller was bridged into conference`);
         let callerWasInConference = false;
@@ -238,7 +276,7 @@ export async function POST(req: Request) {
         }
 
         if (callerWasInConference && callerCallSid) {
-          // Caller was actually bridged — cell answered then hung up mid-call → re-enqueue
+          // Cell answered then hung up mid-call → re-enqueue caller
           console.log(`📵 Cell hung up mid-call — re-enqueueing caller ${callerCallSid}`);
           try {
             const { protocol, host } = new URL(req.url);
@@ -250,8 +288,7 @@ export async function POST(req: Request) {
             console.error('❌ Failed to re-enqueue caller:', (err as Error).message);
           }
         } else {
-          // Caller is still in <Enqueue> — cell just declined slowly
-          // Complete task + re-enqueue caller to next available agent
+          // Cell declined slowly — complete task + re-enqueue caller
           console.log(`ℹ️ Cell declined after ${CallDuration}s — completing task and re-enqueueing caller`);
 
           if (taskSid) {
@@ -288,9 +325,8 @@ export async function POST(req: Request) {
       }
 
       // ── Cell declined or no-answer ──
-      // ✅ FIX: Reservation is already 'accepted' at this point (TaskRouter auto-accepts
-      // when assignment callback returns conference instruction) — rejecting is not allowed.
-      // Instead: complete the task to free the worker, then redirect caller to re-enqueue.
+      // ✅ FIX: Reservation is already 'accepted' at this point — cannot reject.
+      // Complete the task to free the worker, then redirect caller to re-enqueue.
       if (
         CallStatus === 'no-answer' ||
         CallStatus === 'busy' ||
