@@ -4,9 +4,11 @@
  * For simultaneous ring cell legs (type=simring-cell):
  * - Cell answers (in-progress): bridge caller into conference, cancel app ringing
  * - Cell still ringing but GPP2 answered: cancel cell leg
- * - Cell declined/no-answer: reject reservation — TaskRouter reassigns automatically
+ * - Cell declined/no-answer: complete task + redirect caller to re-enqueue
+ *   ✅ FIX: reservation is already 'accepted' by this point — cannot reject.
+ *   Instead complete the task and redirect caller back to /api/twilio-inbound.
  * - Cell hangs up mid-call (completed, duration > 0, caller in conference): end conference so app disconnects
- * - Cell slow decline (completed, duration > 0, caller NOT in conference): reject reservation only
+ * - Cell slow decline (completed, duration > 0, caller NOT in conference): complete task + re-enqueue caller
  *
  * For AMD detection (type=simring-amd):
  * - Voicemail detected: cancel cell leg so caller rolls to next agent
@@ -123,7 +125,6 @@ export async function POST(req: Request) {
       // ── Cell answered — bridge caller in, cancel app ringing ──
       if (CallStatus === 'in-progress') {
         console.log(`📱 Cell answered — bridging caller into conference: ${conferenceName}`);
-
         if (callerCallSid) {
           try {
             const callerTwiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Dial><Conference startConferenceOnEnter="true" endConferenceOnExit="false" beep="false" waitUrl="">${conferenceName}</Conference></Dial></Response>`;
@@ -149,7 +150,7 @@ export async function POST(req: Request) {
           }
         }
 
-        // Cancel any ringing GPP2 app calls
+        // Cancel any ringing app calls
         if (contactUri) {
           try {
             console.log(`🔍 Looking for active app calls to: ${contactUri}`);
@@ -207,12 +208,10 @@ export async function POST(req: Request) {
       // OR a slow decline (phone rang for a second or two before declining).
       // We check conference participants to tell the difference:
       //   - Caller IS in conference  → cell answered then hung up mid-call → re-enqueue caller
-      //   - Caller NOT in conference → still in <Enqueue>, cell just declined slowly → reject reservation only
+      //   - Caller NOT in conference → still in <Enqueue>, cell just declined slowly → complete task + re-enqueue
       if (CallStatus === 'completed' && CallDuration && parseInt(CallDuration) > 0) {
         console.log(`📵 Cell call completed (duration: ${CallDuration}s) — checking if caller was bridged into conference`);
-
         let callerWasInConference = false;
-
         if (callerCallSid && conferenceName) {
           try {
             const conferences = await client.conferences.list({
@@ -220,7 +219,6 @@ export async function POST(req: Request) {
               status: 'in-progress',
               limit: 1,
             });
-
             if (conferences.length > 0) {
               const participants = await client
                 .conferences(conferences[0].sid)
@@ -253,61 +251,85 @@ export async function POST(req: Request) {
           }
         } else {
           // Caller is still in <Enqueue> — cell just declined slowly
-          // Rejecting the reservation is enough — TaskRouter reassigns automatically
-          console.log(`ℹ️ Cell declined after ${CallDuration}s — caller still in queue, TaskRouter will reassign`);
-        }
+          // Complete task + re-enqueue caller to next available agent
+          console.log(`ℹ️ Cell declined after ${CallDuration}s — completing task and re-enqueueing caller`);
 
-        // Always reject the reservation so TaskRouter rings the next agent
-        if (reservationSid && workspaceSid && workerSid) {
-          try {
-            await client.taskrouter.v1
-              .workspaces(workspaceSid)
-              .workers(workerSid)
-              .reservations(reservationSid)
-              .update({ reservationStatus: 'rejected' });
-            console.log(`✅ Reservation ${reservationSid} rejected — TaskRouter will ring next agent`);
-          } catch (err) {
-            const msg = (err as Error).message || '';
-            if (msg.includes('already') || msg.includes('completed') || msg.includes('accepted')) {
-              console.log(`ℹ️ Reservation already resolved — skipping`);
-            } else {
-              console.error('❌ Failed to reject reservation:', msg);
+          if (taskSid) {
+            try {
+              await client.taskrouter.v1
+                .workspaces(workspaceSid)
+                .tasks(taskSid)
+                .update({ assignmentStatus: 'completed', reason: 'Cell slow decline — re-enqueueing' });
+              console.log(`✅ Task ${taskSid} completed`);
+            } catch (err) {
+              const msg = (err as Error).message || '';
+              if (msg.includes('not currently assigned') || msg.includes('already')) {
+                console.log(`ℹ️ Task already resolved — skipping`);
+              } else {
+                console.error('❌ Failed to complete task:', msg);
+              }
             }
           }
-        } else {
-          console.warn(`⚠️ Cannot reject reservation — missing params:`, { reservationSid, workspaceSid, workerSid });
+
+          if (callerCallSid) {
+            try {
+              const { protocol, host } = new URL(req.url);
+              const inboundUrl = `${protocol}//${host}/api/twilio-inbound`;
+              const requeueTwiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Redirect method="POST">${inboundUrl}</Redirect></Response>`;
+              await client.calls(callerCallSid).update({ twiml: requeueTwiml });
+              console.log(`✅ Caller ${callerCallSid} redirected to /api/twilio-inbound for re-enqueue`);
+            } catch (err) {
+              console.error('❌ Failed to re-enqueue caller:', (err as Error).message);
+            }
+          } else {
+            console.warn(`⚠️ No callerCallSid — cannot re-enqueue caller`);
+          }
         }
       }
 
-      // ── Cell declined or no-answer — reject reservation only ──
-      // The caller is held in <Enqueue> by TaskRouter. Rejecting the reservation
-      // is enough — TaskRouter automatically reassigns to the next available worker.
-      // Do NOT redirect the caller — they are not a free call, they are queue-managed.
+      // ── Cell declined or no-answer ──
+      // ✅ FIX: Reservation is already 'accepted' at this point (TaskRouter auto-accepts
+      // when assignment callback returns conference instruction) — rejecting is not allowed.
+      // Instead: complete the task to free the worker, then redirect caller to re-enqueue.
       if (
         CallStatus === 'no-answer' ||
         CallStatus === 'busy' ||
         (CallStatus === 'canceled' && (!CallDuration || CallDuration === '0')) ||
         (CallStatus === 'completed' && (!CallDuration || CallDuration === '0'))
       ) {
-        console.log(`📵 Cell declined/no-answer (${CallStatus}) — rejecting reservation so TaskRouter reassigns`);
-        if (reservationSid && workspaceSid && workerSid) {
+        console.log(`📵 Cell declined/no-answer (${CallStatus}) — completing task and re-enqueueing caller`);
+
+        // Step 1: Complete the task so TaskRouter frees the worker back to Available
+        if (taskSid) {
           try {
             await client.taskrouter.v1
               .workspaces(workspaceSid)
-              .workers(workerSid)
-              .reservations(reservationSid)
-              .update({ reservationStatus: 'rejected' });
-            console.log(`✅ Reservation ${reservationSid} rejected — TaskRouter will ring next agent`);
+              .tasks(taskSid)
+              .update({ assignmentStatus: 'completed', reason: 'Cell no-answer — re-enqueueing' });
+            console.log(`✅ Task ${taskSid} completed`);
           } catch (err) {
             const msg = (err as Error).message || '';
-            if (msg.includes('already') || msg.includes('completed') || msg.includes('accepted')) {
-              console.log(`ℹ️ Reservation ${reservationSid} already resolved — no action needed`);
+            if (msg.includes('not currently assigned') || msg.includes('already')) {
+              console.log(`ℹ️ Task already resolved — skipping`);
             } else {
-              console.error('❌ Failed to reject reservation:', msg);
+              console.error('❌ Failed to complete task:', msg);
             }
           }
+        }
+
+        // Step 2: Redirect caller back to inbound to re-enqueue to next available agent
+        if (callerCallSid) {
+          try {
+            const { protocol, host } = new URL(req.url);
+            const inboundUrl = `${protocol}//${host}/api/twilio-inbound`;
+            const requeueTwiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Redirect method="POST">${inboundUrl}</Redirect></Response>`;
+            await client.calls(callerCallSid).update({ twiml: requeueTwiml });
+            console.log(`✅ Caller ${callerCallSid} redirected to /api/twilio-inbound for re-enqueue`);
+          } catch (err) {
+            console.error('❌ Failed to re-enqueue caller:', (err as Error).message);
+          }
         } else {
-          console.warn(`⚠️ Cannot reject reservation — missing params:`, { reservationSid, workspaceSid, workerSid });
+          console.warn(`⚠️ No callerCallSid — cannot re-enqueue caller`);
         }
       }
     }
