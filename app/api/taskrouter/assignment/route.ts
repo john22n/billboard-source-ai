@@ -6,6 +6,13 @@
  * For workers with simultaneous_ring=true, also dials their cell phone
  * into the same named conference so they can answer either way.
  * Only rings cell phone if worker is currently in an Available/Online activity.
+ *
+ * ✅ Call Screening replaces AMD:
+ * Cell TwiML uses <Gather> to prompt "Press 1 to accept, press 2 to decline".
+ * - Press 1 → cell-screening handler bridges caller into conference
+ * - Press 2 or no input → cell-screening handler re-enqueues caller
+ * - Voicemail picks up → can't press 1 → timeout → re-enqueues automatically
+ * No AMD params needed, no race conditions, no voicemail detection delay.
  */
 import twilio from 'twilio';
 
@@ -95,8 +102,7 @@ export async function POST(req: Request) {
         post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
       };
 
-      // ✅ FIX: await instead of fire-and-forget — Vercel kills unawaited async work
-      // after the response is returned, causing "socket hang up".
+      // ✅ Awaited — Vercel kills unawaited async work after response returns
       try {
         await twilioClient.taskrouter.v1
           .workspaces(workspaceSid)
@@ -115,7 +121,6 @@ export async function POST(req: Request) {
     // ─────────────────────────────────────────────
     if (workerAttrs.simultaneous_ring && workerAttrs.cell_phone) {
 
-      // ✅ Fetch worker's live activity to verify they are online before ringing cell
       let isOnline = false;
       try {
         const workerData = await twilioClient.taskrouter.v1
@@ -140,18 +145,19 @@ export async function POST(req: Request) {
         const contactUri      = workerAttrs.contact_uri || `client:${workerAttrs.email}`;
         const callerCallSid   = taskAttrs.call_sid || '';
 
+        // ✅ Call Screening TwiML — replaces AMD entirely.
+        // Plays a short prompt asking agent to press 1 to accept or 2 to decline.
+        // - Voicemail can't press 1 so it times out after 10s → no-input handler fires
+        // - No AMD detection delay, no race conditions, works 100% reliably
+        const screeningBaseUrl = `${appUrl}/api/taskrouter/cell-screening?conferenceName=${encodeURIComponent(conferenceName)}&taskSid=${taskSid}&workspaceSid=${workspaceSid}&workerSid=${workerSid}&callerCallSid=${callerCallSid}&contactUri=${encodeURIComponent(contactUri)}${bypassParam}`;
+
         const cellTwiml = `<?xml version="1.0" encoding="UTF-8"?>
-          <Response>
-            <Dial>
-              <Conference
-                startConferenceOnEnter="false"
-                endConferenceOnExit="false"
-                beep="false"
-                waitUrl="">
-                ${conferenceName}
-              </Conference>
-            </Dial>
-          </Response>`;
+<Response>
+  <Gather numDigits="1" action="${screeningBaseUrl}" method="POST" timeout="10">
+    <Say voice="Polly.Matthew">Press 1 to accept</Say>
+  </Gather>
+  <Redirect method="POST">${screeningBaseUrl}&amp;noInput=true</Redirect>
+</Response>`;
 
         const cellStatusCallback = `${appUrl}/api/twilio-status?type=simring-cell&conferenceName=${encodeURIComponent(conferenceName)}&reservationSid=${reservationSid}&taskSid=${taskSid}&workspaceSid=${workspaceSid}&workerSid=${workerSid}&callerCallSid=${callerCallSid}&contactUri=${encodeURIComponent(contactUri)}${bypassParam}`;
 
@@ -162,16 +168,6 @@ export async function POST(req: Request) {
             from: process.env.TWILIO_MAIN_NUMBER || '+18338547126',
             twiml: cellTwiml,
             timeout: 20,
-            machineDetection: 'Enable',
-            asyncAmd: 'true',
-            asyncAmdStatusCallback: `${appUrl}/api/twilio-status?type=simring-amd&conferenceName=${encodeURIComponent(conferenceName)}&taskSid=${taskSid}&workspaceSid=${workspaceSid}&workerSid=${workerSid}&callerCallSid=${callerCallSid}${bypassParam}`,
-            asyncAmdStatusCallbackMethod: 'POST',
-            // ✅ Tuned AMD params — cuts voicemail detection from ~5s down to ~1-2s.
-            // Default values are much higher and cause callers to hear voicemail briefly
-            // before AMD fires and cancels the cell leg.
-            machineDetectionSpeechThreshold: 1000,   // ms of speech to classify as machine (default: 2400)
-            machineDetectionSpeechEndThreshold: 500,  // ms of silence after speech (default: 1200)
-            machineDetectionSilenceTimeout: 2000,     // ms of silence before giving up (default: 5000)
             statusCallback: cellStatusCallback,
             statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
             statusCallbackMethod: 'POST',
