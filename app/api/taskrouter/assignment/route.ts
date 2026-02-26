@@ -13,6 +13,11 @@
  * - Press 2 or no input → cell-screening handler re-enqueues caller
  * - Voicemail picks up → can't press 1 → timeout → re-enqueues automatically
  * No AMD params needed, no race conditions, no voicemail detection delay.
+ *
+ * ✅ FIX: XML-escape the screeningBaseUrl before embedding in TwiML.
+ * The URL contains multiple & chars for query params — these must be &amp; in XML
+ * attribute values, otherwise Twilio's XML parser rejects the TwiML and plays
+ * "We are sorry, an application error has occurred" the moment the cell picks up.
  */
 import twilio from 'twilio';
 
@@ -22,6 +27,9 @@ const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
 
 const twilioClient = twilio(ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+
+/** Escape & in URLs before embedding them in XML attribute values */
+const xmlAttr = (s: string) => s.replace(/&/g, '&amp;');
 
 export async function POST(req: Request) {
   try {
@@ -102,7 +110,6 @@ export async function POST(req: Request) {
         post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
       };
 
-      // ✅ Awaited — Vercel kills unawaited async work after response returns
       try {
         await twilioClient.taskrouter.v1
           .workspaces(workspaceSid)
@@ -145,19 +152,25 @@ export async function POST(req: Request) {
         const contactUri      = workerAttrs.contact_uri || `client:${workerAttrs.email}`;
         const callerCallSid   = taskAttrs.call_sid || '';
 
-        // ✅ Call Screening TwiML — replaces AMD entirely.
-        // Plays a short prompt asking agent to press 1 to accept or 2 to decline.
-        // - Voicemail can't press 1 so it times out after 10s → no-input handler fires
-        // - No AMD detection delay, no race conditions, works 100% reliably
+        // Build the raw URL (with plain & separators)
         const screeningBaseUrl = `${appUrl}/api/taskrouter/cell-screening?conferenceName=${encodeURIComponent(conferenceName)}&taskSid=${taskSid}&workspaceSid=${workspaceSid}&workerSid=${workerSid}&callerCallSid=${callerCallSid}&contactUri=${encodeURIComponent(contactUri)}${bypassParam}`;
+
+        // ✅ FIX: XML-escape before embedding in TwiML.
+        // Every & in the URL must be &amp; inside an XML attribute or text node.
+        // Without this, Twilio's XML parser fails immediately when the cell answers,
+        // producing "We are sorry, an application error has occurred".
+        const screeningUrlXml = xmlAttr(screeningBaseUrl);
+        const noInputUrlXml   = xmlAttr(`${screeningBaseUrl}&noInput=true`);
 
         const cellTwiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Gather numDigits="1" action="${screeningBaseUrl}" method="POST" timeout="10">
+  <Gather numDigits="1" action="${screeningUrlXml}" method="POST" timeout="10">
     <Say voice="Polly.Matthew">Press 1 to accept</Say>
   </Gather>
-  <Redirect method="POST">${screeningBaseUrl}&amp;noInput=true</Redirect>
+  <Redirect method="POST">${noInputUrlXml}</Redirect>
 </Response>`;
+
+        console.log('📋 Cell TwiML (first 300 chars):', cellTwiml.slice(0, 300));
 
         const cellStatusCallback = `${appUrl}/api/twilio-status?type=simring-cell&conferenceName=${encodeURIComponent(conferenceName)}&reservationSid=${reservationSid}&taskSid=${taskSid}&workspaceSid=${workspaceSid}&workerSid=${workerSid}&callerCallSid=${callerCallSid}&contactUri=${encodeURIComponent(contactUri)}${bypassParam}`;
 
@@ -174,7 +187,6 @@ export async function POST(req: Request) {
           });
           cellCallSid = call.sid;
           console.log(`📱 Cell leg initiated: ${cellCallSid}`);
-          console.log(`✅ Cell statusCallback set at creation time`);
         } catch (err) {
           console.error('❌ Failed to dial cell phone:', (err as Error).message);
         }
