@@ -174,11 +174,24 @@ export async function POST(req: Request) {
     const url            = new URL(req.url);
     const callType       = url.searchParams.get('type');
     const conferenceName = url.searchParams.get('conferenceName');
+    const reservationSid = url.searchParams.get('reservationSid');
     const callerCallSid  = url.searchParams.get('callerCallSid');
     const taskSid        = url.searchParams.get('taskSid');
     const workspaceSid   = url.searchParams.get('workspaceSid') || WORKSPACE_SID;
 
     const duration = parseInt(CallDuration || '0');
+
+    // ✅ FIX: Get conferenceName and callerCallSid from cache if needed (more reliable)
+    let cachedConferenceName = conferenceName;
+    let cachedCallerCallSid = callerCallSid;
+    if (reservationSid) {
+      const { getSimringContext } = await import('@/lib/simring-cache');
+      const cached = await getSimringContext(reservationSid);
+      if (cached) {
+        cachedConferenceName = cached.conferenceName;
+        cachedCallerCallSid = cached.callerCallSid;
+      }
+    }
 
     console.log(`📊 [twilio-status] ${CallStatus} | type=${callType} | CallSid=${CallSid} | duration=${duration}s`);
 
@@ -187,7 +200,7 @@ export async function POST(req: Request) {
     // ─────────────────────────────────────────────────────────────────────────
     // SIMULTANEOUS RING — cell leg events
     // ─────────────────────────────────────────────────────────────────────────
-    if (callType === 'simring-cell' && conferenceName) {
+    if (callType === 'simring-cell' && cachedConferenceName) {
 
       // ── Cell answered → kick browser from conference ──────────────────────
       // Agent picked up their cell and is hearing the screening prompt.
@@ -195,8 +208,8 @@ export async function POST(req: Request) {
       // that if the agent presses 1, only cell + caller end up connected.
       // (cell-screening also kicks on press-1 as a redundant safety net)
       if (CallStatus === 'in-progress') {
-        console.log(`📱 Cell answered (in-progress) — kicking browser from conference: ${conferenceName}`);
-        await kickBrowserFromConference(client, conferenceName, CallSid);
+        console.log(`📱 Cell answered (in-progress) — kicking browser from conference: ${cachedConferenceName}`);
+        await kickBrowserFromConference(client, cachedConferenceName, CallSid);
       }
 
       // ── Cell hung up after being connected (duration > 0) ─────────────────
@@ -204,7 +217,7 @@ export async function POST(req: Request) {
       // conference (caller, if still connected) and complete the task.
       if (CallStatus === 'completed' && duration > 0) {
         console.log(`📵 Cell hung up after ${duration}s — cleaning up conference and completing task`);
-        await removeAllConferenceParticipants(client, conferenceName);
+        await removeAllConferenceParticipants(client, cachedConferenceName);
         if (taskSid) {
           await completeTaskIfActive(client, taskSid, workspaceSid, 'Cell agent hung up');
         }
@@ -234,18 +247,18 @@ export async function POST(req: Request) {
           }
         }
 
-        if (callerCallSid) {
+        if (cachedCallerCallSid) {
           try {
             const { protocol, host } = new URL(req.url);
             const inboundUrl = `${protocol}//${host}/api/twilio-inbound`;
             const requeueTwiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Redirect method="POST">${inboundUrl}</Redirect></Response>`;
-            await client.calls(callerCallSid).update({ twiml: requeueTwiml });
-            console.log(`✅ Caller ${callerCallSid} re-enqueued`);
+            await client.calls(cachedCallerCallSid).update({ twiml: requeueTwiml });
+             console.log(`✅ Caller ${cachedCallerCallSid} re-enqueued`);
           } catch (err) {
             console.error('❌ Failed to re-enqueue caller:', (err as Error).message);
           }
         } else {
-          console.warn(`⚠️ No callerCallSid — cannot re-enqueue caller`);
+          console.warn(`⚠️ No cachedCallerCallSid — cannot re-enqueue caller`);
         }
       }
     }

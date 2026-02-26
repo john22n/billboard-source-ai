@@ -185,11 +185,29 @@ export async function POST(req: Request) {
           });
           cellCallSid = call.sid;
           console.log(`📱 Cell leg initiated: ${cellCallSid}`);
+
+          // ✅ CRITICAL FIX: Store cellCallSid in cache so it's not lost
+          // URL params can get truncated or lost by Twilio. Using cache ensures
+          // we can always retrieve the cellCallSid in callbacks.
+          const { storeSimringContext } = await import('@/lib/simring-cache');
+          await storeSimringContext(reservationSid, {
+            cellCallSid,
+            conferenceName,
+            callerCallSid,
+            taskSid,
+            workspaceSid,
+            workerSid,
+            createdAt: Date.now(),
+          });
+          console.log(`📦 Cached simring context for reservation ${reservationSid}`);
         } catch (err) {
           console.error('❌ Failed to dial cell phone:', (err as Error).message);
+          cellCallSid = ''; // Ensure it's empty if creation failed
         }
 
-        const conferenceStatusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}&cellCallSid=${cellCallSid}&workerSid=${workerSid}${bypassParam}`;
+        // Build conference callback with cellCallSid (as backup to cache)
+        // and with reservationSid (primary lookup key for cache)
+        const conferenceStatusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?reservationSid=${reservationSid}&taskSid=${taskSid}&workspaceSid=${workspaceSid}&cellCallSid=${cellCallSid}&workerSid=${workerSid}${bypassParam}`;
 
         const instruction = {
           instruction: 'conference',

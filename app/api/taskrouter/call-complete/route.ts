@@ -66,10 +66,22 @@ export async function POST(req: Request) {
     const conferenceFriendlyName = formData.get('FriendlyName') as string;
 
     const url          = new URL(req.url);
+    const reservationSid = url.searchParams.get('reservationSid');
     const taskSid      = url.searchParams.get('taskSid');
     const workspaceSid = url.searchParams.get('workspaceSid') || WORKSPACE_SID;
-    const cellCallSid  = url.searchParams.get('cellCallSid') || '';
+    let cellCallSid    = url.searchParams.get('cellCallSid') || '';
     const workerSid    = url.searchParams.get('workerSid');
+
+    // ✅ FIX: If reservationSid is present, lookup cellCallSid from cache (primary)
+    // Fallback to URL param (secondary)
+    if (reservationSid && !cellCallSid) {
+      const { getSimringContext } = await import('@/lib/simring-cache');
+      const cached = await getSimringContext(reservationSid);
+      if (cached?.cellCallSid) {
+        cellCallSid = cached.cellCallSid;
+        console.log(`📦 Retrieved cellCallSid from cache: ${cellCallSid}`);
+      }
+    }
 
     console.log('═══════════════════════════════════════════');
     console.log('📞 CONFERENCE STATUS CALLBACK');
@@ -77,6 +89,7 @@ export async function POST(req: Request) {
     console.log('ConferenceSid:', conferenceSid);
     console.log('CallSid (who triggered):', callSid);
     console.log('FriendlyName:', conferenceFriendlyName);
+    console.log('ReservationSid:', reservationSid ?? 'none');
     console.log('TaskSid:', taskSid);
     console.log('CellCallSid:', cellCallSid || 'NONE — browser-only call');
     console.log('WorkerSid:', workerSid ?? 'none');
