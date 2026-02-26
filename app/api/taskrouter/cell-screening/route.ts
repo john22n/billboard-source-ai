@@ -4,9 +4,14 @@
  * Called by Twilio when the agent presses a digit on their cell phone
  * or when the <Gather> times out (no input — voicemail or ignored).
  *
- * Press 1 → accept: bridge caller into conference, return TwiML to join conference
+ * Press 1 → accept: kick browser from conference, bridge caller in, cell joins
  * Press 2 → decline: complete task + re-enqueue caller to next agent, hangup cell
  * No input → same as decline: voicemail/no-answer, re-enqueue caller
+ *
+ * ✅ FIX: On accept, kick the browser participant from the conference before
+ * bridging the caller in. The browser always joins the conference first via the
+ * assignment instruction, so without this step the call becomes a 3-way:
+ * caller + cell + browser all connected together.
  */
 import twilio from 'twilio';
 
@@ -30,6 +35,44 @@ async function completeTask(taskSid: string, workspaceSid: string, reason: strin
     } else {
       console.error(`❌ Failed to complete task: ${msg}`);
     }
+  }
+}
+
+/**
+ * Kick all current conference participants that are NOT the caller.
+ * At the time the agent presses 1, the caller is still on TaskRouter hold —
+ * only the browser leg is in the conference. This removes it so we end up
+ * with a clean 2-party call: cell + caller.
+ */
+async function kickBrowserFromConference(conferenceName: string, callerCallSid: string) {
+  try {
+    const conferences = await client.conferences.list({
+      friendlyName: conferenceName,
+      status: 'in-progress',
+      limit: 1,
+    });
+
+    if (conferences.length === 0) {
+      console.warn(`⚠️ No in-progress conference found for: ${conferenceName}`);
+      return;
+    }
+
+    const conferenceSid = conferences[0].sid;
+    const participants = await client.conferences(conferenceSid).participants.list();
+    console.log(`📋 Conference ${conferenceSid} has ${participants.length} participant(s)`);
+
+    for (const p of participants) {
+      if (p.callSid !== callerCallSid) {
+        try {
+          await client.conferences(conferenceSid).participants(p.callSid).remove();
+          console.log(`✅ Kicked browser leg ${p.callSid} from conference`);
+        } catch (err) {
+          console.error(`❌ Failed to kick participant ${p.callSid}:`, (err as Error).message);
+        }
+      }
+    }
+  } catch (err) {
+    console.error(`❌ kickBrowserFromConference failed:`, (err as Error).message);
   }
 }
 
@@ -59,13 +102,20 @@ export async function POST(req: Request) {
     const accepted = digit === '1' && !noInput;
 
     if (accepted) {
-      // ── Agent pressed 1 — ACCEPT ──────────────────────────────────
-      console.log(`✅ Agent accepted call — bridging caller into conference: ${conferenceName}`);
+      // ── Agent pressed 1 — ACCEPT ──────────────────────────────────────────
+      console.log(`✅ Agent accepted call on cell — setting up conference: ${conferenceName}`);
+
+      // ✅ FIX: Kick the browser leg out of the conference first.
+      // The browser joined when the assignment instruction fired — if we don't
+      // remove it, the call becomes: caller + cell + browser (3-way).
+      if (conferenceName) {
+        await kickBrowserFromConference(conferenceName, callerCallSid);
+      }
 
       // Bridge the caller into the conference
       if (callerCallSid) {
         try {
-          const callerTwiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Dial><Conference startConferenceOnEnter="true" endConferenceOnExit="false" beep="false" waitUrl="">${conferenceName}</Conference></Dial></Response>`;
+          const callerTwiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Dial><Conference startConferenceOnEnter="true" endConferenceOnExit="false" beep="false" waitUrl="https://twimlets.com/holdmusic?Bucket=com.twilio.music.ambient">${conferenceName}</Conference></Dial></Response>`;
           await client.calls(callerCallSid).update({ twiml: callerTwiml });
           console.log(`✅ Caller ${callerCallSid} bridged into conference`);
         } catch (err) {
@@ -75,7 +125,7 @@ export async function POST(req: Request) {
         console.warn('⚠️ No callerCallSid — cannot bridge caller');
       }
 
-      // Complete the task — call is now connected
+      // Complete the task — the call is now connected via cell
       if (taskSid) {
         await completeTask(taskSid, workspaceSid, 'Answered on cell phone via screening');
       }
@@ -88,9 +138,7 @@ export async function POST(req: Request) {
       startConferenceOnEnter="true"
       endConferenceOnExit="true"
       beep="false"
-      waitUrl="">
-      ${conferenceName}
-    </Conference>
+      waitUrl="https://twimlets.com/holdmusic?Bucket=com.twilio.music.ambient">${conferenceName}</Conference>
   </Dial>
 </Response>`;
 

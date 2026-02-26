@@ -3,13 +3,20 @@
  *
  * Called when conference events occur (start, end, join, leave).
  *
- * For simultaneous ring:
- * - conference-start: Someone answered — cancel cell leg
- * - participant-leave: GPP2 left — cancel cell leg AND complete task
- *   ✅ FIX: Check if cell is in-progress before canceling. When cell answers,
- *   the app leg gets canceled which fires participant-leave with the app's
- *   callSid. Without this check we'd cancel the cell that's actively talking.
- * - conference-end: Cancel cell leg only — task completion handled elsewhere
+ * ✅ FIX: Removed conference-start cancel-cell logic.
+ * With call screening, the browser ALWAYS joins the conference first (via assignment
+ * instruction), so conference-start fires immediately — BEFORE the agent can press
+ * any digit. Canceling the cell at conference-start killed the screening flow.
+ *
+ * New event responsibilities:
+ * - conference-start:   Log only — cell screening handles accept/decline
+ * - participant-leave:  If worker (browser) left and cell is NOT in-progress → cancel cell + complete task
+ * - conference-end:     Cancel cell leg only as a safety net
+ *
+ * Cell accepted on cell phone:
+ *   cell-screening kicks browser from conference, bridges caller, joins cell → all in route.ts
+ * Cell declined / no-answer:
+ *   cell-screening or twilio-status completes task + re-enqueues caller
  */
 import twilio from 'twilio';
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
@@ -26,10 +33,13 @@ async function cancelCellLeg(cellCallSid: string, reason: string) {
     console.log(`🔍 Fetching cell call status for ${cellCallSid}...`);
     const call = await client.calls(cellCallSid).fetch();
     console.log(`📞 Cell call status: ${call.status}`);
-    const status = call.status === 'in-progress' ? 'completed' : 'canceled';
-    console.log(`📤 Updating cell call to status: ${status}`);
-    await client.calls(cellCallSid).update({ status });
-    console.log(`✅ Cell leg ${cellCallSid} ${status} (${reason})`);
+    if (call.status === 'completed' || call.status === 'canceled' || call.status === 'failed') {
+      console.log(`ℹ️ Cell leg already ${call.status} — skipping`);
+      return;
+    }
+    const newStatus = call.status === 'in-progress' ? 'completed' : 'canceled';
+    await client.calls(cellCallSid).update({ status: newStatus });
+    console.log(`✅ Cell leg ${cellCallSid} → ${newStatus} (${reason})`);
   } catch (err) {
     console.error(`❌ Error canceling cell leg (${reason}): ${(err as Error).message}`);
   }
@@ -91,26 +101,25 @@ export async function POST(req: Request) {
       return new Response('Missing parameters', { status: 400 });
     }
 
-    // ── App answered — cancel cell leg ──
+    // ── ✅ FIX: conference-start no longer cancels the cell ──────────────────
+    // Previously this fired cancelCellLeg here, but the browser ALWAYS joins
+    // the conference first via the assignment instruction — so conference-start
+    // fired before the agent could press 1, killing the screening flow entirely.
+    // Cell screening now handles the accept/decline flow completely.
     if (statusCallbackEvent === 'conference-start') {
-      console.log(`📱 conference-start fired`);
-      if (cellCallSid) {
-        console.log(`📱 Someone answered — canceling cell leg: ${cellCallSid}`);
-        await cancelCellLeg(cellCallSid, 'conference-start');
-      } else {
-        console.warn(`⚠️ conference-start fired but cellCallSid is empty`);
-      }
+      console.log(`📱 conference-start fired — browser joined conference, screening in progress`);
+      // No action needed here — cell-screening handles accept/decline
     }
 
-    // ── Participant left the conference ──
+    // ── Participant left the conference ──────────────────────────────────────
     if (statusCallbackEvent === 'participant-leave') {
       console.log(`📵 participant-leave fired. CallSid: ${callSid}`);
       if (cellCallSid) {
         if (callSid !== cellCallSid) {
-          // ✅ FIX: Check if cell is already in-progress before canceling.
-          // When the cell answers, twilio-status cancels the app leg — that fires
-          // participant-leave with the app's callSid (≠ cellCallSid). Without this
-          // guard we'd incorrectly cancel the cell that's actively talking to the caller.
+          // A non-cell participant left (browser/app leg or caller).
+          // Check if cell is already in-progress before canceling.
+          // If cell accepted (in-progress), it's actively talking to the caller
+          // — don't cancel it. cell-screening already kicked the browser.
           let cellIsActive = false;
           try {
             const cellCall = await client.calls(cellCallSid).fetch();
@@ -121,8 +130,7 @@ export async function POST(req: Request) {
           }
 
           if (cellIsActive) {
-            console.log(`ℹ️ App leg left but cell is in-progress — cell already answered, skipping cell cancel`);
-            // Task was already completed in twilio-status in-progress handler — no-op
+            console.log(`ℹ️ App leg left but cell is in-progress — cell accepted, skipping cancel`);
           } else {
             console.log(`📵 Worker left app (${callSid}) — canceling cell leg: ${cellCallSid}`);
             await cancelCellLeg(cellCallSid, 'worker-left');
@@ -136,22 +144,18 @@ export async function POST(req: Request) {
       }
     }
 
-    // ── Conference ended — cancel cell leg only ──
-    // Do NOT complete the task here. Caller is held in <Enqueue> by TaskRouter.
-    // Completing the task here kicks them out of the queue → voicemail.
-    // Task completion is handled by:
-    //   - twilio-status in-progress: cell answered
-    //   - participant-leave above: app worker hung up
-    //   - twilio-status no-answer: reservation rejected, TaskRouter reassigns automatically
-    //   - TaskRouter workflow timeout: voicemail worker assigned
+    // ── Conference ended — cancel cell leg as safety net ────────────────────
     if (statusCallbackEvent === 'conference-end') {
-      console.log(`📵 conference-end fired — canceling cell leg only`);
+      console.log(`📵 conference-end fired — canceling cell leg as safety net`);
       if (cellCallSid) {
         await cancelCellLeg(cellCallSid, 'conference-end');
       }
-    } else if (
+    }
+
+    if (
       statusCallbackEvent !== 'conference-start' &&
-      statusCallbackEvent !== 'participant-leave'
+      statusCallbackEvent !== 'participant-leave' &&
+      statusCallbackEvent !== 'conference-end'
     ) {
       console.log(`ℹ️ Conference event: ${statusCallbackEvent}`);
     }
