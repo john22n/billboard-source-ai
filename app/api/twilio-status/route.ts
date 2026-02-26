@@ -1,15 +1,13 @@
 /**
  * Twilio Call Status Callback
  *
- * With call screening in place, this file is significantly simplified:
- * - AMD block removed entirely — screening handles accept/decline
- * - in-progress: cell picked up to hear screening prompt — just log, no action
- * - no-answer/busy/canceled: cell never answered at all — complete task + re-enqueue
- * - completed duration > 0: check if normal completed call or slow decline
+ * Primary handler for cell call lifecycle events (simring-cell type).
+ * Owns all cell-related cleanup so we don't rely on conference events for it.
  *
- * Call screening handles the main accept/decline flow via cell-screening route.
- * This file only handles edge cases where screening never got a chance to run
- * (cell rang out, was busy, or got canceled by app answering first).
+ * Cell answered (in-progress) → kick browser from conference
+ * Cell hung up (completed, duration > 0) → remove remaining conference participants + complete task
+ * Cell never answered (no-answer / busy / completed duration=0) → complete task + re-enqueue caller
+ * Cell canceled → no action (browser answered first, call-complete handled it)
  */
 import twilio from 'twilio';
 
@@ -17,7 +15,6 @@ const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
 const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!;
 
-// ── Raw Twilio REST helpers ──────────────────────────────────────────────────
 const twilioAuth = () =>
   'Basic ' + Buffer.from(`${ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64');
 
@@ -36,7 +33,6 @@ async function twilioPost(path: string, body: Record<string, string>) {
   return res.json();
 }
 
-// Complete task only if still active — returns false if already resolved (dedup guard)
 async function completeTaskIfActive(
   client: ReturnType<typeof twilio>,
   taskSid: string,
@@ -61,13 +57,100 @@ async function completeTaskIfActive(
   }
 }
 
+/**
+ * Find the conference by friendly name and remove all participants except the one
+ * we want to keep (the cell itself). Used when cell answers to kick the browser.
+ */
+async function kickBrowserFromConference(
+  client: ReturnType<typeof twilio>,
+  conferenceName: string,
+  keepCallSid: string // the cell's own callSid — don't kick itself
+) {
+  try {
+    const conferences = await client.conferences.list({
+      friendlyName: conferenceName,
+      status: 'in-progress',
+      limit: 1,
+    });
+
+    if (conferences.length === 0) {
+      console.warn(`⚠️ No in-progress conference found for: ${conferenceName}`);
+      return;
+    }
+
+    const conferenceSid = conferences[0].sid;
+    const participants = await client.conferences(conferenceSid).participants.list();
+    console.log(`📋 Conference ${conferenceSid} has ${participants.length} participant(s)`);
+
+    for (const p of participants) {
+      if (p.callSid === keepCallSid) continue; // don't kick the cell itself
+      try {
+        await client.conferences(conferenceSid).participants(p.callSid).remove();
+        console.log(`✅ Kicked browser/agent leg ${p.callSid} from conference`);
+      } catch (err) {
+        // Fallback: cancel the call directly
+        console.warn(`⚠️ remove() failed for ${p.callSid}, canceling call directly:`, (err as Error).message);
+        try {
+          await client.calls(p.callSid).update({ status: 'completed' });
+          console.log(`✅ Canceled browser call ${p.callSid} directly`);
+        } catch (e) {
+          console.error(`❌ Failed to cancel browser call ${p.callSid}:`, (e as Error).message);
+        }
+      }
+    }
+  } catch (err) {
+    console.error(`❌ kickBrowserFromConference failed:`, (err as Error).message);
+  }
+}
+
+/**
+ * Find the conference by friendly name and remove all remaining participants.
+ * Used when the cell hangs up to clean up the caller and any other legs.
+ */
+async function removeAllConferenceParticipants(
+  client: ReturnType<typeof twilio>,
+  conferenceName: string
+) {
+  try {
+    const conferences = await client.conferences.list({
+      friendlyName: conferenceName,
+      status: 'in-progress',
+      limit: 1,
+    });
+
+    if (conferences.length === 0) {
+      console.log(`ℹ️ No active conference found for ${conferenceName} — already ended`);
+      return;
+    }
+
+    const conferenceSid = conferences[0].sid;
+    const participants = await client.conferences(conferenceSid).participants.list();
+    console.log(`📋 Removing ${participants.length} remaining participant(s) from ${conferenceSid}`);
+
+    for (const p of participants) {
+      try {
+        await client.conferences(conferenceSid).participants(p.callSid).remove();
+        console.log(`✅ Removed participant ${p.callSid}`);
+      } catch (err) {
+        console.warn(`⚠️ remove() failed for ${p.callSid}, canceling directly:`, (err as Error).message);
+        try {
+          await client.calls(p.callSid).update({ status: 'completed' });
+        } catch (e) {
+          console.error(`❌ Failed to cancel call ${p.callSid}:`, (e as Error).message);
+        }
+      }
+    }
+  } catch (err) {
+    console.error(`❌ removeAllConferenceParticipants failed:`, (err as Error).message);
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const clonedReq = req.clone();
     const bodyText = await clonedReq.text();
     const formData = await req.formData();
 
-    // Signature validation — log only, not blocking
     if (TWILIO_AUTH_TOKEN) {
       const twilioSignature = req.headers.get('X-Twilio-Signature') || '';
       const proto = req.headers.get('x-forwarded-proto') || 'https';
@@ -87,110 +170,59 @@ export async function POST(req: Request) {
     const CallDuration = formData.get('CallDuration') as string;
     const From         = formData.get('From') as string;
     const To           = formData.get('To') as string;
-    const Timestamp    = formData.get('Timestamp') as string;
 
     const url            = new URL(req.url);
     const callType       = url.searchParams.get('type');
     const conferenceName = url.searchParams.get('conferenceName');
     const callerCallSid  = url.searchParams.get('callerCallSid');
-    const contactUri     = url.searchParams.get('contactUri');
     const taskSid        = url.searchParams.get('taskSid');
     const workspaceSid   = url.searchParams.get('workspaceSid') || WORKSPACE_SID;
-    const workerSid      = url.searchParams.get('workerSid');
-    const reservationSid = url.searchParams.get('reservationSid');
 
-    console.log(`📊 Call status update: ${CallStatus}`, {
-      CallSid, CallStatus,
-      CallDuration: CallDuration ? `${CallDuration}s` : undefined,
-      From, To, Timestamp,
-      callType: callType || 'standard',
-    });
+    const duration = parseInt(CallDuration || '0');
+
+    console.log(`📊 [twilio-status] ${CallStatus} | type=${callType} | CallSid=${CallSid} | duration=${duration}s`);
 
     const client = twilio(ACCOUNT_SID, TWILIO_AUTH_TOKEN!);
 
-    // ─────────────────────────────────────────────────────────────
-    // SIMULTANEOUS RING cell leg status handling
-    // Note: accept/decline is now handled by cell-screening route.
-    // This handler only covers edge cases where screening never ran.
-    // ─────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
+    // SIMULTANEOUS RING — cell leg events
+    // ─────────────────────────────────────────────────────────────────────────
     if (callType === 'simring-cell' && conferenceName) {
 
-      // ── Cell picked up to hear screening prompt — no action needed ──
-      // screening handler will fire on digit press or timeout
+      // ── Cell answered → kick browser from conference ──────────────────────
+      // Agent picked up their cell and is hearing the screening prompt.
+      // The browser leg is sitting idle in the conference. Kick it now so
+      // that if the agent presses 1, only cell + caller end up connected.
+      // (cell-screening also kicks on press-1 as a redundant safety net)
       if (CallStatus === 'in-progress') {
-        console.log(`📱 Cell picked up screening prompt — waiting for digit input`);
+        console.log(`📱 Cell answered (in-progress) — kicking browser from conference: ${conferenceName}`);
+        await kickBrowserFromConference(client, conferenceName, CallSid);
       }
 
-      // ── Cell still ringing but app already answered — cancel cell ──
-      if (CallStatus === 'initiated' || CallStatus === 'ringing') {
-        try {
-          const conferences = await client.conferences.list({
-            friendlyName: conferenceName,
-            status: 'in-progress',
-            limit: 1,
-          });
-          if (conferences.length > 0) {
-            const participants = await client
-              .conferences(conferences[0].sid)
-              .participants.list();
-            if (participants.length >= 2) {
-              console.log(`📵 App already answered — canceling cell leg ${CallSid}`);
-              await twilioPost(`Calls/${CallSid}.json`, { Status: 'canceled' });
-            }
-          }
-        } catch (err) {
-          console.warn('⚠️ Simring cleanup failed:', (err as Error).message);
-        }
-      }
-
-      // ── Cell completed with duration > 0 ──
-      // Screening ran — either accepted (task resolved by screening handler)
-      // or declined (task resolved by screening handler).
-      // Just check task status and skip if already resolved — nothing to do.
-      if (CallStatus === 'completed' && CallDuration && parseInt(CallDuration) > 0) {
-        console.log(`📵 Cell completed (${CallDuration}s) — checking task status`);
+      // ── Cell hung up after being connected (duration > 0) ─────────────────
+      // Agent hung up on their cell. Remove any remaining participants from the
+      // conference (caller, if still connected) and complete the task.
+      if (CallStatus === 'completed' && duration > 0) {
+        console.log(`📵 Cell hung up after ${duration}s — cleaning up conference and completing task`);
+        await removeAllConferenceParticipants(client, conferenceName);
         if (taskSid) {
-          try {
-            const task = await client.taskrouter.v1
-              .workspaces(workspaceSid)
-              .tasks(taskSid)
-              .fetch();
-            console.log(`📋 Task status: ${task.assignmentStatus}`);
-            if (task.assignmentStatus === 'completed' || task.assignmentStatus === 'canceled') {
-              console.log(`ℹ️ Task already resolved — screening handler handled this, no action needed`);
-            } else {
-              // Task still active — screening may have failed, re-enqueue as fallback
-              console.log(`⚠️ Task still active after cell completed — completing and re-enqueueing as fallback`);
-              await completeTaskIfActive(client, taskSid, workspaceSid, 'Cell completed — fallback re-enqueue');
-              if (callerCallSid) {
-                const { protocol, host } = new URL(req.url);
-                const inboundUrl = `${protocol}//${host}/api/twilio-inbound`;
-                const requeueTwiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Redirect method="POST">${inboundUrl}</Redirect></Response>`;
-                await client.calls(callerCallSid).update({ twiml: requeueTwiml });
-                console.log(`✅ Caller re-enqueued via fallback`);
-              }
-            }
-          } catch (err) {
-            console.warn(`⚠️ Could not fetch task status:`, (err as Error).message);
-          }
+          await completeTaskIfActive(client, taskSid, workspaceSid, 'Cell agent hung up');
         }
       }
 
-      // ── Cell never answered (rang out, busy, or canceled by app answering) ──
-      // Screening never ran — complete task + re-enqueue caller.
+      // ── Cell canceled → browser answered first, call-complete handled it ──
+      if (CallStatus === 'canceled') {
+        console.log(`ℹ️ Cell canceled (browser answered first) — no action needed`);
+        return new Response(null, { status: 204 });
+      }
+
+      // ── Cell never answered (rang out, voicemail timed out, busy) ─────────
       if (
         CallStatus === 'no-answer' ||
         CallStatus === 'busy' ||
-        (CallStatus === 'canceled' && (!CallDuration || CallDuration === '0')) ||
-        (CallStatus === 'completed' && (!CallDuration || CallDuration === '0'))
+        (CallStatus === 'completed' && duration === 0)
       ) {
-        // canceled with no duration = app answered first and we canceled the cell — skip
-        if (CallStatus === 'canceled') {
-          console.log(`ℹ️ Cell canceled (app answered first) — no action needed`);
-          return new Response(null, { status: 204 });
-        }
-
-        console.log(`📵 Cell never answered (${CallStatus}) — completing task and re-enqueueing`);
+        console.log(`📵 Cell never answered (${CallStatus}) — completing task and re-enqueueing caller`);
 
         if (taskSid) {
           const taskWasActive = await completeTaskIfActive(
@@ -208,7 +240,7 @@ export async function POST(req: Request) {
             const inboundUrl = `${protocol}//${host}/api/twilio-inbound`;
             const requeueTwiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Redirect method="POST">${inboundUrl}</Redirect></Response>`;
             await client.calls(callerCallSid).update({ twiml: requeueTwiml });
-            console.log(`✅ Caller ${callerCallSid} re-enqueued to next agent`);
+            console.log(`✅ Caller ${callerCallSid} re-enqueued`);
           } catch (err) {
             console.error('❌ Failed to re-enqueue caller:', (err as Error).message);
           }

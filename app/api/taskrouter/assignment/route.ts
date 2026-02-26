@@ -18,6 +18,12 @@
  * The URL contains multiple & chars for query params — these must be &amp; in XML
  * attribute values, otherwise Twilio's XML parser rejects the TwiML and plays
  * "We are sorry, an application error has occurred" the moment the cell picks up.
+ *
+ * ✅ FIX: Do NOT complete the voicemail task here. The task is still "reserved"
+ * at the time of the assignment callback. It only becomes "assigned" after Twilio
+ * processes the redirect instruction with accept: true. Completing it here causes:
+ * "Cannot complete task ... because it is not currently assigned."
+ * Task completion is handled in /api/taskrouter/voicemail-complete instead.
  */
 import twilio from 'twilio';
 
@@ -102,25 +108,17 @@ export async function POST(req: Request) {
         return Response.json({ instruction: 'reject' });
       }
 
-      const instruction = {
+      // ✅ Just return the redirect instruction.
+      // accept: true moves the task from reserved → assigned.
+      // Task completion is handled in /api/taskrouter/voicemail-complete
+      // after the recording finishes — NOT here.
+      return Response.json({
         instruction: 'redirect',
         call_sid: callSid,
         url: voicemailUrl,
         accept: true,
         post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
-      };
-
-      try {
-        await twilioClient.taskrouter.v1
-          .workspaces(workspaceSid)
-          .tasks(taskSid)
-          .update({ assignmentStatus: 'completed', reason: 'Redirected to voicemail' });
-        console.log(`✅ Voicemail task ${taskSid} completed`);
-      } catch (err) {
-        console.error('⚠️ Failed to complete voicemail task:', (err as Error).message);
-      }
-
-      return Response.json(instruction);
+      });
     }
 
     // ─────────────────────────────────────────────
