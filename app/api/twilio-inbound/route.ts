@@ -94,8 +94,12 @@ export async function POST(req: Request) {
       primary_owner: primaryOwner,
     });
 
-    const url = new URL(req.url);
-    const appUrl = `${url.protocol}//${url.host}`;
+    // Use NEXT_PUBLIC_APP_URL when set so callback URLs always resolve to the
+    // correct deployment domain.  On Vercel branch previews, req.url reflects
+    // the preview hostname which may differ from the URL registered in Twilio.
+    const appUrl = (
+      process.env.NEXT_PUBLIC_APP_URL ?? `${new URL(req.url).protocol}//${new URL(req.url).host}`
+    ).replace(/\/$/, '');
     const enqueueActionUrl = `${appUrl}/api/taskrouter/enqueue-complete`;
     const waitUrl = `${appUrl}/api/taskrouter/wait`;
 

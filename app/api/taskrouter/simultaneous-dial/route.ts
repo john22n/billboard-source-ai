@@ -47,8 +47,13 @@ export async function POST(req: Request) {
       );
     }
 
-    const appUrl          = `${url.protocol}//${url.host}`;
-    const callerIdNumber  = process.env.TWILIO_MAIN_NUMBER ?? '+18338547126';
+    // Use NEXT_PUBLIC_APP_URL when set so the <Dial action> callback URL always
+    // resolves to the correct deployment domain rather than the preview hostname
+    // that req.url would reflect on a Vercel branch deployment.
+    const appUrl         = (
+      process.env.NEXT_PUBLIC_APP_URL ?? `${url.protocol}//${url.host}`
+    ).replace(/\/$/, '');
+    const callerIdNumber = process.env.TWILIO_MAIN_NUMBER ?? '+18338547126';
 
     // The <Dial action> URL is called when the dial attempt finishes
     // (answered+hung-up, no-answer timeout, busy, or failed).
