@@ -177,10 +177,8 @@ export async function POST(req: Request) {
         simDialUrl.searchParams.set('cellPhone',      workerAttrs.cell_phone);
         // Vercel Deployment Protection bypass — required so Twilio (unauthenticated)
         // can reach this endpoint on protected Vercel deployments.
-        // Set VERCEL_AUTOMATION_BYPASS_SECRET in your .env files to the token
-        // shown in Vercel Dashboard → Settings → Deployment Protection.
-        if (process.env.VERCEL_AUTOMATION_BYPASS_SECRET) {
-          simDialUrl.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_AUTOMATION_BYPASS_SECRET);
+        if (process.env.VERCEL_BYPASS_TOKEN) {
+          simDialUrl.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
         }
 
         const simRingInstruction = {
