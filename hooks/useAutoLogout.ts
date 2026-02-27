@@ -4,23 +4,70 @@ import { useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 
 /**
- * Auto-logout hook that logs users out at 8pm local time
- * 
+ * Auto-logout hook that logs users out at 8pm local time.
+ *
  * - Login before 8pm → logged out at 8pm same day
  * - Login after 8pm → logged out at 8pm NEXT day
+ *
+ * @param currentUserEmail  The authenticated user's email address.
+ *   Workers listed in NEXT_PUBLIC_AUTO_LOGOUT_EXCLUDED_EMAILS are exempted
+ *   from the auto-8pm logout entirely.  All other workers retain the
+ *   existing auto-logout behavior without modification.
  */
 
 const LOGOUT_HOUR = 20; // 8pm in 24-hour format
 
-export function useAutoLogout() {
-  const router = useRouter();
-  const hasLoggedOutRef = useRef(false);
-  const checkIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const loginTimestampRef = useRef<Date | null>(null);
-  const nextLogoutTimeRef = useRef<Date | null>(null);
+/**
+ * Comma-separated list of worker email addresses that should NOT be
+ * automatically logged out at 8pm.
+ *
+ * Set in .env.local / .env.dev / .env.prod:
+ *   NEXT_PUBLIC_AUTO_LOGOUT_EXCLUDED_EMAILS=mcdonald@billboardsource.com
+ *
+ * Multiple addresses: comma-separate with no spaces.
+ *   NEXT_PUBLIC_AUTO_LOGOUT_EXCLUDED_EMAILS=mcdonald@billboardsource.com,other@billboardsource.com
+ *
+ * NEXT_PUBLIC_ prefix is required so the value is bundled into the
+ * client-side JavaScript without an extra API round-trip.  These are
+ * internal co-worker email addresses — not secrets.
+ */
+const EXCLUDED_EMAILS: Set<string> = new Set(
+  (process.env.NEXT_PUBLIC_AUTO_LOGOUT_EXCLUDED_EMAILS ?? "")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean)
+);
 
-  // Calculate the next 8pm logout time based on login time
+export function useAutoLogout(currentUserEmail?: string) {
+  // Derive exclusion status from the env-var set and the caller's email.
+  // This is a plain boolean, NOT a hook — computed before any hook calls so
+  // it's stable across renders and safe to reference in dependency arrays.
+  const isExcluded = Boolean(
+    currentUserEmail &&
+      EXCLUDED_EMAILS.has(currentUserEmail.toLowerCase())
+  );
+
+  // ── All hooks are called unconditionally (React Rules of Hooks) ───────────
+  // The exclusion guard is placed INSIDE each hook's callback / effect body,
+  // never as a conditional that skips the hook call itself.
+  const router              = useRouter();
+  const hasLoggedOutRef     = useRef(false);
+  const checkIntervalRef    = useRef<NodeJS.Timeout | null>(null);
+  const loginTimestampRef   = useRef<Date | null>(null);
+  const nextLogoutTimeRef   = useRef<Date | null>(null);
+
+  // ── Schedule the next 8pm logout time ────────────────────────────────────
   useEffect(() => {
+    // ── McDONALD / EXCLUDED WORKERS ─────────────────────────────────────────
+    // Workers in NEXT_PUBLIC_AUTO_LOGOUT_EXCLUDED_EMAILS skip the timer
+    // entirely.  No logout time is calculated; no interval is started below.
+    if (isExcluded) {
+      console.log(
+        `⏭️ Auto-logout suppressed for excluded worker: ${currentUserEmail}`
+      );
+      return;
+    }
+
     const now = new Date();
     loginTimestampRef.current = now;
 
@@ -36,11 +83,12 @@ export function useAutoLogout() {
     nextLogoutTimeRef.current = next8pm;
     console.log(`🕐 Session started: ${now.toLocaleString()}`);
     console.log(`🕗 Next auto-logout scheduled: ${next8pm.toLocaleString()}`);
-  }, []);
+  }, [isExcluded, currentUserEmail]);
 
   const performLogout = useCallback(async () => {
-    // Prevent multiple logout attempts
-    if (hasLoggedOutRef.current) return;
+    // ── McDONALD / EXCLUDED WORKERS ─────────────────────────────────────────
+    // Guard inside the callback so the hook is still called unconditionally.
+    if (hasLoggedOutRef.current || isExcluded) return;
     hasLoggedOutRef.current = true;
 
     console.log("🕗 8pm auto-logout triggered");
@@ -66,7 +114,7 @@ export function useAutoLogout() {
 
     // Redirect to login page
     router.push("/login?reason=auto-logout");
-  }, [router]);
+  }, [router, isExcluded]);
 
   const checkTime = useCallback(() => {
     const now = new Date();
@@ -82,6 +130,11 @@ export function useAutoLogout() {
   }, [performLogout]);
 
   useEffect(() => {
+    // ── McDONALD / EXCLUDED WORKERS ─────────────────────────────────────────
+    // Skip interval and visibility-change wiring for excluded workers.
+    // The effect still runs (hook is called unconditionally) but returns early.
+    if (isExcluded) return;
+
     // Wait for nextLogoutTimeRef to be set, then start checking
     const startChecking = setTimeout(() => {
       checkTime();
@@ -103,5 +156,5 @@ export function useAutoLogout() {
       }
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [checkTime]);
+  }, [checkTime, isExcluded]);
 }
