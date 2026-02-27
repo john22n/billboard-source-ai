@@ -62,10 +62,8 @@ export async function POST(req: Request) {
     dialCompleteUrl.searchParams.set('workspaceSid', workspaceSid);
     // Vercel Deployment Protection bypass — required so Twilio (unauthenticated)
     // can reach this endpoint on protected Vercel deployments.
-    // Set VERCEL_AUTOMATION_BYPASS_SECRET in your .env files to the token
-    // shown in Vercel Dashboard → Settings → Deployment Protection.
-    if (process.env.VERCEL_AUTOMATION_BYPASS_SECRET) {
-      dialCompleteUrl.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_AUTOMATION_BYPASS_SECRET);
+    if (process.env.VERCEL_BYPASS_TOKEN) {
+      dialCompleteUrl.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
     }
 
     // Escape XML special characters used inside attribute values
