@@ -25,9 +25,17 @@ const ArcGISMapPanel = dynamic(
   { ssr: false, loading: () => <div className="h-full flex items-center justify-center text-gray-500">Loading ArcGIS Map...</div> }
 );
 
-export default function SalesCallTranscriber() {
+/**
+ * sessionEmail — the authenticated user's email address, passed down from the
+ * server component (app/dashboard/page.tsx) via the session object.
+ * Forwarded to useAutoLogout so excluded workers (e.g. McDonald) are not
+ * auto-logged-out at 8pm.  Named "sessionEmail" (not "userEmail") to avoid
+ * shadowing the "userEmail" value destructured from useTwilioContext() below.
+ * Optional: the hook degrades gracefully when undefined.
+ */
+export default function SalesCallTranscriber({ sessionEmail }: { sessionEmail?: string }) {
 
- useAutoLogout();
+  useAutoLogout(sessionEmail);
 
   // 🔍 Performance monitoring (only in development)
   if (process.env.NODE_ENV === 'development') {

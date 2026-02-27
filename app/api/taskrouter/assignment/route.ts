@@ -56,7 +56,16 @@ export async function POST(req: Request) {
     console.log('ReservationSid:', reservationSid);
     console.log('WorkerSid:', workerSid);
 
-    let workerAttrs: { email?: string; contact_uri?: string } = {};
+    let workerAttrs: {
+      email?: string;
+      contact_uri?: string;
+      /** Set to true in the Twilio Console for workers that should receive a
+       *  simultaneous ring to their personal cell phone when a task is assigned. */
+      simultaneous_ring?: boolean;
+      /** E.164 personal cell number (e.g. "+19565551234"). Read from Twilio worker
+       *  attributes — set in the Console alongside simultaneous_ring: true. */
+      cell_phone?: string;
+    } = {};
     let taskAttrs: { call_sid?: string; from?: string } = {};
 
     try {
@@ -125,6 +134,63 @@ export async function POST(req: Request) {
 
       return Response.json(instruction);
     }
+
+    // ── McDONALD SIMULTANEOUS RING ───────────────────────────────────────────
+    // If this worker's Twilio attributes include `simultaneous_ring: true` AND
+    // a `cell_phone` value, we redirect the caller's call to a TwiML handler
+    // that dials BOTH his GPP2 browser client and his personal cell phone in
+    // parallel.  The first leg to answer wins; the other drops automatically.
+    //
+    // This branch is triggered exclusively by worker attributes — no name or
+    // SID is hardcoded here.  All other agents fall through to the standard
+    // conference instruction below without modification.
+    //
+    // The availability toggle (Available / Offline) continues to work exactly
+    // as-is for McDonald: when he is Offline, TaskRouter will not assign tasks
+    // to him, so this branch never executes.  No separate toggle logic is needed.
+    if (workerAttrs.simultaneous_ring && workerAttrs.cell_phone) {
+      console.log('📱 Worker has simultaneous_ring=true — using parallel dial instead of conference');
+
+      const callSid = taskAttrs.call_sid;
+
+      if (!callSid) {
+        // Safety fallback: call_sid is required for the redirect instruction.
+        // If it's missing (shouldn't happen in practice), fall through to the
+        // standard conference path so the call is not dropped.
+        console.error('❌ No call_sid in task attributes — falling through to conference for simultaneous-ring worker');
+      } else {
+        // Strip the "client:" scheme prefix to get the bare identity used in
+        // TwiML <Client> tags (e.g. "client:mcdonald" → "mcdonald").
+        const clientIdentity = (workerAttrs.contact_uri ?? `client:${workerAttrs.email}`)
+          .replace(/^client:/, '');
+
+        // Pass all dialing params as query-string args on the redirect URL.
+        // The simultaneous-dial route reads them to build the <Dial> TwiML.
+        const simDialUrl = new URL(`${appUrl}/api/taskrouter/simultaneous-dial`);
+        simDialUrl.searchParams.set('taskSid',        taskSid);
+        simDialUrl.searchParams.set('workspaceSid',   workspaceSid);
+        simDialUrl.searchParams.set('clientIdentity', clientIdentity);
+        simDialUrl.searchParams.set('cellPhone',      workerAttrs.cell_phone);
+
+        const simRingInstruction = {
+          instruction: 'redirect',
+          call_sid:    callSid,
+          url:         simDialUrl.toString(),
+          accept:      true,  // Accept the reservation immediately
+          // Return McDonald to Available once the task is completed by
+          // simultaneous-dial-complete (matches conference path behavior)
+          post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
+        };
+
+        console.log('📞 Simultaneous ring redirect instruction:', {
+          ...simRingInstruction,
+          // Avoid logging full cell number
+          url: simRingInstruction.url.replace(/cellPhone=[^&]+/, 'cellPhone=***'),
+        });
+        return Response.json(simRingInstruction);
+      }
+    }
+    // ── END McDONALD SIMULTANEOUS RING ───────────────────────────────────────
 
     // Normal worker - use conference instruction (recommended by Twilio)
     // Conference handles call orchestration, monitors if agent answered,
