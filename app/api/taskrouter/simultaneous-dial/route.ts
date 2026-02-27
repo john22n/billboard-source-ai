@@ -55,6 +55,13 @@ export async function POST(req: Request) {
     const dialCompleteUrl = new URL(`${appUrl}/api/taskrouter/simultaneous-dial-complete`);
     dialCompleteUrl.searchParams.set('taskSid',      taskSid);
     dialCompleteUrl.searchParams.set('workspaceSid', workspaceSid);
+    // Vercel Deployment Protection bypass — required so Twilio (unauthenticated)
+    // can reach this endpoint on protected Vercel deployments.
+    // Set VERCEL_AUTOMATION_BYPASS_SECRET in your .env files to the token
+    // shown in Vercel Dashboard → Settings → Deployment Protection.
+    if (process.env.VERCEL_AUTOMATION_BYPASS_SECRET) {
+      dialCompleteUrl.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_AUTOMATION_BYPASS_SECRET);
+    }
 
     // Escape XML special characters used inside attribute values
     const escapeXml = (s: string): string =>
