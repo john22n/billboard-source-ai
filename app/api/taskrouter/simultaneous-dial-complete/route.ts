@@ -13,7 +13,9 @@
  *   1. Complete the TaskRouter task so McDonald's worker activity resets to
  *      Available (honoring the post_work_activity_sid set in the redirect
  *      instruction from the assignment callback).
- *   2. Return <Hangup/> TwiML to cleanly end the caller's call leg.
+ *   2. If the call was answered and completed, return <Hangup/> TwiML.
+ *      If the caller hung up before anyone answered, return <Hangup/> TwiML.
+ *      If nobody answered (no-answer / busy / failed), redirect to voicemail.
  *
  * Query parameters (forwarded from the simultaneous-dial action attribute):
  *   taskSid      — TaskRouter Task SID
@@ -26,7 +28,7 @@ const ACCOUNT_SID   = process.env.TWILIO_ACCOUNT_SID!;
 const AUTH_TOKEN    = process.env.TWILIO_AUTH_TOKEN!;
 const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!;
 
-// Shared hangup response — returned in all code paths
+// Shared hangup response — returned when no further routing is needed
 const HANGUP_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>';
 
 export async function POST(req: Request) {
@@ -35,9 +37,9 @@ export async function POST(req: Request) {
     const taskSid      = url.searchParams.get('taskSid');
     const workspaceSid = url.searchParams.get('workspaceSid') ?? WORKSPACE_SID;
 
-    const formData          = await req.formData();
-    const dialCallStatus    = formData.get('DialCallStatus')   as string | null;
-    const dialCallDuration  = formData.get('DialCallDuration') as string | null;
+    const formData         = await req.formData();
+    const dialCallStatus   = formData.get('DialCallStatus')   as string | null;
+    const dialCallDuration = formData.get('DialCallDuration') as string | null;
 
     console.log('═══════════════════════════════════════════');
     console.log('📱 SIMULTANEOUS DIAL COMPLETE — McDONALD');
@@ -72,15 +74,44 @@ export async function POST(req: Request) {
           console.log(`ℹ️ Task ${taskSid} is already "${task.assignmentStatus}" — skipping completion`);
         }
       } catch (taskErr) {
-        // Non-fatal: log and continue so the caller still gets a clean hangup
+        // Non-fatal: log and continue so the caller still gets a clean hangup/voicemail
         console.error('❌ Failed to complete simultaneous-dial task:', taskErr);
       }
     } else {
       console.warn('⚠️ Missing taskSid or workspaceSid — task will not be completed');
     }
 
-    // Always hang up the caller's leg cleanly
-    return new Response(HANGUP_TWIML, {
+    // ── Route based on how the dial ended ───────────────────────────────────
+    const appUrl = (
+      process.env.NEXT_PUBLIC_APP_URL ?? `${url.protocol}//${url.host}`
+    ).replace(/\/$/, '');
+
+    // Caller hung up while ringing, or call was answered and finished normally → clean hangup
+    if (!dialCallStatus || dialCallStatus === 'canceled' || dialCallStatus === 'completed') {
+      console.log(`📞 DialCallStatus="${dialCallStatus}" — hanging up cleanly`);
+      return new Response(HANGUP_TWIML, {
+        status: 200,
+        headers: { 'Content-Type': 'text/xml' },
+      });
+    }
+
+    // no-answer / busy / failed → nobody picked up → redirect to voicemail
+    console.log(`📼 DialCallStatus="${dialCallStatus}" — redirecting to voicemail`);
+
+    const voicemailUrl = new URL(`${appUrl}/api/taskrouter/voicemail`);
+    // taskSid/workspaceSid are already completed above; passed along for logging context only
+    if (taskSid)      voicemailUrl.searchParams.set('taskSid',      taskSid);
+    if (workspaceSid) voicemailUrl.searchParams.set('workspaceSid', workspaceSid);
+    if (process.env.VERCEL_BYPASS_TOKEN) {
+      voicemailUrl.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
+    }
+
+    const redirectTwiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Redirect method="POST">${voicemailUrl.toString()}</Redirect>
+</Response>`;
+
+    return new Response(redirectTwiml, {
       status: 200,
       headers: { 'Content-Type': 'text/xml' },
     });
