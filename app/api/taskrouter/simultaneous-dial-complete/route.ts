@@ -7,15 +7,12 @@
  *   - "no-answer"  — timeout elapsed before either leg answered
  *   - "busy"       — both legs were busy
  *   - "failed"     — dial failed (e.g. invalid number, carrier error)
- *   - "canceled"   — caller hung up before either leg answered
+ *   - "canceled"   — browser or cell rejected/dismissed the call
  *
- * Responsibilities:
- *   1. Complete the TaskRouter task so McDonald's worker activity resets to
- *      Available (honoring the post_work_activity_sid set in the redirect
- *      instruction from the assignment callback).
- *   2. If the call was answered and completed, return <Hangup/> TwiML.
- *      If the caller hung up before anyone answered, return <Hangup/> TwiML.
- *      If nobody answered (no-answer / busy / failed), redirect to voicemail.
+ * Routing logic:
+ *   - completed  → clean hangup (call already finished)
+ *   - canceled   → re-enqueue back into TaskRouter to try next available worker
+ *   - no-answer / busy / failed → voicemail (nobody answered after full timeout)
  *
  * Query parameters (forwarded from the simultaneous-dial action attribute):
  *   taskSid      — TaskRouter Task SID
@@ -27,8 +24,8 @@ import twilio from 'twilio';
 const ACCOUNT_SID   = process.env.TWILIO_ACCOUNT_SID!;
 const AUTH_TOKEN    = process.env.TWILIO_AUTH_TOKEN!;
 const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!;
+const WORKFLOW_SID  = process.env.TASKROUTER_WORKFLOW_SID!;
 
-// Shared hangup response — returned when no further routing is needed
 const HANGUP_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>';
 
 export async function POST(req: Request) {
@@ -48,18 +45,25 @@ export async function POST(req: Request) {
     console.log('TaskSid:',          taskSid);
     console.log('═══════════════════════════════════════════');
 
-    // ── Complete the TaskRouter task ────────────────────────────────────────
-    // This releases McDonald's worker reservation and (via post_work_activity_sid
-    // set in the assignment callback redirect instruction) returns his activity
-    // to Available so he can receive the next call.
-    if (taskSid && workspaceSid) {
-      const client = twilio(ACCOUNT_SID, AUTH_TOKEN);
+    const appUrl = (
+      process.env.NEXT_PUBLIC_APP_URL ?? `${url.protocol}//${url.host}`
+    ).replace(/\/$/, '');
 
+    const client = twilio(ACCOUNT_SID, AUTH_TOKEN);
+
+    // ── Fetch task attributes BEFORE completing ──────────────────────────────
+    // We need the original task attributes (from, callTo, callType, etc.) to
+    // re-enqueue the call if McDonald canceled. Fetch them now while the task
+    // still exists.
+    let taskAttributes: Record<string, string> = {};
+    if (taskSid && workspaceSid) {
       try {
         const task = await client.taskrouter.v1
           .workspaces(workspaceSid)
           .tasks(taskSid)
           .fetch();
+
+        taskAttributes = JSON.parse(task.attributes || '{}');
 
         if (task.assignmentStatus === 'assigned' || task.assignmentStatus === 'wrapping') {
           await client.taskrouter.v1
@@ -74,20 +78,14 @@ export async function POST(req: Request) {
           console.log(`ℹ️ Task ${taskSid} is already "${task.assignmentStatus}" — skipping completion`);
         }
       } catch (taskErr) {
-        // Non-fatal: log and continue so the caller still gets a clean hangup/voicemail
-        console.error('❌ Failed to complete simultaneous-dial task:', taskErr);
+        console.error('❌ Failed to fetch/complete simultaneous-dial task:', taskErr);
       }
     } else {
       console.warn('⚠️ Missing taskSid or workspaceSid — task will not be completed');
     }
 
-    // ── Route based on how the dial ended ───────────────────────────────────
-    const appUrl = (
-      process.env.NEXT_PUBLIC_APP_URL ?? `${url.protocol}//${url.host}`
-    ).replace(/\/$/, '');
-
-    // Caller hung up while ringing, or call was answered and finished normally → clean hangup
-    if (!dialCallStatus || dialCallStatus === 'canceled' || dialCallStatus === 'completed') {
+    // ── completed → clean hangup ─────────────────────────────────────────────
+    if (!dialCallStatus || dialCallStatus === 'completed') {
       console.log(`📞 DialCallStatus="${dialCallStatus}" — hanging up cleanly`);
       return new Response(HANGUP_TWIML, {
         status: 200,
@@ -95,18 +93,56 @@ export async function POST(req: Request) {
       });
     }
 
-    // no-answer / busy / failed → nobody picked up → redirect to voicemail
+    // ── canceled → re-enqueue to try next available worker ──────────────────
+    // McDonald (or his cell) rejected/dismissed the call. Put the caller back
+    // into the TaskRouter workflow so the next available worker gets a chance.
+    // If McDonald is the only available worker, TaskRouter will re-assign to
+    // him and the simultaneous ring will fire again. If nobody is available,
+    // the workflow timeout will eventually route to voicemail via enqueue-complete.
+    if (dialCallStatus === 'canceled') {
+      console.log('🔄 Call canceled by worker — re-enqueueing into TaskRouter');
+
+      const waitUrl          = `${appUrl}/api/taskrouter/wait`;
+      const enqueueActionUrl = `${appUrl}/api/taskrouter/enqueue-complete`;
+
+      // Re-use the original task attributes so the workflow routes correctly.
+      // Keep call_sid — it's the same live call leg being re-enqueued.
+      const newTaskAttributes = JSON.stringify({
+        ...taskAttributes,
+        retried: true, // flag for optional workflow retry logic later
+      });
+
+      const escapedWaitUrl           = waitUrl.replace(/&/g, '&amp;');
+      const escapedEnqueueActionUrl  = enqueueActionUrl.replace(/&/g, '&amp;');
+
+      const requeueTwiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Enqueue workflowSid="${WORKFLOW_SID}"
+           action="${escapedEnqueueActionUrl}"
+           method="POST"
+           waitUrl="${escapedWaitUrl}"
+           waitUrlMethod="POST">
+    <Task>${newTaskAttributes}</Task>
+  </Enqueue>
+</Response>`;
+
+      return new Response(requeueTwiml, {
+        status: 200,
+        headers: { 'Content-Type': 'text/xml' },
+      });
+    }
+
+    // ── no-answer / busy / failed → voicemail ───────────────────────────────
+    // Full timeout elapsed and nobody answered on either device.
     console.log(`📼 DialCallStatus="${dialCallStatus}" — redirecting to voicemail`);
 
     const voicemailUrl = new URL(`${appUrl}/api/taskrouter/voicemail`);
-    // taskSid/workspaceSid are already completed above; passed along for logging context only
     if (taskSid)      voicemailUrl.searchParams.set('taskSid',      taskSid);
     if (workspaceSid) voicemailUrl.searchParams.set('workspaceSid', workspaceSid);
     if (process.env.VERCEL_BYPASS_TOKEN) {
       voicemailUrl.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
     }
 
-    // Escape & as &amp; — required for valid XML inside TwiML text nodes
     const escapedVoicemailUrl = voicemailUrl.toString().replace(/&/g, '&amp;');
 
     const redirectTwiml = `<?xml version="1.0" encoding="UTF-8"?>
