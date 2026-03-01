@@ -94,25 +94,26 @@ export async function POST(req: Request) {
       primary_owner: primaryOwner,
     });
 
-    // Use NEXT_PUBLIC_APP_URL when set so callback URLs always resolve to the
-    // correct deployment domain.  On Vercel branch previews, req.url reflects
-    // the preview hostname which may differ from the URL registered in Twilio.
     const appUrl = (
       process.env.NEXT_PUBLIC_APP_URL ?? `${new URL(req.url).protocol}//${new URL(req.url).host}`
     ).replace(/\/$/, '');
     const enqueueActionUrl = `${appUrl}/api/taskrouter/enqueue-complete`;
     const waitUrl = `${appUrl}/api/taskrouter/wait`;
 
+    // Say the greeting BEFORE <Enqueue> so it always plays in full.
+    // If it were inside the waitUrl, TaskRouter could interrupt it mid-sentence
+    // the moment a worker becomes available.
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
-                    <Response>
-                    <Enqueue workflowSid="${WORKFLOW_SID}"
-                    action="${enqueueActionUrl}"
-                    method="POST"
-                    waitUrl="${waitUrl}"
-                    waitUrlMethod="POST">
-                    <Task>${taskAttributes}</Task>
-                    </Enqueue>
-                    </Response>`;
+<Response>
+  <Say voice="Polly.Joanna">Please hold while we connect you with the next available representative.</Say>
+  <Enqueue workflowSid="${WORKFLOW_SID}"
+           action="${enqueueActionUrl}"
+           method="POST"
+           waitUrl="${waitUrl}"
+           waitUrlMethod="POST">
+    <Task>${taskAttributes}</Task>
+  </Enqueue>
+</Response>`;
 
     return new Response(twiml, {
       status: 200,
@@ -123,4 +124,3 @@ export async function POST(req: Request) {
     return new Response('Error', { status: 500 });
   }
 }
-
