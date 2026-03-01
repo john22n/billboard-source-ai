@@ -10,6 +10,10 @@
  * The first leg to answer wins; the other drops automatically — standard
  * Twilio multi-noun <Dial> semantics, no bridging or patching required.
  *
+ * The <Client> noun has a statusCallback so that if the browser rejects the
+ * call, the outbound cell leg is immediately canceled via the REST API rather
+ * than continuing to ring until the 20s timeout.
+ *
  * Query parameters (appended by the assignment callback):
  *   taskSid        — TaskRouter Task SID (used by the action URL for task completion)
  *   workspaceSid   — TaskRouter Workspace SID
@@ -60,10 +64,19 @@ export async function POST(req: Request) {
     const dialCompleteUrl = new URL(`${appUrl}/api/taskrouter/simultaneous-dial-complete`);
     dialCompleteUrl.searchParams.set('taskSid',      taskSid);
     dialCompleteUrl.searchParams.set('workspaceSid', workspaceSid);
-    // Vercel Deployment Protection bypass — required so Twilio (unauthenticated)
-    // can reach this endpoint on protected Vercel deployments.
     if (process.env.VERCEL_BYPASS_TOKEN) {
       dialCompleteUrl.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
+    }
+
+    // statusCallback for the <Client> noun — fires when the browser client's
+    // leg changes status (initiated, ringing, answered, completed).
+    // If the browser rejects/dismisses the call, this callback cancels the
+    // outbound cell leg immediately instead of waiting for the 20s timeout.
+    const clientStatusUrl = new URL(`${appUrl}/api/taskrouter/client-status`);
+    clientStatusUrl.searchParams.set('cellPhone', cellPhone);
+    clientStatusUrl.searchParams.set('taskSid',   taskSid);
+    if (process.env.VERCEL_BYPASS_TOKEN) {
+      clientStatusUrl.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
     }
 
     // Escape XML special characters used inside attribute values
@@ -79,9 +92,8 @@ export async function POST(req: Request) {
      *
      * ┌─ <Client> ──────────────────────────────────────────────────────────┐
      * │  McDonald's GPP2 browser endpoint.                                  │
-     * │  Identity matches the one issued in the Twilio Access Token         │
-     * │  (/api/twilio-token), which equals his `contact_uri` minus          │
-     * │  the "client:" scheme prefix.                                        │
+     * │  statusCallback fires on all leg status changes so we can cancel    │
+     * │  the cell leg immediately if the browser rejects.                   │
      * └─────────────────────────────────────────────────────────────────────┘
      *
      * ┌─ <Number> ──────────────────────────────────────────────────────────┐
@@ -101,7 +113,9 @@ export async function POST(req: Request) {
         timeout="20"
         action="${escapeXml(dialCompleteUrl.toString())}"
         method="POST">
-    <Client>${escapeXml(clientIdentity)}</Client>
+    <Client statusCallback="${escapeXml(clientStatusUrl.toString())}"
+            statusCallbackEvent="initiated ringing answered completed"
+            statusCallbackMethod="POST">${escapeXml(clientIdentity)}</Client>
     <Number>${escapeXml(cellPhone)}</Number>
   </Dial>
 </Response>`;
