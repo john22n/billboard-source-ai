@@ -93,13 +93,11 @@ export async function POST(req: Request) {
       });
     }
 
-    // ── canceled → re-enqueue to try next available worker ──────────────────
-    // McDonald (or his cell) rejected/dismissed the call. Put the caller back
-    // into the TaskRouter workflow so the next available worker gets a chance.
-    // If McDonald is the only available worker, TaskRouter will re-assign to
-    // him and the simultaneous ring will fire again. If nobody is available,
-    // the workflow timeout will eventually route to voicemail via enqueue-complete.
-    if (dialCallStatus === 'canceled') {
+    // ── canceled or no-answer → re-enqueue to try next available worker ──────
+    // - canceled: worker actively rejected on browser or cell
+    // - no-answer: cell rejected causing browser to keep ringing until timeout
+    // Both should rotate to the next available worker, not go straight to voicemail.
+    if (dialCallStatus === 'canceled' || dialCallStatus === 'no-answer') {
       console.log('🔄 Call canceled by worker — re-enqueueing into TaskRouter');
 
       const waitUrl          = `${appUrl}/api/taskrouter/wait?retry=true`;
@@ -132,8 +130,9 @@ export async function POST(req: Request) {
       });
     }
 
-    // ── no-answer / busy / failed → voicemail ───────────────────────────────
-    // Full timeout elapsed and nobody answered on either device.
+    // ── busy / failed → voicemail ────────────────────────────────────────────
+    // Only hard failures go straight to voicemail. canceled and no-answer
+    // are handled above by requeue so callers get a chance to reach another worker.
     console.log(`📼 DialCallStatus="${dialCallStatus}" — redirecting to voicemail`);
 
     const voicemailUrl = new URL(`${appUrl}/api/taskrouter/voicemail`);
