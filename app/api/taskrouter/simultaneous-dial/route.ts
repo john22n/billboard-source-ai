@@ -81,7 +81,7 @@ export async function POST(req: Request) {
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Dial callerId="${escapeXml(callerIdNumber)}"
-        timeout="20"
+        timeout="15"
         action="${escapeXml(dialCompleteUrl.toString())}"
         method="POST">
     <Client statusCallback="${escapeXml(clientStatusUrl.toString())}"
