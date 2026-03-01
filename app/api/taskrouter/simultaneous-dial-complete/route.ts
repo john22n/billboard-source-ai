@@ -102,7 +102,7 @@ export async function POST(req: Request) {
     if (dialCallStatus === 'canceled') {
       console.log('🔄 Call canceled by worker — re-enqueueing into TaskRouter');
 
-      const waitUrl          = `${appUrl}/api/taskrouter/wait`;
+      const waitUrl          = `${appUrl}/api/taskrouter/wait?retry=true`;
       const enqueueActionUrl = `${appUrl}/api/taskrouter/enqueue-complete`;
 
       // Re-use the original task attributes so the workflow routes correctly.
