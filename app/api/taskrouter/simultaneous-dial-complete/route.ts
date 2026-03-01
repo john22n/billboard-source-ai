@@ -106,9 +106,12 @@ export async function POST(req: Request) {
       voicemailUrl.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
     }
 
+    // Escape & as &amp; — required for valid XML inside TwiML text nodes
+    const escapedVoicemailUrl = voicemailUrl.toString().replace(/&/g, '&amp;');
+
     const redirectTwiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Redirect method="POST">${voicemailUrl.toString()}</Redirect>
+  <Redirect method="POST">${escapedVoicemailUrl}</Redirect>
 </Response>`;
 
     return new Response(redirectTwiml, {
