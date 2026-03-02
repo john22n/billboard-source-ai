@@ -1,19 +1,23 @@
 // app/api/transcribe-file/route.ts
-import { NextRequest, NextResponse } from "next/server";
-import OpenAI from "openai";
-import { generateObject } from "ai";
-import { openai } from "@ai-sdk/openai";
-import { z } from "zod";
-import { getSession } from "@/lib/auth";
+import { NextRequest, NextResponse } from 'next/server'
+import OpenAI from 'openai'
+import { generateObject } from 'ai'
+import { openai } from '@ai-sdk/openai'
+import { z } from 'zod'
+import { getSession } from '@/lib/auth'
 
 const openaiClient = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
-});
+})
 
 // Combined analysis schema - single LLM call instead of 4 parallel calls
 const fullAnalysisSchema = z.object({
-  summary: z.string().describe("2-3 paragraph summary of the sales call covering main discussion points, client needs, solutions discussed, and next steps"),
-  
+  summary: z
+    .string()
+    .describe(
+      '2-3 paragraph summary of the sales call covering main discussion points, client needs, solutions discussed, and next steps',
+    ),
+
   keyPoints: z.object({
     clientName: z.string().nullable(),
     companyName: z.string().nullable(),
@@ -28,99 +32,99 @@ const fullAnalysisSchema = z.object({
     objections: z.array(z.string()),
     requirements: z.array(z.string()),
   }),
-  
+
   actionItems: z.array(
     z.object({
       action: z.string(),
-      owner: z.enum(["Sales Rep", "Customer", "Both"]),
+      owner: z.enum(['Sales Rep', 'Customer', 'Both']),
       deadline: z.string().nullable(),
-      priority: z.enum(["high", "medium", "low"]),
-    })
+      priority: z.enum(['high', 'medium', 'low']),
+    }),
   ),
-  
+
   sentiment: z.object({
-    overall: z.enum(["positive", "neutral", "negative"]),
-    clientEngagement: z.enum(["high", "medium", "low"]),
+    overall: z.enum(['positive', 'neutral', 'negative']),
+    clientEngagement: z.enum(['high', 'medium', 'low']),
     buyingSignals: z.array(z.string()),
     concerns: z.array(z.string()),
-    dealLikelihood: z.enum(["high", "medium", "low"]),
+    dealLikelihood: z.enum(['high', 'medium', 'low']),
     confidenceScore: z.number().min(0).max(100),
     emotionalTone: z.enum([
-      "enthusiastic",
-      "interested",
-      "skeptical",
-      "resistant",
-      "neutral",
+      'enthusiastic',
+      'interested',
+      'skeptical',
+      'resistant',
+      'neutral',
     ]),
     reasoning: z.string(),
   }),
-});
+})
 
 export async function POST(req: NextRequest) {
   try {
     // ✅ SECURITY: Require authentication
-    const session = await getSession();
+    const session = await getSession()
     if (!session?.userId) {
       return NextResponse.json(
-        { error: "Unauthorized - Please log in" },
-        { status: 401 }
-      );
+        { error: 'Unauthorized - Please log in' },
+        { status: 401 },
+      )
     }
 
-    const formData = await req.formData();
-    const file = formData.get("file") as File;
+    const formData = await req.formData()
+    const file = formData.get('file') as File
 
     if (!file) {
-      return NextResponse.json({ error: "No file provided" }, { status: 400 });
+      return NextResponse.json({ error: 'No file provided' }, { status: 400 })
     }
 
-    console.log("📁 Transcribing file:", file.name, `(${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+    console.log(
+      '📁 Transcribing file:',
+      file.name,
+      `(${(file.size / 1024 / 1024).toFixed(2)} MB)`,
+    )
 
     // Step 1: Transcribe the audio file using OpenAI Whisper
     const transcription = await openaiClient.audio.transcriptions.create({
       file: file,
-      model: "whisper-1",
-      language: "en",
-      response_format: "verbose_json",
-      timestamp_granularities: ["segment"],
-    });
+      model: 'whisper-1',
+      language: 'en',
+      prompt:
+        'Billboard, billboard advertising, bulletin, poster, digital billboard, static bulletin, out-of-home, OOH, CPM, impressions, DEC, daily effective circulation, vinyl, trivision, LED, Nutshell, Billboard Source',
+      response_format: 'verbose_json',
+      timestamp_granularities: ['segment'],
+    })
 
-    const transcript = transcription.text;
-    console.log("✅ Transcription complete, analyzing...");
+    const transcript = transcription.text
+    console.log('✅ Transcription complete, analyzing...')
 
     // Step 2: Single LLM call for all analysis (4x more efficient than parallel calls)
     const { object: analysis } = await generateObject({
-      model: openai("gpt-4o-mini"),
+      model: openai('gpt-4o-mini'),
       schema: fullAnalysisSchema,
       system: `You are a sales call analyst. Analyze this sales call transcript and extract all relevant information.
 Be thorough and only include information that was explicitly mentioned. Use null for missing fields.`,
       prompt: transcript,
       temperature: 0.2,
-    });
+    })
 
-    console.log("✅ Analysis complete");
+    console.log('✅ Analysis complete')
 
     return NextResponse.json({
       text: transcript,
       segments: transcription.segments,
       analysis,
-    });
+    })
   } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : "Unknown error";
-    console.error("❌ Transcription error:", error);
+    const errorMessage =
+      error instanceof Error ? error.message : 'Unknown error'
+    console.error('❌ Transcription error:', error)
     return NextResponse.json(
-      { error: "Failed to transcribe file", details: errorMessage },
-      { status: 500 }
-    );
+      { error: 'Failed to transcribe file', details: errorMessage },
+      { status: 500 },
+    )
   }
 }
-
-
-
-
-
-
-
 
 /*
 import { NextResponse } from "next/server";
