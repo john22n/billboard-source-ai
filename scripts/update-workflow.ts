@@ -6,7 +6,6 @@
  *
  * Run with: npx dotenv -e .env.prod -- tsx scripts/update-workflow.ts
  */
-
 import twilio from 'twilio';
 
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
@@ -16,7 +15,6 @@ const WORKFLOW_SID = process.env.TASKROUTER_WORKFLOW_SID!;
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://billboard-source.vercel.app';
 
 const MAIN_ROUTING_NUMBER = '+18338547126';
-
 const DIRECT_NUMBERS = [
   '+12625876034',
   '+14177390805',
@@ -60,7 +58,10 @@ async function updateWorkflow() {
     }
   }
 
-  // Workflow config matching setup-taskrouter.ts
+  // Worker exclusion expression — skips workers that missed the simultaneous ring
+  // excluded_workers is set on the task attributes by simultaneous-dial-complete
+  const workerExclusionExpression = "worker.sid NOT IN task.excluded_workers";
+
   const workflowConfig = {
     task_routing: {
       filters: [
@@ -70,17 +71,21 @@ async function updateWorkflow() {
           expression: `callTo == "${num}"`,
           targets: [
             { queue: directQueues[num], timeout: 20 },
-            { queue: mainQueue.sid, timeout: 20 },  // Fallback to any available rep
+            // Fallback to main queue — skip any worker that already missed the call
+            { queue: mainQueue.sid, expression: workerExclusionExpression, timeout: 20 },
             { queue: voicemailQueue.sid, timeout: 120 },
           ],
         })),
+
         // Main number
         {
           filter_friendly_name: 'Main Number',
           expression: `callTo == "${MAIN_ROUTING_NUMBER}"`,
           targets: [
-            { queue: mainQueue.sid, timeout: 20 },
-            { queue: mainQueue.sid, timeout: 20 },
+            // First attempt — skip any worker that already missed the call
+            { queue: mainQueue.sid, expression: workerExclusionExpression, timeout: 20 },
+            // Second attempt — same filter (retried=true will send to voicemail instead)
+            { queue: mainQueue.sid, expression: workerExclusionExpression, timeout: 20 },
             { queue: voicemailQueue.sid, timeout: 120 },
           ],
         },

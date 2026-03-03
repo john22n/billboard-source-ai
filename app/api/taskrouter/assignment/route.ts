@@ -38,8 +38,6 @@ export async function POST(req: Request) {
         console.error('❌ Invalid Twilio signature on assignment callback');
         console.error('URL used:', webhookUrl);
         console.error('Signature:', twilioSignature);
-        // Don't block - Twilio signature validation can fail with proxies/load balancers
-        // return new Response('Forbidden', { status: 403 });
       }
     }
 
@@ -56,7 +54,12 @@ export async function POST(req: Request) {
     console.log('ReservationSid:', reservationSid);
     console.log('WorkerSid:', workerSid);
 
-    let workerAttrs: { email?: string; contact_uri?: string } = {};
+    let workerAttrs: {
+      email?: string;
+      contact_uri?: string;
+      simultaneous_ring?: boolean;
+      cell_phone?: string;
+    } = {};
     let taskAttrs: { call_sid?: string; from?: string } = {};
 
     try {
@@ -70,9 +73,9 @@ export async function POST(req: Request) {
     console.log('Call from:', taskAttrs.from);
     console.log('═══════════════════════════════════════════');
 
-    // Build URLs
-    const url = new URL(req.url);
-    const appUrl = `${url.protocol}//${url.host}`;
+    const appUrl = (
+      process.env.NEXT_PUBLIC_APP_URL ?? `${new URL(req.url).protocol}//${new URL(req.url).host}`
+    ).replace(/\/$/, '');
     const workspaceSid = formData.get('WorkspaceSid') as string;
 
     // Check if this is the voicemail worker
@@ -81,20 +84,12 @@ export async function POST(req: Request) {
 
       const voicemailUrl = `${appUrl}/api/taskrouter/voicemail?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
 
-      // call_sid is required for redirect instruction
       const callSid = taskAttrs.call_sid;
       if (!callSid) {
         console.error('❌ No call_sid in task attributes - cannot redirect');
         return Response.json({ instruction: 'reject' });
       }
 
-      // Use TaskRouter's redirect instruction - this properly:
-      // 1. Redirects the call to voicemail TwiML
-      // 2. Completes the reservation
-      // 3. Pulls the call out of the Enqueue cleanly
-      //
-      // We also complete the task immediately since voicemail doesn't need
-      // task tracking - if caller hangs up before recording, task would stay stuck.
       const instruction = {
         instruction: 'redirect',
         call_sid: callSid,
@@ -105,8 +100,6 @@ export async function POST(req: Request) {
 
       console.log('📞 Redirect instruction:', instruction);
 
-      // Complete the task asynchronously - voicemail doesn't need task tracking
-      // This prevents tasks from getting stuck if caller hangs up early
       import('twilio').then(({ default: twilioModule }) => {
         const client = twilioModule(
           process.env.TWILIO_ACCOUNT_SID!,
@@ -126,9 +119,49 @@ export async function POST(req: Request) {
       return Response.json(instruction);
     }
 
-    // Normal worker - use conference instruction (recommended by Twilio)
-    // Conference handles call orchestration, monitors if agent answered,
-    // and properly times out the reservation if agent doesn't answer
+    // ── SIMULTANEOUS RING ────────────────────────────────────────────────────
+    if (workerAttrs.simultaneous_ring && workerAttrs.cell_phone) {
+      console.log('📱 Worker has simultaneous_ring=true — using parallel dial instead of conference');
+
+      const callSid = taskAttrs.call_sid;
+
+      if (!callSid) {
+        console.error('❌ No call_sid in task attributes — falling through to conference for simultaneous-ring worker');
+      } else {
+        const clientIdentity = (workerAttrs.contact_uri ?? `client:${workerAttrs.email}`)
+          .replace(/^client:/, '');
+
+        const simDialUrl = new URL(`${appUrl}/api/taskrouter/simultaneous-dial`);
+        simDialUrl.searchParams.set('taskSid',        taskSid);
+        simDialUrl.searchParams.set('workspaceSid',   workspaceSid);
+        simDialUrl.searchParams.set('clientIdentity', clientIdentity);
+        simDialUrl.searchParams.set('cellPhone',      workerAttrs.cell_phone);
+        simDialUrl.searchParams.set('callerFrom',     taskAttrs.from ?? '');
+        // ── NEW: pass workerSid so simultaneous-dial-complete can exclude this
+        //         worker from the re-enqueued task if he doesn't answer
+        simDialUrl.searchParams.set('workerSid',      workerSid);
+        if (process.env.VERCEL_BYPASS_TOKEN) {
+          simDialUrl.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
+        }
+
+        const simRingInstruction = {
+          instruction: 'redirect',
+          call_sid:    callSid,
+          url:         simDialUrl.toString(),
+          accept:      true,
+          post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
+        };
+
+        console.log('📞 Simultaneous ring redirect instruction:', {
+          ...simRingInstruction,
+          url: simRingInstruction.url.replace(/cellPhone=[^&]+/, 'cellPhone=***'),
+        });
+        return Response.json(simRingInstruction);
+      }
+    }
+    // ── END SIMULTANEOUS RING ────────────────────────────────────────────────
+
+    // Normal worker — conference instruction
     const conferenceStatusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
 
     const instruction = {
@@ -141,7 +174,7 @@ export async function POST(req: Request) {
       conference_status_callback_event: 'start, end, join, leave',
       end_conference_on_exit: true,
       end_conference_on_customer_exit: true,
-      reject_pending_reservations: true,  // Prevent race condition: reject other reservations when this one is accepted
+      reject_pending_reservations: true,
     };
 
     console.log('📞 Conference instruction:', instruction);

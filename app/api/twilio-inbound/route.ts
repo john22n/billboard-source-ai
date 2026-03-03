@@ -88,27 +88,30 @@ export async function POST(req: Request) {
     const taskAttributes = JSON.stringify({
       call_sid: CallSid,
       from: From,
-      callTo: To,        // 🔑 used by workflow (matches workflow expression)
-      callType,          // 🔑 used by workflow
-      phoneNumber,       // 🔑 used by direct queues
+      callTo: To,
+      callType,
+      phoneNumber,
       primary_owner: primaryOwner,
+      excluded_workers: [],  // initialized empty so NOT IN expression never throws on fresh calls
     });
 
-    const url = new URL(req.url);
-    const appUrl = `${url.protocol}//${url.host}`;
+    const appUrl = (
+      process.env.NEXT_PUBLIC_APP_URL ?? `${new URL(req.url).protocol}//${new URL(req.url).host}`
+    ).replace(/\/$/, '');
     const enqueueActionUrl = `${appUrl}/api/taskrouter/enqueue-complete`;
     const waitUrl = `${appUrl}/api/taskrouter/wait`;
 
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
-                    <Response>
-                    <Enqueue workflowSid="${WORKFLOW_SID}"
-                    action="${enqueueActionUrl}"
-                    method="POST"
-                    waitUrl="${waitUrl}"
-                    waitUrlMethod="POST">
-                    <Task>${taskAttributes}</Task>
-                    </Enqueue>
-                    </Response>`;
+<Response>
+  <Say voice="Polly.Joanna">Please hold while we connect you with the next available representative.</Say>
+  <Enqueue workflowSid="${WORKFLOW_SID}"
+           action="${enqueueActionUrl}"
+           method="POST"
+           waitUrl="${waitUrl}"
+           waitUrlMethod="POST">
+    <Task>${taskAttributes}</Task>
+  </Enqueue>
+</Response>`;
 
     return new Response(twiml, {
       status: 200,
@@ -119,4 +122,3 @@ export async function POST(req: Request) {
     return new Response('Error', { status: 500 });
   }
 }
-

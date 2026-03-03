@@ -1,20 +1,16 @@
 /**
  * TaskRouter Wait URL
  *
- * Plays hold message while caller waits in the TaskRouter queue.
- * Redirects back to itself to keep the call alive and allow TaskRouter to attempt worker assignment.
+ * Plays hold music while caller waits in the TaskRouter queue.
+ * The "please hold" greeting is spoken once in twilio-inbound BEFORE
+ * the call enters the queue, so it can never be interrupted by TaskRouter.
+ * This handler just plays seamless music for the duration of the wait,
+ * including any re-enqueue cycles when a worker rejects the call.
  */
-
 export async function POST(req: Request) {
-  const url = new URL(req.url);
-  const baseUrl = `${url.protocol}//${url.host}`;
-
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="Polly.Joanna">Please hold while we connect you with the next available representative.</Say>
   <Play loop="0">https://com.twilio.sounds.music.s3.amazonaws.com/ClockworkWaltz.mp3</Play>
-  <!-- Redirect back to this wait URL to keep the caller in the queue -->
-  <Redirect>${baseUrl}/api/taskrouter/wait</Redirect>
 </Response>`;
 
   return new Response(twiml, {
@@ -22,4 +18,3 @@ export async function POST(req: Request) {
     headers: { 'Content-Type': 'text/xml' },
   });
 }
-
