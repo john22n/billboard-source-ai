@@ -2,22 +2,19 @@
  * Simultaneous Dial Complete Handler — McDonald only
  *
  * Called by Twilio as the <Dial action> callback when the simultaneous ring
- * attempt finishes — regardless of outcome:
- *   - "completed"  — a leg answered, the call ran, then hung up
- *   - "no-answer"  — timeout elapsed before either leg answered
- *   - "busy"       — both legs were busy
- *   - "failed"     — dial failed (e.g. invalid number, carrier error)
- *   - "canceled"   — browser or cell rejected/dismissed the call
+ * attempt finishes — regardless of outcome.
  *
  * Routing logic:
  *   - completed              → clean hangup (call already finished)
- *   - canceled / no-answer   → re-enqueue with retried=true to try next worker
+ *   - canceled / no-answer   → re-enqueue with retried=true + excluded_workers
+ *                              so TaskRouter skips McDonald on the next attempt
  *   - canceled / no-answer (retried=true) → voicemail (prevent loop)
  *   - busy / failed          → voicemail
  *
- * Query parameters (forwarded from the simultaneous-dial action attribute):
+ * Query parameters:
  *   taskSid      — TaskRouter Task SID
  *   workspaceSid — TaskRouter Workspace SID
+ *   workerSid    — The worker SID that just missed the call (to exclude)
  */
 
 import twilio from 'twilio';
@@ -34,6 +31,8 @@ export async function POST(req: Request) {
     const url          = new URL(req.url);
     const taskSid      = url.searchParams.get('taskSid');
     const workspaceSid = url.searchParams.get('workspaceSid') ?? WORKSPACE_SID;
+    // ── NEW: read workerSid from query params
+    const workerSid    = url.searchParams.get('workerSid') ?? '';
 
     const formData         = await req.formData();
     const dialCallStatus   = formData.get('DialCallStatus')   as string | null;
@@ -44,6 +43,7 @@ export async function POST(req: Request) {
     console.log('DialCallStatus:',   dialCallStatus);
     console.log('DialCallDuration:', dialCallDuration ? `${dialCallDuration}s` : 'n/a');
     console.log('TaskSid:',          taskSid);
+    console.log('WorkerSid:',        workerSid);
     console.log('═══════════════════════════════════════════');
 
     const appUrl = (
@@ -129,7 +129,7 @@ export async function POST(req: Request) {
       console.warn('⚠️ Missing taskSid or workspaceSid — task will not be completed');
     }
 
-    // ── canceled or no-answer → re-enqueue once to next worker, then voicemail ─
+    // ── canceled or no-answer → re-enqueue once, then voicemail ─────────────
     if (dialCallStatus === 'canceled' || dialCallStatus === 'no-answer') {
 
       // Already retried once — stop looping, go to voicemail
@@ -141,15 +141,25 @@ export async function POST(req: Request) {
         });
       }
 
-      // First miss — re-enqueue so next available worker gets the call
-      console.log('🔄 No answer from McDonald — re-enqueueing to next worker');
+      // ── NEW: build excluded_workers array ───────────────────────────────
+      // Carry forward any previously excluded workers and add the current one.
+      // TaskRouter workflow filter uses: worker.sid NOT IN task.excluded_workers
+      const previouslyExcluded = Array.isArray(taskAttributes.excluded_workers)
+        ? (taskAttributes.excluded_workers as string[])
+        : [];
+      const excludedWorkers = workerSid
+        ? [...new Set([...previouslyExcluded, workerSid])]
+        : previouslyExcluded;
+
+      console.log('🔄 No answer from McDonald — re-enqueueing, excluded workers:', excludedWorkers);
 
       const waitUrl          = `${appUrl}/api/taskrouter/wait?retry=true`;
       const enqueueActionUrl = `${appUrl}/api/taskrouter/enqueue-complete`;
 
       const newTaskAttributes = JSON.stringify({
         ...taskAttributes,
-        retried: true, // on second miss, go straight to voicemail
+        retried: true,
+        excluded_workers: excludedWorkers, // ── NEW
       });
 
       const escapedWaitUrl          = waitUrl.replace(/&/g, '&amp;');

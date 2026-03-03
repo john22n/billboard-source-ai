@@ -5,18 +5,9 @@
  * when a task is assigned to a worker whose Twilio attributes include:
  *   { "simultaneous_ring": true, "cell_phone": "+1XXXXXXXXXX" }
  *
- * It returns a <Dial> TwiML that rings BOTH the worker's GPP2 browser client
+ * It returns a <Dial> TwiML that rings BOTH the worker's browser client
  * (via <Client>) and their personal cell phone (via <Number>) simultaneously.
- * The first leg to answer wins; the other drops automatically — standard
- * Twilio multi-noun <Dial> semantics, no bridging or patching required.
- *
- * The <Client> noun has a statusCallback so that if the browser rejects the
- * call, the outbound cell leg is immediately canceled via the REST API rather
- * than continuing to ring until the 20s timeout.
- *
- * A <Parameter name="callerFrom"> is injected into the <Client> noun so the
- * browser client receives the real caller's E.164 number in
- * call.customParameters — regardless of what callerId shows on screen.
+ * The first leg to answer wins; the other drops automatically.
  *
  * Query parameters (appended by the assignment callback):
  *   taskSid        — TaskRouter Task SID
@@ -24,6 +15,8 @@
  *   clientIdentity — Twilio Client identity string (e.g. "mcdonald")
  *   cellPhone      — E.164 personal cell number (e.g. "+19565551234")
  *   callerFrom     — Real caller E.164 number from task attributes
+ *   workerSid      — TaskRouter Worker SID (passed through to dial-complete
+ *                    so it can be added to excluded_workers on re-enqueue)
  */
 
 export async function POST(req: Request) {
@@ -35,10 +28,13 @@ export async function POST(req: Request) {
     const clientIdentity = url.searchParams.get('clientIdentity') ?? '';
     const cellPhone      = url.searchParams.get('cellPhone')      ?? '';
     const callerFrom     = url.searchParams.get('callerFrom')     ?? '';
+    // ── NEW: read workerSid so we can forward it to dial-complete
+    const workerSid      = url.searchParams.get('workerSid')      ?? '';
 
     console.log('═══════════════════════════════════════════');
     console.log('📱 SIMULTANEOUS RING — McDONALD');
     console.log('TaskSid:', taskSid);
+    console.log('WorkerSid:', workerSid);
     console.log('ClientIdentity:', clientIdentity);
     console.log('CellPhone:', cellPhone.replace(/\d(?=\d{4})/g, '*'));
     console.log('CallerFrom:', callerFrom.replace(/\d(?=\d{4})/g, '*'));
@@ -60,6 +56,8 @@ export async function POST(req: Request) {
     const dialCompleteUrl = new URL(`${appUrl}/api/taskrouter/simultaneous-dial-complete`);
     dialCompleteUrl.searchParams.set('taskSid',      taskSid);
     dialCompleteUrl.searchParams.set('workspaceSid', workspaceSid);
+    // ── NEW: forward workerSid to dial-complete
+    dialCompleteUrl.searchParams.set('workerSid',    workerSid);
     if (process.env.VERCEL_BYPASS_TOKEN) {
       dialCompleteUrl.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
     }

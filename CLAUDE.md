@@ -253,6 +253,12 @@ Dual authentication: JWT-based password auth + WebAuthn passkeys.
 - Client-side form state for lead form
 - Tracks `userEditedFields`, `lockedFields`, `recentlyChangedFields`
 - Used by LeadForm and SalesCallTranscriber
+- **Three-tier AI merge logic in `updateFromAI()`**:
+  1. `ALWAYS_UPDATE_FIELDS` (e.g. `notes`) — never locked, always overwritten by AI
+  2. `userEditedFields` — user wins absolutely, AI never overwrites
+  3. Locked fields — AI can update only if the new value is meaningfully different (word overlap check) or an "expansion" (e.g. "John" → "John Smith")
+- **Phone field protection**: if `twilioPhonePreFilled` is true, AI extraction never overwrites the phone field (but still checks match for verification state)
+- Granular selectors (`selectField`, `selectIsFieldLocked`, etc.) keep re-renders minimal
 
 ### API Routes (34 endpoints)
 
@@ -320,6 +326,33 @@ Call routing system using Twilio TaskRouter:
 - `useWorkerStatus` hook streams status via SSE (`/api/taskrouter/worker-status-stream`)
 - Voicemail handling: recording, transcription, email notification via Resend
 - Scripts in `scripts/` for setup, debugging, and diagnostics
+
+**Assignment callback routing logic** (`/api/taskrouter/assignment`):
+1. `voicemail@system` worker → redirect to `/api/taskrouter/voicemail`
+2. Worker has `simultaneous_ring: true` + `cell_phone` → redirect to `/api/taskrouter/simultaneous-dial` (dials browser client + cell phone in parallel; first to answer wins)
+3. All others → conference instruction
+
+**Simultaneous-dial-complete re-enqueue logic** (`/api/taskrouter/simultaneous-dial-complete`):
+- `completed` → task marked complete
+- `canceled`/`no-answer` and NOT already retried → re-enqueue call to next available worker (sets `retried: true` on task attributes to prevent loops)
+- `canceled`/`no-answer` and already retried, or `busy`/`failed` → redirect to voicemail
+
+**Worker attribute merge strategy** (`/api/taskrouter/worker-status` POST):
+- Always fetches existing Twilio worker attributes before updating so custom fields (`simultaneous_ring`, `cell_phone`, `contact_uri`) are preserved
+- Retries up to 3× on 409 Conflict (concurrent update race condition)
+
+**SSE worker status stream** (`/api/taskrouter/worker-status-stream`):
+- Uses `getSessionWithoutRefresh()` — won't extend the session timer
+- Auth failures (401) are returned as SSE-formatted data (not HTTP 401) so the client can handle gracefully without triggering browser error behavior
+- Keepalive comment (`: keepalive`) sent every 30 seconds
+
+**Dashboard layout provider order** (`app/dashboard/layout.tsx`):
+- `WorkerStatusProvider` wraps `TwilioProvider` — this order is required because `TwilioProvider` reads from `useWorkerStatus()`
+
+**TwilioProvider device lifecycle** (`components/providers/TwilioProvider.tsx`):
+- The Twilio Device is **never destroyed on component unmount** — it persists for the entire app session
+- Destroyed only explicitly via `destroyDevice()` (called on logout)
+- Polls every 2 seconds to detect unexpected destruction
 
 ### Billboard Data Processing
 

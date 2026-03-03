@@ -136,9 +136,10 @@ export async function POST(req: Request) {
         simDialUrl.searchParams.set('workspaceSid',   workspaceSid);
         simDialUrl.searchParams.set('clientIdentity', clientIdentity);
         simDialUrl.searchParams.set('cellPhone',      workerAttrs.cell_phone);
-        // Pass the real caller number so the browser client can display it
-        // via call.customParameters.get('callerFrom')
         simDialUrl.searchParams.set('callerFrom',     taskAttrs.from ?? '');
+        // ── NEW: pass workerSid so simultaneous-dial-complete can exclude this
+        //         worker from the re-enqueued task if he doesn't answer
+        simDialUrl.searchParams.set('workerSid',      workerSid);
         if (process.env.VERCEL_BYPASS_TOKEN) {
           simDialUrl.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
         }
