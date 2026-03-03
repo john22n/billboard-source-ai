@@ -88,10 +88,11 @@ export async function POST(req: Request) {
     const taskAttributes = JSON.stringify({
       call_sid: CallSid,
       from: From,
-      callTo: To,        // 🔑 used by workflow (matches workflow expression)
-      callType,          // 🔑 used by workflow
-      phoneNumber,       // 🔑 used by direct queues
+      callTo: To,
+      callType,
+      phoneNumber,
       primary_owner: primaryOwner,
+      excluded_workers: [],  // initialized empty so NOT IN expression never throws on fresh calls
     });
 
     const appUrl = (
@@ -100,9 +101,6 @@ export async function POST(req: Request) {
     const enqueueActionUrl = `${appUrl}/api/taskrouter/enqueue-complete`;
     const waitUrl = `${appUrl}/api/taskrouter/wait`;
 
-    // Say the greeting BEFORE <Enqueue> so it always plays in full.
-    // If it were inside the waitUrl, TaskRouter could interrupt it mid-sentence
-    // the moment a worker becomes available.
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Say voice="Polly.Joanna">Please hold while we connect you with the next available representative.</Say>
