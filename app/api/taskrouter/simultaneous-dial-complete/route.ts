@@ -31,7 +31,6 @@ export async function POST(req: Request) {
     const url          = new URL(req.url);
     const taskSid      = url.searchParams.get('taskSid');
     const workspaceSid = url.searchParams.get('workspaceSid') ?? WORKSPACE_SID;
-    // ── NEW: read workerSid from query params
     const workerSid    = url.searchParams.get('workerSid') ?? '';
 
     const formData         = await req.formData();
@@ -141,9 +140,7 @@ export async function POST(req: Request) {
         });
       }
 
-      // ── NEW: build excluded_workers array ───────────────────────────────
-      // Carry forward any previously excluded workers and add the current one.
-      // TaskRouter workflow filter uses: worker.sid NOT IN task.excluded_workers
+      // Build excluded_workers array — carry forward any previously excluded workers
       const previouslyExcluded = Array.isArray(taskAttributes.excluded_workers)
         ? (taskAttributes.excluded_workers as string[])
         : [];
@@ -153,17 +150,27 @@ export async function POST(req: Request) {
 
       console.log('🔄 No answer from McDonald — re-enqueueing, excluded workers:', excludedWorkers);
 
-      const waitUrl          = `${appUrl}/api/taskrouter/wait?retry=true`;
-      const enqueueActionUrl = `${appUrl}/api/taskrouter/enqueue-complete`;
+      // ── Build waitUrl with bypass token ─────────────────────────────────
+      const waitUrlObj = new URL(`${appUrl}/api/taskrouter/wait`);
+      waitUrlObj.searchParams.set('retry', 'true');
+      if (process.env.VERCEL_BYPASS_TOKEN) {
+        waitUrlObj.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
+      }
+
+      // ── Build enqueueActionUrl with bypass token ─────────────────────────
+      const enqueueActionUrlObj = new URL(`${appUrl}/api/taskrouter/enqueue-complete`);
+      if (process.env.VERCEL_BYPASS_TOKEN) {
+        enqueueActionUrlObj.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
+      }
 
       const newTaskAttributes = JSON.stringify({
         ...taskAttributes,
         retried: true,
-        excluded_workers: excludedWorkers, // ── NEW
+        excluded_workers: excludedWorkers,
       });
 
-      const escapedWaitUrl          = waitUrl.replace(/&/g, '&amp;');
-      const escapedEnqueueActionUrl = enqueueActionUrl.replace(/&/g, '&amp;');
+      const escapedWaitUrl          = waitUrlObj.toString().replace(/&/g, '&amp;');
+      const escapedEnqueueActionUrl = enqueueActionUrlObj.toString().replace(/&/g, '&amp;');
 
       const requeueTwiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
