@@ -1,15 +1,16 @@
 /**
- * Simultaneous Dial Complete Handler — McDonald only
+ * Simultaneous Dial Complete Handler
  *
  * Called by Twilio as the <Dial action> callback when the simultaneous ring
  * attempt finishes — regardless of outcome.
  *
  * Routing logic:
- *   - completed              → clean hangup (call already finished)
- *   - canceled / no-answer   → re-enqueue with retried=true + excluded_workers
- *                              so TaskRouter skips McDonald on the next attempt
+ *   - completed (duration >= 4s)  → clean hangup (genuine answer)
+ *   - completed (duration < 4s)   → treat as no-answer (carrier voicemail)
+ *   - canceled / no-answer        → re-enqueue with retried=true + excluded_workers
+ *                                   so TaskRouter skips McDonald on the next attempt
  *   - canceled / no-answer (retried=true) → voicemail (prevent loop)
- *   - busy / failed          → voicemail
+ *   - busy / failed               → voicemail
  *
  * Query parameters:
  *   taskSid      — TaskRouter Task SID
@@ -24,6 +25,10 @@ const AUTH_TOKEN    = process.env.TWILIO_AUTH_TOKEN!;
 const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!;
 const WORKFLOW_SID  = process.env.TASKROUTER_WORKFLOW_SID!;
 
+// Carrier voicemail answers in ~0-2s. A real human answer takes longer.
+// Anything under this threshold on a "completed" status is treated as voicemail.
+const VOICEMAIL_DURATION_THRESHOLD_SECONDS = 4;
+
 const HANGUP_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>';
 
 export async function POST(req: Request) {
@@ -34,13 +39,15 @@ export async function POST(req: Request) {
     const workerSid    = url.searchParams.get('workerSid') ?? '';
 
     const formData         = await req.formData();
-    const dialCallStatus   = formData.get('DialCallStatus')   as string | null;
+    let   dialCallStatus   = formData.get('DialCallStatus')   as string | null;
     const dialCallDuration = formData.get('DialCallDuration') as string | null;
 
+    const durationSeconds = dialCallDuration ? parseInt(dialCallDuration, 10) : null;
+
     console.log('═══════════════════════════════════════════');
-    console.log('📱 SIMULTANEOUS DIAL COMPLETE — McDONALD');
+    console.log('📱 SIMULTANEOUS DIAL COMPLETE');
     console.log('DialCallStatus:',   dialCallStatus);
-    console.log('DialCallDuration:', dialCallDuration ? `${dialCallDuration}s` : 'n/a');
+    console.log('DialCallDuration:', durationSeconds != null ? `${durationSeconds}s` : 'n/a');
     console.log('TaskSid:',          taskSid);
     console.log('WorkerSid:',        workerSid);
     console.log('═══════════════════════════════════════════');
@@ -66,36 +73,48 @@ export async function POST(req: Request) {
 </Response>`;
     };
 
-    // ── completed → clean hangup ─────────────────────────────────────────────
+    // ── completed → check duration to detect carrier voicemail ──────────────
     if (!dialCallStatus || dialCallStatus === 'completed') {
-      console.log(`📞 DialCallStatus="${dialCallStatus}" — hanging up cleanly`);
 
-      if (taskSid && workspaceSid) {
-        try {
-          const task = await client.taskrouter.v1
-            .workspaces(workspaceSid)
-            .tasks(taskSid)
-            .fetch();
+      const isCarrierVoicemail =
+        durationSeconds != null &&
+        durationSeconds < VOICEMAIL_DURATION_THRESHOLD_SECONDS;
 
-          if (task.assignmentStatus === 'assigned' || task.assignmentStatus === 'wrapping') {
-            await client.taskrouter.v1
+      if (isCarrierVoicemail) {
+        console.log(`⚠️ "completed" but duration=${durationSeconds}s < ${VOICEMAIL_DURATION_THRESHOLD_SECONDS}s — carrier voicemail detected, treating as no-answer`);
+        // Override so it falls through to re-enqueue logic below
+        dialCallStatus = 'no-answer';
+      } else {
+        // Genuine answer — complete the task and hang up cleanly
+        console.log(`📞 DialCallStatus="completed" duration=${durationSeconds ?? 'unknown'}s — hanging up cleanly`);
+
+        if (taskSid && workspaceSid) {
+          try {
+            const task = await client.taskrouter.v1
               .workspaces(workspaceSid)
               .tasks(taskSid)
-              .update({
-                assignmentStatus: 'completed',
-                reason: 'Simultaneous dial completed successfully',
-              });
-            console.log(`✅ Task ${taskSid} completed`);
-          }
-        } catch (taskErr) {
-          console.error('❌ Failed to complete task:', taskErr);
-        }
-      }
+              .fetch();
 
-      return new Response(HANGUP_TWIML, {
-        status: 200,
-        headers: { 'Content-Type': 'text/xml' },
-      });
+            if (task.assignmentStatus === 'assigned' || task.assignmentStatus === 'wrapping') {
+              await client.taskrouter.v1
+                .workspaces(workspaceSid)
+                .tasks(taskSid)
+                .update({
+                  assignmentStatus: 'completed',
+                  reason: 'Simultaneous dial completed successfully',
+                });
+              console.log(`✅ Task ${taskSid} completed`);
+            }
+          } catch (taskErr) {
+            console.error('❌ Failed to complete task:', taskErr);
+          }
+        }
+
+        return new Response(HANGUP_TWIML, {
+          status: 200,
+          headers: { 'Content-Type': 'text/xml' },
+        });
+      }
     }
 
     // ── Fetch task attributes for all non-completed cases ────────────────────
@@ -148,16 +167,16 @@ export async function POST(req: Request) {
         ? [...new Set([...previouslyExcluded, workerSid])]
         : previouslyExcluded;
 
-      console.log('🔄 No answer from McDonald — re-enqueueing, excluded workers:', excludedWorkers);
+      console.log('🔄 No answer — re-enqueueing, excluded workers:', excludedWorkers);
 
-      // ── Build waitUrl with bypass token ─────────────────────────────────
+      // ── Build waitUrl with bypass token ──────────────────────────────────
       const waitUrlObj = new URL(`${appUrl}/api/taskrouter/wait`);
       waitUrlObj.searchParams.set('retry', 'true');
       if (process.env.VERCEL_BYPASS_TOKEN) {
         waitUrlObj.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
       }
 
-      // ── Build enqueueActionUrl with bypass token ─────────────────────────
+      // ── Build enqueueActionUrl with bypass token ──────────────────────────
       const enqueueActionUrlObj = new URL(`${appUrl}/api/taskrouter/enqueue-complete`);
       if (process.env.VERCEL_BYPASS_TOKEN) {
         enqueueActionUrlObj.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
