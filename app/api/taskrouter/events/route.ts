@@ -27,16 +27,6 @@ export async function POST(req: Request) {
     const reservationSid = formData.get('ReservationSid') as string
     const taskAttributes = formData.get('TaskAttributes') as string
 
-    console.log('═══════════════════════════════════════════')
-    console.log('📡 TASKROUTER EVENT')
-    console.log('EventType:', eventType)
-    console.log('TaskSid:', taskSid)
-    console.log('TaskQueueName:', taskQueueName || 'N/A')
-    console.log('TaskQueueSid:', taskQueueSid || 'N/A')
-    console.log('WorkerSid:', workerSid || 'N/A')
-    console.log('ReservationSid:', reservationSid || 'N/A')
-    console.log('═══════════════════════════════════════════')
-
     switch (eventType) {
       case 'task.created':
         console.log('📋 Task created')
