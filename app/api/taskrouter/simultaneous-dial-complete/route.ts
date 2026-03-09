@@ -7,6 +7,7 @@
  * Routing logic:
  *   - completed (duration >= 4s)  → clean hangup (genuine answer)
  *   - completed (duration < 4s)   → treat as no-answer (carrier voicemail)
+ *   - completed (duration = null) → treat as no-answer (rejected during screening)
  *   - canceled / no-answer        → re-enqueue with retried=true + excluded_workers
  *                                   so TaskRouter skips McDonald on the next attempt
  *   - canceled / no-answer (retried=true) → voicemail (prevent loop)
@@ -25,9 +26,11 @@ const AUTH_TOKEN    = process.env.TWILIO_AUTH_TOKEN!;
 const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!;
 const WORKFLOW_SID  = process.env.TASKROUTER_WORKFLOW_SID!;
 
-// Carrier voicemail answers in ~0-2s. A real human answer takes longer.
-// Anything under this threshold on a "completed" status is treated as voicemail.
-const VOICEMAIL_DURATION_THRESHOLD_SECONDS = 4;
+// Only trust "completed" as a genuine answer if the call lasted at least this long.
+// - null duration = rejected during call screening prompt → re-enqueue
+// - duration < 4s = carrier voicemail answered → re-enqueue
+// - duration >= 4s = real human answered → hang up cleanly
+const GENUINE_ANSWER_THRESHOLD_SECONDS = 4;
 
 const HANGUP_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>';
 
@@ -73,20 +76,19 @@ export async function POST(req: Request) {
 </Response>`;
     };
 
-    // ── completed → check duration to detect carrier voicemail ──────────────
+    // ── completed → only trust it if duration confirms a real answer ─────────
     if (!dialCallStatus || dialCallStatus === 'completed') {
 
-      const isCarrierVoicemail =
+      // Genuine answer requires a known duration >= threshold.
+      // null duration = rejected during screening prompt.
+      // short duration = carrier voicemail.
+      // Both cases should re-enqueue.
+      const isGenuineAnswer =
         durationSeconds != null &&
-        durationSeconds < VOICEMAIL_DURATION_THRESHOLD_SECONDS;
+        durationSeconds >= GENUINE_ANSWER_THRESHOLD_SECONDS;
 
-      if (isCarrierVoicemail) {
-        console.log(`⚠️ "completed" but duration=${durationSeconds}s < ${VOICEMAIL_DURATION_THRESHOLD_SECONDS}s — carrier voicemail detected, treating as no-answer`);
-        // Override so it falls through to re-enqueue logic below
-        dialCallStatus = 'no-answer';
-      } else {
-        // Genuine answer — complete the task and hang up cleanly
-        console.log(`📞 DialCallStatus="completed" duration=${durationSeconds ?? 'unknown'}s — hanging up cleanly`);
+      if (isGenuineAnswer) {
+        console.log(`📞 DialCallStatus="completed" duration=${durationSeconds}s — genuine answer, hanging up cleanly`);
 
         if (taskSid && workspaceSid) {
           try {
@@ -115,6 +117,13 @@ export async function POST(req: Request) {
           headers: { 'Content-Type': 'text/xml' },
         });
       }
+
+      // Not a genuine answer — override and fall through to re-enqueue
+      const reason = durationSeconds === null
+        ? 'null duration (rejected during screening)'
+        : `duration=${durationSeconds}s < ${GENUINE_ANSWER_THRESHOLD_SECONDS}s (carrier voicemail)`;
+      console.log(`⚠️ "completed" but ${reason} — treating as no-answer`);
+      dialCallStatus = 'no-answer';
     }
 
     // ── Fetch task attributes for all non-completed cases ────────────────────
