@@ -12,8 +12,8 @@
  * Query parameters (appended by the assignment callback):
  *   taskSid        — TaskRouter Task SID
  *   workspaceSid   — TaskRouter Workspace SID
- *   clientIdentity — Twilio Client identity string (e.g. "mcdonald")
- *   cellPhone      — E.164 personal cell number (e.g. "+19565551234")
+ *   clientIdentity — Twilio Client identity string
+ *   cellPhone      — E.164 personal cell number
  *   callerFrom     — Real caller E.164 number from task attributes
  *   workerSid      — TaskRouter Worker SID (passed through to dial-complete
  *                    so it can be added to excluded_workers on re-enqueue)

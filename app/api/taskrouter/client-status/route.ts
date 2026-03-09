@@ -8,7 +8,7 @@
  * stops ringing instead of waiting for the full 20s timeout.
  *
  * Query parameters (set by simultaneous-dial/route.ts):
- *   cellPhone — E.164 cell number to cancel (e.g. "+19565551234")
+ *   cellPhone — E.164 cell number to cancel 
  *   taskSid   — TaskRouter Task SID (for logging)
  */
 
