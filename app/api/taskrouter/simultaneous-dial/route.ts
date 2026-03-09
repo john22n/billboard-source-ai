@@ -1,13 +1,13 @@
 /**
- * Simultaneous Ring TwiML Handler — McDonald only
+ * Simultaneous Ring TwiML Handler
  *
- * This route is called by Twilio via the TaskRouter `redirect` instruction
- * when a task is assigned to a worker whose Twilio attributes include:
- *   { "simultaneous_ring": true, "cell_phone": "+1XXXXXXXXXX" }
+ * Returns a <Dial> that rings BOTH the worker's browser client (via <Client>)
+ * and their personal cell phone (via <Number>) simultaneously.
  *
- * It returns a <Dial> TwiML that rings BOTH the worker's browser client
- * (via <Client>) and their personal cell phone (via <Number>) simultaneously.
- * The first leg to answer wins; the other drops automatically.
+ * The <Number> tag uses a `url` attribute pointing to cell-screen, which plays
+ * a "Press 1 to accept" prompt when the cell answers. This prevents carrier
+ * voicemail from silently stealing the call — voicemail can't press 1, so it
+ * times out, the cell leg hangs up, and simultaneous-dial-complete re-enqueues.
  *
  * Query parameters (appended by the assignment callback):
  *   taskSid        — TaskRouter Task SID
@@ -15,8 +15,7 @@
  *   clientIdentity — Twilio Client identity string
  *   cellPhone      — E.164 personal cell number
  *   callerFrom     — Real caller E.164 number from task attributes
- *   workerSid      — TaskRouter Worker SID (passed through to dial-complete
- *                    so it can be added to excluded_workers on re-enqueue)
+ *   workerSid      — TaskRouter Worker SID (passed through to dial-complete)
  */
 
 export async function POST(req: Request) {
@@ -28,11 +27,10 @@ export async function POST(req: Request) {
     const clientIdentity = url.searchParams.get('clientIdentity') ?? '';
     const cellPhone      = url.searchParams.get('cellPhone')      ?? '';
     const callerFrom     = url.searchParams.get('callerFrom')     ?? '';
-    // ── NEW: read workerSid so we can forward it to dial-complete
     const workerSid      = url.searchParams.get('workerSid')      ?? '';
 
     console.log('═══════════════════════════════════════════');
-    console.log('📱 SIMULTANEOUS RING — McDONALD');
+    console.log('📱 SIMULTANEOUS RING');
     console.log('TaskSid:', taskSid);
     console.log('WorkerSid:', workerSid);
     console.log('ClientIdentity:', clientIdentity);
@@ -41,7 +39,7 @@ export async function POST(req: Request) {
     console.log('═══════════════════════════════════════════');
 
     if (!clientIdentity || !cellPhone) {
-      console.error('❌ Missing clientIdentity or cellPhone — cannot build simultaneous dial TwiML');
+      console.error('❌ Missing clientIdentity or cellPhone');
       return new Response(
         '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>',
         { status: 200, headers: { 'Content-Type': 'text/xml' } }
@@ -53,20 +51,30 @@ export async function POST(req: Request) {
     ).replace(/\/$/, '');
     const callerIdNumber = process.env.TWILIO_MAIN_NUMBER ?? '+18338547126';
 
+    // ── dial-complete callback ────────────────────────────────────────────────
     const dialCompleteUrl = new URL(`${appUrl}/api/taskrouter/simultaneous-dial-complete`);
     dialCompleteUrl.searchParams.set('taskSid',      taskSid);
     dialCompleteUrl.searchParams.set('workspaceSid', workspaceSid);
-    // ── NEW: forward workerSid to dial-complete
     dialCompleteUrl.searchParams.set('workerSid',    workerSid);
     if (process.env.VERCEL_BYPASS_TOKEN) {
       dialCompleteUrl.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
     }
 
+    // ── browser client status callback ───────────────────────────────────────
     const clientStatusUrl = new URL(`${appUrl}/api/taskrouter/client-status`);
     clientStatusUrl.searchParams.set('cellPhone', cellPhone);
     clientStatusUrl.searchParams.set('taskSid',   taskSid);
     if (process.env.VERCEL_BYPASS_TOKEN) {
       clientStatusUrl.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
+    }
+
+    // ── cell screening URL — played when cell answers before bridging ─────────
+    // Carrier voicemail cannot press 1, so it times out → cell leg hangs up
+    // → simultaneous-dial-complete fires with no-answer → re-enqueues
+    const cellScreenUrl = new URL(`${appUrl}/api/taskrouter/cell-screen`);
+    cellScreenUrl.searchParams.set('taskSid', taskSid);
+    if (process.env.VERCEL_BYPASS_TOKEN) {
+      cellScreenUrl.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
     }
 
     const escapeXml = (s: string): string =>
@@ -79,7 +87,7 @@ export async function POST(req: Request) {
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Dial callerId="${escapeXml(callerIdNumber)}"
-        timeout="12"
+        timeout="20"
         action="${escapeXml(dialCompleteUrl.toString())}"
         method="POST">
     <Client statusCallback="${escapeXml(clientStatusUrl.toString())}"
@@ -88,7 +96,8 @@ export async function POST(req: Request) {
       <Identity>${escapeXml(clientIdentity)}</Identity>
       <Parameter name="callerFrom" value="${escapeXml(callerFrom)}"/>
     </Client>
-    <Number>${escapeXml(cellPhone)}</Number>
+    <Number url="${escapeXml(cellScreenUrl.toString())}"
+            method="POST">${escapeXml(cellPhone)}</Number>
   </Dial>
 </Response>`;
 
