@@ -9,7 +9,7 @@
  *   - completed (duration < 4s)   → treat as no-answer (carrier voicemail)
  *   - completed (duration = null) → treat as no-answer (rejected during screening)
  *   - canceled / no-answer        → re-enqueue with retried=true + excluded_workers
- *                                   so TaskRouter skips McDonald on the next attempt
+ *                                   so TaskRouter skips cell user on the next attempt
  *   - canceled / no-answer (retried=true) → voicemail (prevent loop)
  *   - busy / failed               → voicemail
  *
