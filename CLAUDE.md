@@ -189,12 +189,20 @@ Dual authentication: JWT-based password auth + WebAuthn passkeys.
 - Used for Twilio integration and Realtime sessions
 - Server actions in `actions/voice-actions.ts`
 
+**3. Live Call Transcription** (`hooks/useOpenAITranscription.ts`):
+
+- Uses **WebRTC + DataChannel** — NOT a WebSocket SDK. Two separate `RTCPeerConnection` sessions are created per call: one for `caller` (remote stream) and one for `agent` (local stream).
+- Each session posts an SDP offer directly to `https://api.openai.com/v1/realtime/calls` using an ephemeral key from `/api/token`. Two `/api/token` calls are made — one per stream.
+- DataChannel events: `transcription.delta` → updates `interimTranscript` state; `transcription.completed` → pushes a final `TranscriptItem` and clears interim.
+- **Transcript state lives in `useState` inside this hook** — not Zustand, not persisted to the server. Items are ephemeral per call session.
+- `SalesCallTranscriber` joins all `TranscriptItem[]` into a single `fullTranscript` string (via `useMemo`) and feeds it to `extractFields()` for AI form extraction — debounced during the call, then one final pass on call end.
+
 **Model Selection:**
 
 - `gpt-4o-mini` - Fast, cheap operations (incremental updates, simple tasks)
 - `gpt-4o` - Complex analysis requiring accuracy
 - `text-embedding-3-small` - Vector embeddings (512 dimensions)
-- `gpt-4o-transcribe` - Realtime transcription
+- `whisper-1` (via Realtime API) - Live call transcription
 
 ### Key Components
 
@@ -260,42 +268,46 @@ Dual authentication: JWT-based password auth + WebAuthn passkeys.
 - **Phone field protection**: if `twilioPhonePreFilled` is true, AI extraction never overwrites the phone field (but still checks match for verification state)
 - Granular selectors (`selectField`, `selectIsFieldLocked`, etc.) keep re-renders minimal
 
-### API Routes (34 endpoints)
+### API Routes
 
-| Route                                     | Description                            |
-| ----------------------------------------- | -------------------------------------- |
-| **Auth**                                  |                                        |
-| `/api/auth/check-user`                    | Check if user exists                   |
-| `/api/auth/logout`                        | Logout / clear session                 |
-| **OpenAI**                                |                                        |
-| `/api/token`                              | OpenAI realtime token generation       |
-| `/api/transcribe-file`                    | File upload transcription              |
-| `/api/extract-billboard-fields`           | Streaming form field extraction        |
-| `/api/openai/update-cost`                 | Update call duration and cost          |
-| `/api/openai/usage`                       | Fetch OpenAI API usage via Admin API   |
-| **Billboard**                             |                                        |
-| `/api/billboard-pricing`                  | Market intelligence lookup (RAG)       |
-| `/api/billboard-data/upload-blob`         | File upload to Vercel Blob             |
-| `/api/billboard-data/start-process`       | Start chunked CSV processing           |
-| `/api/billboard-data/process-chunk`       | Process single chunk of billboard data |
-| **Twilio**                                |                                        |
-| `/api/twilio-token`                       | Twilio Voice SDK tokens                |
-| `/api/twilio-inbound`                     | Incoming call webhook handler          |
-| `/api/twilio-status`                      | Call status callback                   |
-| `/api/twilio/usage`                       | Fetch Twilio usage/costs               |
-| `/api/twilio/voicemails`                  | Fetch voicemail recordings             |
-| **TaskRouter**                            |                                        |
-| `/api/taskrouter/assignment`              | Task assignment callback               |
-| `/api/taskrouter/call-complete`           | Call completion handler                |
-| `/api/taskrouter/enqueue-complete`        | Enqueue completion handler             |
-| `/api/taskrouter/events`                  | TaskRouter event webhook               |
-| `/api/taskrouter/voicemail`               | Voicemail recording handler            |
-| `/api/taskrouter/voicemail-complete`      | Voicemail completion callback          |
-| `/api/taskrouter/voicemail-transcription` | Voicemail transcription callback       |
-| `/api/taskrouter/wait`                    | Queue wait music/message               |
-| `/api/taskrouter/worker-availability`     | Get/set worker availability            |
-| `/api/taskrouter/worker-status`           | Get worker status                      |
-| `/api/taskrouter/worker-status-stream`    | SSE stream for worker status           |
+| Route                                        | Description                                         |
+| -------------------------------------------- | --------------------------------------------------- |
+| **Auth**                                     |                                                     |
+| `/api/auth/check-user`                       | Check if user exists                                |
+| `/api/auth/logout`                           | Logout / clear session                              |
+| **OpenAI**                                   |                                                     |
+| `/api/token`                                 | OpenAI realtime token generation                    |
+| `/api/transcribe-file`                       | File upload transcription                           |
+| `/api/extract-billboard-fields`              | Streaming form field extraction                     |
+| `/api/openai/update-cost`                    | Update call duration and cost                       |
+| `/api/openai/usage`                          | Fetch OpenAI API usage via Admin API                |
+| **Billboard**                                |                                                     |
+| `/api/billboard-pricing`                     | Market intelligence lookup (RAG)                    |
+| `/api/billboard-data/upload-blob`            | File upload to Vercel Blob                          |
+| `/api/billboard-data/start-process`          | Start chunked CSV processing                        |
+| `/api/billboard-data/process-chunk`          | Process single chunk of billboard data              |
+| **Twilio**                                   |                                                     |
+| `/api/twilio-token`                          | Twilio Voice SDK tokens                             |
+| `/api/twilio-inbound`                        | Incoming call webhook handler                       |
+| `/api/twilio-status`                         | Call status callback                                |
+| `/api/twilio/usage`                          | Fetch Twilio usage/costs                            |
+| `/api/twilio/voicemails`                     | Fetch voicemail recordings                          |
+| **TaskRouter**                               |                                                     |
+| `/api/taskrouter/assignment`                 | Task assignment callback                            |
+| `/api/taskrouter/call-complete`              | Call completion handler                             |
+| `/api/taskrouter/cell-screen`                | Simultaneous ring: plays "press 1" prompt to cell   |
+| `/api/taskrouter/cell-screen-accept`         | Simultaneous ring: cell worker pressed 1, connects  |
+| `/api/taskrouter/enqueue-complete`           | Enqueue completion handler                          |
+| `/api/taskrouter/events`                     | TaskRouter event webhook                            |
+| `/api/taskrouter/simultaneous-dial`          | Simultaneous ring: TwiML dial handler               |
+| `/api/taskrouter/simultaneous-dial-complete` | Simultaneous ring: dial action callback             |
+| `/api/taskrouter/voicemail`                  | Voicemail recording handler                         |
+| `/api/taskrouter/voicemail-complete`         | Voicemail completion callback                       |
+| `/api/taskrouter/voicemail-transcription`    | Voicemail transcription callback                    |
+| `/api/taskrouter/wait`                       | Queue wait music/message                            |
+| `/api/taskrouter/worker-availability`        | Get/set worker availability                         |
+| `/api/taskrouter/worker-status`              | Get worker status                                   |
+| `/api/taskrouter/worker-status-stream`       | SSE stream for worker status                        |
 | **Passkeys**                              |                                        |
 | `/api/passkey/auth-options`               | Generate passkey auth options          |
 | `/api/passkey/auth-verify`                | Verify passkey authentication          |
@@ -331,6 +343,9 @@ Call routing system using Twilio TaskRouter:
 1. `voicemail@system` worker → redirect to `/api/taskrouter/voicemail`
 2. Worker has `simultaneous_ring: true` + `cell_phone` → redirect to `/api/taskrouter/simultaneous-dial` (dials browser client + cell phone in parallel; first to answer wins)
 3. All others → conference instruction
+
+**Simultaneous ring cell-screening flow**:
+The cell phone leg uses a "press 1" screening step to prevent carrier voicemail from silently answering. `<Number url="/api/taskrouter/cell-screen">` intercepts the cell answer, plays a prompt, and only connects if worker presses 1 (`cell-screen-accept`). No key press or wrong key → `<Hangup/>` → treated as no-answer by simultaneous-dial-complete.
 
 **Simultaneous-dial-complete re-enqueue logic** (`/api/taskrouter/simultaneous-dial-complete`):
 - `completed` → task marked complete
@@ -426,6 +441,11 @@ NEXT_PUBLIC_GOOGLE_MAP_KEY= # Google Maps API key (client-side)
 # Vercel
 VERCEL=                    # Set automatically in production
 BLOB_READ_WRITE_TOKEN=     # Vercel Blob storage token
+NEXT_PUBLIC_APP_URL=       # Canonical deployment URL (used for Twilio callback URLs)
+VERCEL_BYPASS_TOKEN=       # Vercel Deployment Protection bypass secret (Twilio webhooks need it)
+
+# Feature flags
+NEXT_PUBLIC_AUTO_LOGOUT_EXCLUDED_EMAILS=  # Comma-separated emails exempt from 8pm auto-logout
 ```
 
 ## Code Conventions
