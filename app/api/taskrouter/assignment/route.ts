@@ -41,18 +41,18 @@ export async function POST(req: Request) {
       }
     }
 
-    const taskSid = formData.get('TaskSid') as string;
+    const taskSid        = formData.get('TaskSid')        as string;
     const reservationSid = formData.get('ReservationSid') as string;
-    const workerSid = formData.get('WorkerSid') as string;
+    const workerSid      = formData.get('WorkerSid')      as string;
     const workerAttributes = formData.get('WorkerAttributes') as string;
-    const taskAttributes = formData.get('TaskAttributes') as string;
+    const taskAttributes   = formData.get('TaskAttributes')   as string;
 
     console.log('═══════════════════════════════════════════');
     console.log('📋 TASKROUTER ASSIGNMENT CALLBACK');
     console.log('═══════════════════════════════════════════');
-    console.log('TaskSid:', taskSid);
+    console.log('TaskSid:',        taskSid);
     console.log('ReservationSid:', reservationSid);
-    console.log('WorkerSid:', workerSid);
+    console.log('WorkerSid:',      workerSid);
 
     let workerAttrs: {
       email?: string;
@@ -64,13 +64,13 @@ export async function POST(req: Request) {
 
     try {
       workerAttrs = JSON.parse(workerAttributes || '{}');
-      taskAttrs = JSON.parse(taskAttributes || '{}');
+      taskAttrs   = JSON.parse(taskAttributes   || '{}');
     } catch {
       console.error('Failed to parse attributes');
     }
 
     console.log('Worker email:', workerAttrs.email);
-    console.log('Call from:', taskAttrs.from);
+    console.log('Call from:',   taskAttrs.from);
     console.log('═══════════════════════════════════════════');
 
     const appUrl = (
@@ -78,11 +78,16 @@ export async function POST(req: Request) {
     ).replace(/\/$/, '');
     const workspaceSid = formData.get('WorkspaceSid') as string;
 
-    // Check if this is the voicemail worker
+    // ── VOICEMAIL WORKER ─────────────────────────────────────────────────────
     if (workerAttrs.email === 'voicemail@system') {
       console.log('📼 Voicemail worker assigned - using redirect instruction');
 
-      const voicemailUrl = `${appUrl}/api/taskrouter/voicemail?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
+      const voicemailUrl = new URL(`${appUrl}/api/taskrouter/voicemail`);
+      voicemailUrl.searchParams.set('taskSid',      taskSid);
+      voicemailUrl.searchParams.set('workspaceSid', workspaceSid);
+      if (process.env.VERCEL_BYPASS_TOKEN) {
+        voicemailUrl.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
+      }
 
       const callSid = taskAttrs.call_sid;
       if (!callSid) {
@@ -92,9 +97,9 @@ export async function POST(req: Request) {
 
       const instruction = {
         instruction: 'redirect',
-        call_sid: callSid,
-        url: voicemailUrl,
-        accept: true,
+        call_sid:    callSid,
+        url:         voicemailUrl.toString(),
+        accept:      true,
         post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
       };
 
@@ -137,8 +142,6 @@ export async function POST(req: Request) {
         simDialUrl.searchParams.set('clientIdentity', clientIdentity);
         simDialUrl.searchParams.set('cellPhone',      workerAttrs.cell_phone);
         simDialUrl.searchParams.set('callerFrom',     taskAttrs.from ?? '');
-        // ── NEW: pass workerSid so simultaneous-dial-complete can exclude this
-        //         worker from the re-enqueued task if he doesn't answer
         simDialUrl.searchParams.set('workerSid',      workerSid);
         if (process.env.VERCEL_BYPASS_TOKEN) {
           simDialUrl.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
@@ -161,20 +164,25 @@ export async function POST(req: Request) {
     }
     // ── END SIMULTANEOUS RING ────────────────────────────────────────────────
 
-    // Normal worker — conference instruction
-    const conferenceStatusCallbackUrl = `${appUrl}/api/taskrouter/call-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}`;
+    // ── NORMAL CONFERENCE ────────────────────────────────────────────────────
+    const callCompleteUrl = new URL(`${appUrl}/api/taskrouter/call-complete`);
+    callCompleteUrl.searchParams.set('taskSid',      taskSid);
+    callCompleteUrl.searchParams.set('workspaceSid', workspaceSid);
+    if (process.env.VERCEL_BYPASS_TOKEN) {
+      callCompleteUrl.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
+    }
 
     const instruction = {
       instruction: 'conference',
-      to: workerAttrs.contact_uri || `client:${workerAttrs.email}`,
+      to:   workerAttrs.contact_uri || `client:${workerAttrs.email}`,
       from: taskAttrs.from || process.env.TWILIO_MAIN_NUMBER || '+18338547126',
       post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
       timeout: 20,
-      conference_status_callback: conferenceStatusCallbackUrl,
+      conference_status_callback:       callCompleteUrl.toString(),
       conference_status_callback_event: 'start, end, join, leave',
-      end_conference_on_exit: true,
-      end_conference_on_customer_exit: true,
-      reject_pending_reservations: true,
+      end_conference_on_exit:           true,
+      end_conference_on_customer_exit:  true,
+      reject_pending_reservations:      true,
     };
 
     console.log('📞 Conference instruction:', instruction);
