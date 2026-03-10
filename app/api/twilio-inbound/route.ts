@@ -1,6 +1,5 @@
 // app/api/twilio-inbound/route.ts
 // Handles incoming Twilio calls and enqueues them into TaskRouter
-
 import twilio from 'twilio';
 import { db } from '@/db';
 import { user } from '@/db/schema';
@@ -8,7 +7,6 @@ import { eq } from 'drizzle-orm';
 
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 const WORKFLOW_SID = process.env.TASKROUTER_WORKFLOW_SID;
-
 const MAIN_ROUTING_NUMBER = '+18338547126';
 
 export async function POST(req: Request) {
@@ -88,27 +86,43 @@ export async function POST(req: Request) {
     const taskAttributes = JSON.stringify({
       call_sid: CallSid,
       from: From,
-      callTo: To,        // 🔑 used by workflow (matches workflow expression)
-      callType,          // 🔑 used by workflow
-      phoneNumber,       // 🔑 used by direct queues
+      callTo: To,
+      callType,
+      phoneNumber,
       primary_owner: primaryOwner,
+      excluded_workers: [],  // initialized empty so NOT IN expression never throws on fresh calls
     });
 
-    const url = new URL(req.url);
-    const appUrl = `${url.protocol}//${url.host}`;
-    const enqueueActionUrl = `${appUrl}/api/taskrouter/enqueue-complete`;
-    const waitUrl = `${appUrl}/api/taskrouter/wait`;
+    const appUrl = (
+      process.env.NEXT_PUBLIC_APP_URL ?? `${new URL(req.url).protocol}//${new URL(req.url).host}`
+    ).replace(/\/$/, '');
+
+    // ── Build waitUrl with bypass token ──────────────────────────────────────
+    const waitUrlObj = new URL(`${appUrl}/api/taskrouter/wait`);
+    if (process.env.VERCEL_BYPASS_TOKEN) {
+      waitUrlObj.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
+    }
+
+    // ── Build enqueueActionUrl with bypass token ──────────────────────────────
+    const enqueueActionUrlObj = new URL(`${appUrl}/api/taskrouter/enqueue-complete`);
+    if (process.env.VERCEL_BYPASS_TOKEN) {
+      enqueueActionUrlObj.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
+    }
+
+    const escapedWaitUrl          = waitUrlObj.toString().replace(/&/g, '&amp;');
+    const escapedEnqueueActionUrl = enqueueActionUrlObj.toString().replace(/&/g, '&amp;');
 
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
-                    <Response>
-                    <Enqueue workflowSid="${WORKFLOW_SID}"
-                    action="${enqueueActionUrl}"
-                    method="POST"
-                    waitUrl="${waitUrl}"
-                    waitUrlMethod="POST">
-                    <Task>${taskAttributes}</Task>
-                    </Enqueue>
-                    </Response>`;
+<Response>
+  <Say voice="Polly.Joanna">Please hold while we connect you with the next available representative.</Say>
+  <Enqueue workflowSid="${WORKFLOW_SID}"
+           action="${escapedEnqueueActionUrl}"
+           method="POST"
+           waitUrl="${escapedWaitUrl}"
+           waitUrlMethod="POST">
+    <Task>${taskAttributes}</Task>
+  </Enqueue>
+</Response>`;
 
     return new Response(twiml, {
       status: 200,
@@ -119,4 +133,3 @@ export async function POST(req: Request) {
     return new Response('Error', { status: 500 });
   }
 }
-

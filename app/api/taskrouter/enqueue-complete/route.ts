@@ -1,18 +1,18 @@
 export async function POST(req: Request) {
   try {
-    const formData = await req.formData();
+    const formData    = await req.formData();
     const queueResult = formData.get('QueueResult') as string;
-    const queueTime = formData.get('QueueTime') as string;
-    const callSid = formData.get('CallSid') as string;
-    const from = formData.get('From') as string;
-    const to = formData.get('To') as string;
+    const queueTime   = formData.get('QueueTime')   as string;
+    const callSid     = formData.get('CallSid')     as string;
+    const from        = formData.get('From')        as string;
+    const to          = formData.get('To')          as string;
 
     console.log('═══════════════════════════════════════════');
     console.log('📞 ENQUEUE COMPLETE');
     console.log('QueueResult:', queueResult);
-    console.log('QueueTime:', queueTime, 'seconds');
-    console.log('CallSid:', callSid);
-    console.log('From:', from);
+    console.log('QueueTime:',   queueTime, 'seconds');
+    console.log('CallSid:',     callSid);
+    console.log('From:',        from);
     console.log('═══════════════════════════════════════════');
 
     // ─────────────────────────────────────────────
@@ -38,26 +38,36 @@ export async function POST(req: Request) {
     }
 
     // ─────────────────────────────────────────────
+    // CALL WAS RE-ENQUEUED (simultaneous-dial-complete retry)
+    // QueueResult="redirected" fires on the OLD enqueue when the call
+    // is handed off to a new <Enqueue> — the new enqueue handles routing,
+    // so we do nothing here and let it play out.
+    // ─────────────────────────────────────────────
+    if (queueResult === 'redirected') {
+      console.log('🔄 Call was redirected/re-enqueued — no action needed');
+      return new Response(
+        '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+        { status: 200, headers: { 'Content-Type': 'text/xml' } }
+      );
+    }
+
+    // ─────────────────────────────────────────────
     // TIMEOUT / NO AGENTS / REJECTED → VOICEMAIL
     // ─────────────────────────────────────────────
     console.log(`📨 QueueResult="${queueResult}" → voicemail`);
 
-    const url = new URL(req.url);
+    const url    = new URL(req.url);
     const appUrl = `${url.protocol}//${url.host}`;
 
-    const voicemailCompleteUrl = new URL(
-      `${appUrl}/api/taskrouter/voicemail-complete`
-    );
-    voicemailCompleteUrl.searchParams.set('from', from || '');
-    voicemailCompleteUrl.searchParams.set('to', to || '');
-    voicemailCompleteUrl.searchParams.set('callSid', callSid || '');
+    const voicemailCompleteUrl = new URL(`${appUrl}/api/taskrouter/voicemail-complete`);
+    voicemailCompleteUrl.searchParams.set('from',      from      || '');
+    voicemailCompleteUrl.searchParams.set('to',        to        || '');
+    voicemailCompleteUrl.searchParams.set('callSid',   callSid   || '');
     voicemailCompleteUrl.searchParams.set('queueTime', queueTime || '');
 
-    const transcriptionUrl = new URL(
-      `${appUrl}/api/taskrouter/voicemail-transcription`
-    );
-    transcriptionUrl.searchParams.set('from', from || '');
-    transcriptionUrl.searchParams.set('to', to || '');
+    const transcriptionUrl = new URL(`${appUrl}/api/taskrouter/voicemail-transcription`);
+    transcriptionUrl.searchParams.set('from',    from    || '');
+    transcriptionUrl.searchParams.set('to',      to      || '');
     transcriptionUrl.searchParams.set('callSid', callSid || '');
 
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -90,4 +100,3 @@ export async function POST(req: Request) {
     );
   }
 }
-

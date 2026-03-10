@@ -25,11 +25,10 @@ const ArcGISMapPanel = dynamic(
   { ssr: false, loading: () => <div className="h-full flex items-center justify-center text-gray-500">Loading ArcGIS Map...</div> }
 );
 
-export default function SalesCallTranscriber() {
+export default function SalesCallTranscriber({ sessionEmail }: { sessionEmail?: string }) {
 
- useAutoLogout();
+  useAutoLogout(sessionEmail);
 
-  // 🔍 Performance monitoring (only in development)
   if (process.env.NODE_ENV === 'development') {
     console.log('🔄 Re-render: SalesCallTranscriber');
   }
@@ -46,27 +45,21 @@ export default function SalesCallTranscriber() {
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [resetTrigger, setResetTrigger] = useState(0);
 
-  // Auto-clear Nutshell success message after 10 seconds (errors stay visible)
   useEffect(() => {
     if (nutshellStatus !== 'success') return;
-    
     const timer = setTimeout(() => {
       setNutshellStatus('idle');
       setNutshellMessage('');
     }, 10000);
-
     return () => clearTimeout(timer);
   }, [nutshellStatus]);
   
-  // ✅ Store caller's phone number separately so it persists after call is accepted
   const [callerPhone, setCallerPhone] = useState<string>("");
 
-  // ✅ Get store actions (STABLE - won't cause re-renders)
   const updateFromAI = useFormStore((s) => s.updateFromAI);
   const resetForm = useFormStore((s) => s.reset);
   const getFormData = useFormStore((s) => s.getFormData);
 
-  // ✅ Subscribe to minimal state for maps/pricing
   const activeMarketIndex = useFormStore((s) => s.activeMarketIndex);
   const additionalMarkets = useFormStore((s) => s.additionalMarkets);
   const targetCity = useFormStore((s) => s.fields.targetCity);
@@ -75,7 +68,6 @@ export default function SalesCallTranscriber() {
   const ballpark = useFormStore((s) => s.ballpark);
   const additionalContacts = useFormStore((s) => s.additionalContacts);
 
-  // Custom hooks for Twilio and transcription
   const {
     transcripts,
     interimTranscript,
@@ -103,24 +95,28 @@ export default function SalesCallTranscriber() {
     onCallDisconnected,
   } = useTwilioContext();
 
-  // ✅ Capture caller's phone number as soon as incoming call arrives
+  // ✅ Capture caller's real phone number from the incoming call.
+  // For simultaneous-ring workers, the real caller number is passed as a
+  // custom parameter "callerFrom" via the <Parameter> tag in the <Client>
+  // TwiML noun. For all other workers it falls back to parameters.From.
   useEffect(() => {
-    if (incomingCall?.parameters?.From) {
-      const fromNumber = incomingCall.parameters.From;
-      console.log('📞 Captured caller phone from Twilio:', fromNumber);
-      setCallerPhone(fromNumber);
+    if (incomingCall) {
+      // customParameters is a Map set by <Parameter> tags in the <Client> noun
+      const customFrom = incomingCall.customParameters?.get('callerFrom');
+      const from = customFrom || incomingCall.parameters?.From || '';
+      if (from) {
+        console.log('📞 Captured caller phone:', from, customFrom ? '(custom param)' : '(parameters.From)');
+        setCallerPhone(from);
+      }
     }
   }, [incomingCall]);
 
-  // Register callbacks for call events
   useEffect(() => {
     onCallAccepted((call) => startTranscription(call));
     onCallDisconnected(() => {
       stopTranscription();
       resetStatus();
       
-      // Fallback: Ensure worker is set back to Available after call ends
-      // This handles cases where TaskRouter's post_work_activity_sid fails
       fetch('/api/taskrouter/worker-status', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -131,7 +127,6 @@ export default function SalesCallTranscriber() {
     });
   }, [onCallAccepted, onCallDisconnected, startTranscription, stopTranscription, resetStatus]);
 
-  // Billboard form extraction hook (must be declared before effects that use extractFields)
   const {
     formData: aiFormData,
     isExtracting,
@@ -145,7 +140,6 @@ export default function SalesCallTranscriber() {
     extractionCount,
   } = useBillboardFormExtraction();
 
-  // ✅ Push AI data to Zustand store when extraction completes
   useEffect(() => {
     if (aiFormData) {
       console.log("🎯 Applying extracted data to form:", aiFormData);
@@ -153,11 +147,9 @@ export default function SalesCallTranscriber() {
     }
   }, [aiFormData, extractionCount, updateFromAI]);
 
-  // ✅ Track if we've done the final extraction for this call
   const hasDoneFinalExtractionRef = useRef<boolean>(false);
   const fullTranscriptRef = useRef<string>("");
   
-  // Keep the ref updated with latest transcript (declared after fullTranscript is defined)
   const fullTranscript = useMemo(() => {
     return transcripts.map(t => {
       const speaker = t.speaker === 'agent' ? 'Sales Rep' : 'Caller';
@@ -169,14 +161,12 @@ export default function SalesCallTranscriber() {
     fullTranscriptRef.current = fullTranscript;
   }, [fullTranscript]);
   
-  // ✅ Reset the flag when a new call starts
   useEffect(() => {
     if (callActive) {
       hasDoneFinalExtractionRef.current = false;
     }
   }, [callActive]);
   
-  // ✅ Do ONE final extraction when call ends
   useEffect(() => {
     if (!callActive && !hasDoneFinalExtractionRef.current && fullTranscriptRef.current.length > 50) {
       hasDoneFinalExtractionRef.current = true;
@@ -195,21 +185,18 @@ export default function SalesCallTranscriber() {
     hasDoneFinalExtractionRef.current = false; 
   }, [clearTranscripts, resetExtraction, resetForm]);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       cleanup();
     };
   }, [cleanup]);
 
-  // Auto-scroll transcripts
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [transcripts, interimTranscript]);
 
-  // Extract form fields when transcripts update (only during active call)
   useEffect(() => {
     if (fullTranscript.length > 50 && !isExtracting && callActive) {
       extractFields(fullTranscript);
@@ -273,7 +260,7 @@ export default function SalesCallTranscriber() {
     setIsSubmittingNutshell(true);
     setNutshellStatus('idle');
     setNutshellMessage('');
-    setValidationErrors([]); // Clear previous validation errors
+    setValidationErrors([]);
 
     const formData = getFormData();
 
@@ -324,18 +311,13 @@ export default function SalesCallTranscriber() {
         setNutshellStatus('success');
         setNutshellMessage('Lead created');
         showSuccessToast('Lead sent to Nutshell');
-        
-        // Clear everything after successful submission
         clearAll();
       } else {
         setNutshellStatus('error');
         setNutshellMessage(result.error || 'Failed');
-        
-        // Capture validation errors for field highlighting
         if (result.missingFields && Array.isArray(result.missingFields)) {
           setValidationErrors(result.missingFields);
         }
-        
         showErrorToast(result.error || 'Failed to create lead');
       }
     } catch (error) {
@@ -353,7 +335,6 @@ export default function SalesCallTranscriber() {
     status.includes("Starting") || status.includes("Uploading") ||
     status.includes("Initializing");
 
-  // ✅ Memoized current market location for maps
   const currentMarketLocation = useMemo(() => {
     if (activeMarketIndex === 0) {
       return targetCity && state
@@ -391,7 +372,6 @@ export default function SalesCallTranscriber() {
                 
                 {/* Status and Buttons */}
                 <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                  {/* Status Badge */}
                   <div className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs ${isProcessing ? "animate-pulse" : ""}`}>
                     {twilioReady && !callActive && (
                       <span className={`inline-block w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full flex-shrink-0 ${
@@ -406,7 +386,6 @@ export default function SalesCallTranscriber() {
                     <span className="font-medium truncate max-w-[100px] sm:max-w-none">{status}</span>
                   </div>
                   
-                  {/* Action Buttons */}
                   <div className="flex flex-1 sm:flex-initial gap-1 sm:gap-2">
                     {callActive && (
                       <Button
@@ -453,7 +432,7 @@ export default function SalesCallTranscriber() {
                 <div className="bg-green-500/30 border border-white/30 rounded px-2 sm:px-3 py-1.5 sm:py-2 animate-pulse">
                   <div className="flex flex-col sm:flex-row items-center justify-between gap-1.5 sm:gap-2">
                     <p className="text-white text-xs sm:text-sm font-semibold">
-                      📞 Incoming: {incomingCall.parameters.From}
+                      📞 Incoming: {incomingCall.customParameters?.get('callerFrom') || incomingCall.parameters.From}
                     </p>
                     <div className="flex gap-1.5 sm:gap-2">
                       <Button
@@ -538,39 +517,25 @@ export default function SalesCallTranscriber() {
 
           <CardContent className="p-1.5 sm:p-2 flex flex-col flex-1 min-h-0 overflow-hidden">
             <Tabs defaultValue="form" className="w-full flex-1 flex flex-col min-h-0 overflow-hidden">
-              {/* Responsive Tab List */}
               <TabsList className="grid w-full grid-cols-4 mb-2 sm:mb-4 bg-slate-100 p-0.5 sm:p-1 rounded-lg h-8 sm:h-9 flex-shrink-0">
-                <TabsTrigger
-                  value="form"
-                  className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs"
-                >
+                <TabsTrigger value="form" className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs">
                   <span className="hidden sm:inline">Lead Form & Pricing</span>
                   <span className="sm:hidden">Form</span>
                 </TabsTrigger>
-                <TabsTrigger
-                  value="map"
-                  className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs"
-                >
+                <TabsTrigger value="map" className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs">
                   <span className="hidden sm:inline">Google Map</span>
                   <span className="sm:hidden">Map</span>
                 </TabsTrigger>
-                <TabsTrigger
-                  value="arcgis"
-                  className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs"
-                >
+                <TabsTrigger value="arcgis" className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs">
                   <span className="hidden sm:inline">BSI Map</span>
                   <span className="sm:hidden">BSI</span>
                 </TabsTrigger>
-                <TabsTrigger
-                  value="transcript"
-                  className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs"
-                >
+                <TabsTrigger value="transcript" className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs">
                   <span className="hidden sm:inline">Transcript</span>
                   <span className="sm:hidden">Trans</span>
                 </TabsTrigger>
               </TabsList>
 
-              {/* Form + Pricing Tab - Stack on mobile, side-by-side on xl+ */}
               <TabsContent value="form" className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col">
                 <div className="flex flex-col xl:flex-row gap-2 sm:gap-1 h-full min-h-0 overflow-hidden">
                   <LeadForm
@@ -596,27 +561,18 @@ export default function SalesCallTranscriber() {
                 </div>
               </TabsContent>
 
-              {/* Map Tab */}
               <TabsContent value="map" className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col">
                 <div className="h-full overflow-hidden">
-                  <GoogleMapPanel
-                    key={`google-map-${resetTrigger}`}
-                    initialLocation={currentMarketLocation}
-                  />
+                  <GoogleMapPanel key={`google-map-${resetTrigger}`} initialLocation={currentMarketLocation} />
                 </div>
               </TabsContent>
 
-              {/* ArcGIS Map Tab */}
               <TabsContent value="arcgis" className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col">
                 <div className="h-full overflow-hidden">
-                  <ArcGISMapPanel
-                    key={`arcgis-map-${resetTrigger}`}
-                    initialLocation={currentMarketLocation}
-                  />
+                  <ArcGISMapPanel key={`arcgis-map-${resetTrigger}`} initialLocation={currentMarketLocation} />
                 </div>
               </TabsContent>
 
-              {/* Transcript Tab */}
               <TabsContent value="transcript" className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col">
                 <div className="h-full overflow-hidden">
                   <TranscriptView
