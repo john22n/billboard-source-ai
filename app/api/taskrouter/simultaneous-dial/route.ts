@@ -31,11 +31,11 @@ export async function POST(req: Request) {
 
     console.log('═══════════════════════════════════════════');
     console.log('📱 SIMULTANEOUS RING');
-    console.log('TaskSid:', taskSid);
-    console.log('WorkerSid:', workerSid);
+    console.log('TaskSid:',        taskSid);
+    console.log('WorkerSid:',      workerSid);
     console.log('ClientIdentity:', clientIdentity);
-    console.log('CellPhone:', cellPhone.replace(/\d(?=\d{4})/g, '*'));
-    console.log('CallerFrom:', callerFrom.replace(/\d(?=\d{4})/g, '*'));
+    console.log('CellPhone:',      cellPhone.replace(/\d(?=\d{4})/g, '*'));
+    console.log('CallerFrom:',     callerFrom.replace(/\d(?=\d{4})/g, '*'));
     console.log('═══════════════════════════════════════════');
 
     if (!clientIdentity || !cellPhone) {
@@ -49,7 +49,11 @@ export async function POST(req: Request) {
     const appUrl         = (
       process.env.NEXT_PUBLIC_APP_URL ?? `${url.protocol}//${url.host}`
     ).replace(/\/$/, '');
-    const callerIdNumber = process.env.TWILIO_MAIN_NUMBER ?? '+18338547126';
+    const businessNumber = process.env.TWILIO_MAIN_NUMBER ?? '+18338547126';
+
+    // Use the real caller's number as the caller ID so McDonald sees who is
+    // calling on his cell. Falls back to the business number if not available.
+    const callerId = callerFrom || businessNumber;
 
     // ── dial-complete callback ────────────────────────────────────────────────
     const dialCompleteUrl = new URL(`${appUrl}/api/taskrouter/simultaneous-dial-complete`);
@@ -86,7 +90,7 @@ export async function POST(req: Request) {
 
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Dial callerId="${escapeXml(callerIdNumber)}"
+  <Dial callerId="${escapeXml(callerId)}"
         timeout="20"
         action="${escapeXml(dialCompleteUrl.toString())}"
         method="POST">
