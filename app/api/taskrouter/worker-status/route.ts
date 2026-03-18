@@ -153,6 +153,45 @@ export async function POST(req: Request) {
         mergedAttributes.contact_uri = `client:${currentUser.email}`
       }
 
+      // ── Preserve custom worker attributes (simultaneous_ring, cell_phone) ──
+      // Fetch the current Twilio worker attributes and merge them so that any
+      // custom fields set via the Console (e.g. simultaneous_ring: true,
+      // cell_phone: "+1...") are not wiped on every status toggle.
+      // Standard fields (email, available, phoneNumber) are always overwritten
+      // with current values.  contact_uri is preserved if already set to a
+      // custom value (e.g. "client:mcdonald") rather than defaulting to
+      // "client:<email>" which could break the simultaneous-ring <Client> target.
+      let existingAttrs: Record<string, unknown> = {};
+      try {
+        const existingWorker = await client.taskrouter.v1
+          .workspaces(WORKSPACE_SID)
+          .workers(workerSid)
+          .fetch();
+        existingAttrs = JSON.parse(existingWorker.attributes ?? '{}');
+      } catch (fetchErr) {
+        // Non-fatal: if the fetch fails we proceed with standard attributes only.
+        // Any custom attrs (simultaneous_ring, cell_phone) will be missing from
+        // this update but will remain in Twilio if the update itself succeeds,
+        // because we merge via spread below.
+        console.warn('⚠️ Could not fetch existing worker attributes for merge (proceeding with defaults):', fetchErr);
+      }
+
+      // Build merged attribute object:
+      //   1. Spread existing attrs to preserve all custom fields
+      //   2. Explicitly set the standard fields that must always reflect DB state
+      //   3. Preserve a custom contact_uri if one was already set (e.g. "client:mcdonald")
+      //      rather than overriding with the email-based default
+      const mergedAttributes: Record<string, unknown> = { ...existingAttrs };
+      mergedAttributes.email     = currentUser.email;
+      mergedAttributes.available = effectiveStatus === 'available';
+      if (currentUser.twilioPhoneNumber) {
+        mergedAttributes.phoneNumber = currentUser.twilioPhoneNumber;
+      }
+      // Only set contact_uri from the email if no custom value already exists
+      if (!existingAttrs.contact_uri) {
+        mergedAttributes.contact_uri = `client:${currentUser.email}`;
+      }
+
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
           await client.taskrouter.v1
