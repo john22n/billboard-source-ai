@@ -53,7 +53,22 @@ export async function POST() {
       `sky@billboardsource.com:${nutshellApiKey}`,
     ).toString('base64')
 
-    // Fetch leads from Nutshell - get recent leads (last 90 days)
+    // Get the "Call (GPP2)" source ID so we only sync leads from that source
+    const sourceResult = await nutshellRequest(
+      'newSource',
+      { name: 'Call (GPP2)' },
+      credentials,
+    )
+    if (sourceResult.error || !sourceResult.result?.id) {
+      console.error('Failed to get source:', sourceResult.error)
+      return NextResponse.json(
+        { error: 'Failed to find "Call (GPP2)" source' },
+        { status: 400 },
+      )
+    }
+    const sourceId = Number(sourceResult.result.id)
+
+    // Fetch leads from Nutshell - get recent leads (last 90 days) filtered by source
     const since = new Date()
     since.setDate(since.getDate() - 90)
     const sinceDate = since.toISOString().split('T')[0]
@@ -67,6 +82,7 @@ export async function POST() {
         {
           query: {
             modifiedTime: `> ${sinceDate}`,
+            sourceId,
           },
           orderBy: 'createdTime',
           orderDirection: 'DESC',
