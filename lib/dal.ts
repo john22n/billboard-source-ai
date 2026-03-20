@@ -119,7 +119,7 @@ export async function clearMonthlyOpenAILogs() {
   const result = await db
     .delete(openaiLogs)
     .where(lt(openaiLogs.createdAt, startOfMonth))
-    .returning({ id: openaiLogs.id })
+    .returning()
 
   return result.length
 }
