@@ -56,12 +56,13 @@ export async function POST() {
     // Fetch leads from Nutshell - get recent leads (last 90 days)
     const since = new Date()
     since.setDate(since.getDate() - 90)
+    const sinceDate = since.toISOString().split('T')[0]
 
     const findResult = await nutshellRequest(
       'findLeads',
       {
         query: {
-          createdAfter: since.toISOString(),
+          modifiedTime: `> ${sinceDate}`,
         },
         orderBy: 'createdTime',
         orderDirection: 'DESC',
