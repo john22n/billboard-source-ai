@@ -58,28 +58,40 @@ export async function POST() {
     since.setDate(since.getDate() - 90)
     const sinceDate = since.toISOString().split('T')[0]
 
-    const findResult = await nutshellRequest(
-      'findLeads',
-      {
-        query: {
-          modifiedTime: `> ${sinceDate}`,
+    // Nutshell API caps findLeads at 100 per page, so paginate
+    const leads: NutshellLead[] = []
+    let page = 1
+    while (true) {
+      const findResult = await nutshellRequest(
+        'findLeads',
+        {
+          query: {
+            modifiedTime: `> ${sinceDate}`,
+          },
+          orderBy: 'createdTime',
+          orderDirection: 'DESC',
+          limit: 100,
+          page,
+          stubResponses: true,
         },
-        orderBy: 'createdTime',
-        orderDirection: 'DESC',
-        limit: 500,
-      },
-      credentials,
-    )
-
-    if (findResult.error) {
-      console.error('Nutshell findLeads error:', findResult.error)
-      return NextResponse.json(
-        { error: findResult.error.message || 'Failed to fetch leads' },
-        { status: 400 },
+        credentials,
       )
+
+      if (findResult.error) {
+        console.error('Nutshell findLeads error:', findResult.error)
+        return NextResponse.json(
+          { error: findResult.error.message || 'Failed to fetch leads' },
+          { status: 400 },
+        )
+      }
+
+      const pageLeads: NutshellLead[] = findResult.result || []
+      leads.push(...pageLeads)
+
+      if (pageLeads.length < 100) break
+      page++
     }
 
-    const leads: NutshellLead[] = findResult.result || []
     let synced = 0
     let errors = 0
 
