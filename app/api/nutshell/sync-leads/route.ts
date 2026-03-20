@@ -50,7 +50,7 @@ export async function POST() {
     }
 
     const credentials = Buffer.from(
-      `${session.email}:${nutshellApiKey}`,
+      `sky@billboardsource.com:${nutshellApiKey}`,
     ).toString('base64')
 
     // Fetch leads from Nutshell - get recent leads (last 90 days)
