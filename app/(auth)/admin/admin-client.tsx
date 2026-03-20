@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useTransition, useEffect, useCallback } from "react"
-import { SignupForm } from "@/components/sign-up"
+import { useState, useTransition, useEffect, useCallback } from 'react'
+import { SignupForm } from '@/components/sign-up'
 import {
   Table,
   TableBody,
@@ -11,58 +11,62 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table"
+} from '@/components/ui/table'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { Trash2, Loader2, FileText, RefreshCw, DollarSign } from 'lucide-react'
+import { deleteUsers, updateTwilioPhone } from '@/actions/user-actions'
+import { useRouter } from 'next/navigation'
+import type { User, NutshellLead } from '@/db/schema'
+import { BillboardDataUploader } from '@/components/BillboardDataUploader'
 import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs"
-import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Input } from "@/components/ui/input"
-import { Trash2, Loader2, FileText } from "lucide-react"
-import { deleteUsers, updateTwilioPhone } from "@/actions/user-actions"
-import { useRouter } from "next/navigation"
-import type { User } from "@/db/schema"
-import { BillboardDataUploader } from "@/components/BillboardDataUploader"
-import { showErrorToast, showSuccessToast, getErrorMessage } from "@/lib/error-handling"
+  showErrorToast,
+  showSuccessToast,
+  getErrorMessage,
+} from '@/lib/error-handling'
 
 interface OpenAIUsage {
-  totalCost: number;
-  totalCostFormatted: string;
-  startDate: string;
-  endDate: string;
+  totalCost: number
+  totalCostFormatted: string
+  startDate: string
+  endDate: string
 }
 
 interface TwilioUsage {
   currentMonth: {
-    name: string;
-    cost: number;
-    costFormatted: string;
-  };
+    name: string
+    cost: number
+    costFormatted: string
+  }
   lastMonth: {
-    name: string;
-    cost: number;
-    costFormatted: string;
-  };
-  totalCost: number;
-  totalCostFormatted: string;
+    name: string
+    cost: number
+    costFormatted: string
+  }
+  totalCost: number
+  totalCostFormatted: string
 }
 
 interface Voicemail {
-  sid: string;
-  callSid: string;
-  from: string;
-  dateCreated: string;
-  duration: number;
-  recordingUrl: string;
-  transcription: string | null;
-  transcriptionStatus: string | null;
+  sid: string
+  callSid: string
+  from: string
+  dateCreated: string
+  duration: number
+  recordingUrl: string
+  transcription: string | null
+  transcriptionStatus: string | null
 }
 
 // Define a type for the cost parameter
-type CostValue = string | number | { toNumber?: () => number; toFixed?: () => string } | null | undefined
+type CostValue =
+  | string
+  | number
+  | { toNumber?: () => number; toFixed?: () => string }
+  | null
+  | undefined
 
 function formatPhoneNumber(phone: string): string {
   const cleaned = phone.replace(/\D/g, '')
@@ -77,14 +81,14 @@ function formatPhoneNumber(phone: string): string {
 
 function costToNumber(cost: CostValue): number {
   if (cost == null) return 0
-  if (typeof cost === "number") return cost
-  if (typeof cost === "string") {
+  if (typeof cost === 'number') return cost
+  if (typeof cost === 'string') {
     const n = Number(cost)
     return Number.isFinite(n) ? n : 0
   }
-  if (typeof cost === "object") {
-    if (typeof cost.toNumber === "function") return cost.toNumber()
-    if (typeof cost.toFixed === "function") {
+  if (typeof cost === 'object') {
+    if (typeof cost.toNumber === 'function') return cost.toNumber()
+    if (typeof cost.toFixed === 'function') {
       const s = cost.toFixed()
       const n = Number(s)
       return Number.isFinite(n) ? n : 0
@@ -96,17 +100,30 @@ function costToNumber(cost: CostValue): number {
 interface UserCost {
   id: string
   email: string
-  cost: string | number 
+  cost: string | number
+}
+
+interface LeadStats {
+  leads: NutshellLead[]
+  totalLeads: number
+  wonCount: number
+  openCount: number
+  lostCount: number
+  totalWonValue: number
 }
 
 interface AdminClientProps {
   initialUsers: User[]
   initialCosts: UserCost[]
+  initialLeadStats: LeadStats | null
+  sessionEmail: string
 }
 
 export default function AdminClient({
   initialUsers = [],
-  initialCosts = []
+  initialCosts = [],
+  initialLeadStats = null,
+  sessionEmail = '',
 }: AdminClientProps) {
   const [selectedUsers, setSelectedUsers] = useState<string[]>([])
   const [isPending, startTransition] = useTransition()
@@ -130,10 +147,17 @@ export default function AdminClient({
 
   // Worker availability state
   interface WorkerAvailability {
-    [userId: string]: { avgDailyHours: number; totalHours: number };
+    [userId: string]: { avgDailyHours: number; totalHours: number }
   }
-  const [workerAvailability, setWorkerAvailability] = useState<WorkerAvailability>({})
+  const [workerAvailability, setWorkerAvailability] =
+    useState<WorkerAvailability>({})
   const [availabilityLoading, setAvailabilityLoading] = useState(true)
+
+  // Nutshell leads state
+  const [leadStats, setLeadStats] = useState<LeadStats | null>(initialLeadStats)
+  const [syncingLeads, setSyncingLeads] = useState(false)
+
+  const showLeadsTab = sessionEmail === 'tech@billboardsource.com'
 
   // Fetch OpenAI and Twilio usage on mount
   useEffect(() => {
@@ -209,7 +233,7 @@ export default function AdminClient({
 
   const toggleSelect = (id: string) => {
     setSelectedUsers((prev: string[]) =>
-      prev.includes(id) ? prev.filter(u => u !== id) : [...prev, id]
+      prev.includes(id) ? prev.filter((u) => u !== id) : [...prev, id],
     )
   }
 
@@ -220,7 +244,7 @@ export default function AdminClient({
       if (result.success) {
         setSelectedUsers([])
         showSuccessToast('Users deleted successfully')
-        router.refresh() 
+        router.refresh()
       } else {
         showErrorToast(result.message || 'Failed to delete users')
       }
@@ -231,7 +255,10 @@ export default function AdminClient({
     router.push('/dashboard')
   }
 
-  const handlePhoneUpdate = async (userId: string, currentValue: string | null) => {
+  const handlePhoneUpdate = async (
+    userId: string,
+    currentValue: string | null,
+  ) => {
     const newValue = phoneEdits[userId]
     if (newValue === undefined || newValue === (currentValue ?? '')) return
 
@@ -239,7 +266,7 @@ export default function AdminClient({
       const result = await updateTwilioPhone(userId, newValue)
       if (result.success) {
         showSuccessToast(result.message || 'Phone updated')
-        setPhoneEdits(prev => {
+        setPhoneEdits((prev) => {
           const next = { ...prev }
           delete next[userId]
           return next
@@ -256,6 +283,23 @@ export default function AdminClient({
     : 0
   const totalCost = totalCostNumber.toFixed(6)
 
+  const handleSyncLeads = async () => {
+    setSyncingLeads(true)
+    try {
+      const response = await fetch('/api/nutshell/sync-leads', {
+        method: 'POST',
+      })
+      if (!response.ok) throw new Error('Sync failed')
+      const data = await response.json()
+      showSuccessToast(`Synced ${data.synced} leads from Nutshell`)
+      router.refresh()
+    } catch (error) {
+      showErrorToast(getErrorMessage(error))
+    } finally {
+      setSyncingLeads(false)
+    }
+  }
+
   const handleSignupSuccess = useCallback(() => {
     router.refresh()
   }, [router])
@@ -271,15 +315,10 @@ export default function AdminClient({
       </div>
       <div className="flex flex-col justify-center items-center p-6 md:p-10 w-full lg:w-1/2 gap-5 bg-primary-foreground">
         <div className="w-full flex items-center justify-between mb-4">
-          <Button 
-            size="sm" 
-            onClick={handleBackToDashboard}
-          >
+          <Button size="sm" onClick={handleBackToDashboard}>
             back to Dashboard
           </Button>
-          <h2 className="text-2xl font-semibold">
-            Admin Panel
-          </h2>
+          <h2 className="text-2xl font-semibold">Admin Panel</h2>
           <Button
             variant="destructive"
             size="sm"
@@ -287,17 +326,20 @@ export default function AdminClient({
             onClick={handleDelete}
           >
             <Trash2 className="mr-2 h-4 w-4" />
-            {isPending ? "Deleting..." : "Delete Selected"}
+            {isPending ? 'Deleting...' : 'Delete Selected'}
           </Button>
         </div>
         <Tabs defaultValue="users" className="w-full">
-          <TabsList className="grid w-full grid-cols-4 mb-6">
+          <TabsList
+            className={`grid w-full mb-6 ${showLeadsTab ? 'grid-cols-5' : 'grid-cols-4'}`}
+          >
             <TabsTrigger value="users">User Accounts</TabsTrigger>
             <TabsTrigger value="costs">User Costs</TabsTrigger>
             <TabsTrigger value="voicemails">Voicemails</TabsTrigger>
             <TabsTrigger value="billboard">Billboard Data</TabsTrigger>
+            {showLeadsTab && <TabsTrigger value="leads">CRM Leads</TabsTrigger>}
           </TabsList>
-          
+
           <TabsContent value="users">
             <Table>
               <TableCaption>Manage registered users.</TableCaption>
@@ -314,7 +356,10 @@ export default function AdminClient({
               <TableBody>
                 {initialUsers.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center text-muted-foreground">
+                    <TableCell
+                      colSpan={6}
+                      className="text-center text-muted-foreground"
+                    >
                       No users found
                     </TableCell>
                   </TableRow>
@@ -330,16 +375,28 @@ export default function AdminClient({
                       </TableCell>
                       <TableCell>{index + 1}</TableCell>
                       <TableCell>{user.email}</TableCell>
-                      <TableCell>{user.role ?? "User"}</TableCell>
+                      <TableCell>{user.role ?? 'User'}</TableCell>
                       <TableCell>
                         <Input
                           type="tel"
                           className="h-8 w-32"
                           placeholder="+1234567890"
-                          value={phoneEdits[user.id] ?? user.twilioPhoneNumber ?? ''}
-                          onChange={(e) => setPhoneEdits(prev => ({ ...prev, [user.id]: e.target.value }))}
-                          onBlur={() => handlePhoneUpdate(user.id, user.twilioPhoneNumber)}
-                          onKeyDown={(e) => e.key === 'Enter' && handlePhoneUpdate(user.id, user.twilioPhoneNumber)}
+                          value={
+                            phoneEdits[user.id] ?? user.twilioPhoneNumber ?? ''
+                          }
+                          onChange={(e) =>
+                            setPhoneEdits((prev) => ({
+                              ...prev,
+                              [user.id]: e.target.value,
+                            }))
+                          }
+                          onBlur={() =>
+                            handlePhoneUpdate(user.id, user.twilioPhoneNumber)
+                          }
+                          onKeyDown={(e) =>
+                            e.key === 'Enter' &&
+                            handlePhoneUpdate(user.id, user.twilioPhoneNumber)
+                          }
                           disabled={isPending}
                         />
                       </TableCell>
@@ -347,7 +404,12 @@ export default function AdminClient({
                         {availabilityLoading ? (
                           <Loader2 className="h-3 w-3 animate-spin ml-auto" />
                         ) : workerAvailability[user.id] ? (
-                          <span className="font-medium">{workerAvailability[user.id].avgDailyHours.toFixed(1)}h</span>
+                          <span className="font-medium">
+                            {workerAvailability[user.id].avgDailyHours.toFixed(
+                              1,
+                            )}
+                            h
+                          </span>
                         ) : (
                           <span className="text-muted-foreground">—</span>
                         )}
@@ -358,7 +420,7 @@ export default function AdminClient({
               </TableBody>
             </Table>
           </TabsContent>
-          
+
           <TabsContent value="costs">
             <Table>
               <TableCaption>OpenAI usage cost per user.</TableCaption>
@@ -372,7 +434,10 @@ export default function AdminClient({
               <TableBody>
                 {initialCosts.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={3} className="text-center text-muted-foreground">
+                    <TableCell
+                      colSpan={3}
+                      className="text-center text-muted-foreground"
+                    >
                       No cost data available
                     </TableCell>
                   </TableRow>
@@ -380,7 +445,9 @@ export default function AdminClient({
                   initialCosts.map((cost, index) => (
                     <TableRow key={cost.id}>
                       <TableCell>{index + 1}</TableCell>
-                      <TableCell className="font-medium">{cost.email}</TableCell>
+                      <TableCell className="font-medium">
+                        {cost.email}
+                      </TableCell>
                       <TableCell className="text-right">
                         ${costToNumber(cost.cost).toFixed(6)}
                       </TableCell>
@@ -398,7 +465,9 @@ export default function AdminClient({
 
             {/* OpenAI API Usage (Last 30 Days) */}
             <div className="mt-6 p-4 bg-muted rounded-lg border">
-              <h3 className="text-sm font-semibold mb-2">OpenAI API Usage (Last 30 Days)</h3>
+              <h3 className="text-sm font-semibold mb-2">
+                OpenAI API Usage (Last 30 Days)
+              </h3>
               {usageLoading ? (
                 <div className="flex items-center gap-2 text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -409,8 +478,12 @@ export default function AdminClient({
               ) : openaiUsage ? (
                 <div className="space-y-2">
                   <div className="flex justify-between items-center">
-                    <span className="text-sm text-muted-foreground">Total API Cost</span>
-                    <span className="text-xl font-bold">{openaiUsage.totalCostFormatted}</span>
+                    <span className="text-sm text-muted-foreground">
+                      Total API Cost
+                    </span>
+                    <span className="text-xl font-bold">
+                      {openaiUsage.totalCostFormatted}
+                    </span>
                   </div>
                   <p className="text-xs text-muted-foreground">
                     {openaiUsage.startDate} to {openaiUsage.endDate}
@@ -432,16 +505,26 @@ export default function AdminClient({
               ) : twilioUsage ? (
                 <div className="space-y-3">
                   <div className="flex justify-between items-center">
-                    <span className="text-sm text-muted-foreground">{twilioUsage.currentMonth.name} (Current)</span>
-                    <span className="text-lg font-semibold">{twilioUsage.currentMonth.costFormatted}</span>
+                    <span className="text-sm text-muted-foreground">
+                      {twilioUsage.currentMonth.name} (Current)
+                    </span>
+                    <span className="text-lg font-semibold">
+                      {twilioUsage.currentMonth.costFormatted}
+                    </span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-sm text-muted-foreground">{twilioUsage.lastMonth.name} (Last)</span>
-                    <span className="text-lg font-semibold">{twilioUsage.lastMonth.costFormatted}</span>
+                    <span className="text-sm text-muted-foreground">
+                      {twilioUsage.lastMonth.name} (Last)
+                    </span>
+                    <span className="text-lg font-semibold">
+                      {twilioUsage.lastMonth.costFormatted}
+                    </span>
                   </div>
                   <div className="pt-2 border-t flex justify-between items-center">
                     <span className="text-sm font-medium">Total</span>
-                    <span className="text-xl font-bold">{twilioUsage.totalCostFormatted}</span>
+                    <span className="text-xl font-bold">
+                      {twilioUsage.totalCostFormatted}
+                    </span>
                   </div>
                 </div>
               ) : null}
@@ -452,12 +535,15 @@ export default function AdminClient({
           <TabsContent value="voicemails">
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold">Voicemails (Last 7 Days)</h3>
+                <h3 className="text-lg font-semibold">
+                  Voicemails (Last 7 Days)
+                </h3>
                 <span className="text-sm text-muted-foreground">
-                  {voicemails.length} recording{voicemails.length !== 1 ? 's' : ''}
+                  {voicemails.length} recording
+                  {voicemails.length !== 1 ? 's' : ''}
                 </span>
               </div>
-              
+
               {voicemailsLoading ? (
                 <div className="flex items-center gap-2 text-muted-foreground py-8 justify-center">
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -478,17 +564,22 @@ export default function AdminClient({
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                          <span className="font-medium">{formatPhoneNumber(vm.from)}</span>
+                          <span className="font-medium">
+                            {formatPhoneNumber(vm.from)}
+                          </span>
                           <span className="text-sm text-muted-foreground">
                             {vm.duration}s
                           </span>
                         </div>
                         <span className="text-xs text-muted-foreground">
                           {new Date(vm.dateCreated).toLocaleDateString()}{' '}
-                          {new Date(vm.dateCreated).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          {new Date(vm.dateCreated).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
                         </span>
                       </div>
-                      
+
                       {vm.transcription ? (
                         <div className="flex items-start gap-2 pt-2 border-t">
                           <FileText className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
@@ -498,8 +589,8 @@ export default function AdminClient({
                         <div className="flex items-center gap-2 pt-2 border-t text-muted-foreground">
                           <FileText className="h-4 w-4" />
                           <span className="text-sm italic">
-                            {vm.transcriptionStatus === 'in-progress' 
-                              ? 'Transcription in progress...' 
+                            {vm.transcriptionStatus === 'in-progress'
+                              ? 'Transcription in progress...'
                               : 'No transcription available'}
                           </span>
                         </div>
@@ -515,6 +606,187 @@ export default function AdminClient({
           <TabsContent value="billboard" className="w-full">
             <BillboardDataUploader />
           </TabsContent>
+
+          {/* Nutshell CRM Leads Tab - tech@ only */}
+          {showLeadsTab && (
+            <TabsContent value="leads">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-semibold">Nutshell CRM Leads</h3>
+                  <Button
+                    size="sm"
+                    onClick={handleSyncLeads}
+                    disabled={syncingLeads}
+                  >
+                    {syncingLeads ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Syncing...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                        Sync from Nutshell
+                      </>
+                    )}
+                  </Button>
+                </div>
+
+                {/* Stats cards */}
+                {leadStats && (
+                  <div className="grid grid-cols-4 gap-3">
+                    <div className="p-3 bg-muted rounded-lg border text-center">
+                      <p className="text-2xl font-bold">
+                        {leadStats.totalLeads}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Total Leads
+                      </p>
+                    </div>
+                    <div className="p-3 bg-green-50 rounded-lg border border-green-200 text-center">
+                      <p className="text-2xl font-bold text-green-700">
+                        {leadStats.wonCount}
+                      </p>
+                      <p className="text-xs text-green-600">Won</p>
+                    </div>
+                    <div className="p-3 bg-blue-50 rounded-lg border border-blue-200 text-center">
+                      <p className="text-2xl font-bold text-blue-700">
+                        {leadStats.openCount}
+                      </p>
+                      <p className="text-xs text-blue-600">Open</p>
+                    </div>
+                    <div className="p-3 bg-red-50 rounded-lg border border-red-200 text-center">
+                      <p className="text-2xl font-bold text-red-700">
+                        {leadStats.lostCount}
+                      </p>
+                      <p className="text-xs text-red-600">Lost</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Won revenue */}
+                {leadStats && leadStats.wonCount > 0 && (
+                  <div className="p-4 bg-green-50 rounded-lg border border-green-200">
+                    <div className="flex items-center gap-2 mb-1">
+                      <DollarSign className="h-5 w-5 text-green-600" />
+                      <h4 className="font-semibold text-green-800">
+                        Total Won Revenue
+                      </h4>
+                    </div>
+                    <p className="text-3xl font-bold text-green-700">
+                      $
+                      {leadStats.totalWonValue.toLocaleString('en-US', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </p>
+                  </div>
+                )}
+
+                {/* Leads table */}
+                <Table>
+                  <TableCaption>
+                    Nutshell CRM leads tracked from this app.
+                  </TableCaption>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Lead ID</TableHead>
+                      <TableHead>Description</TableHead>
+                      <TableHead>Assignee</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Value</TableHead>
+                      <TableHead>Created</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {!leadStats || leadStats.leads.length === 0 ? (
+                      <TableRow>
+                        <TableCell
+                          colSpan={6}
+                          className="text-center text-muted-foreground"
+                        >
+                          No leads yet. Click &quot;Sync from Nutshell&quot; to
+                          pull data.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      leadStats.leads.map((lead) => {
+                        const statusLabels: Record<
+                          number,
+                          { label: string; className: string }
+                        > = {
+                          0: {
+                            label: 'Open',
+                            className: 'bg-blue-100 text-blue-700',
+                          },
+                          1: {
+                            label: 'Won',
+                            className: 'bg-green-100 text-green-700',
+                          },
+                          2: {
+                            label: 'Lost',
+                            className: 'bg-red-100 text-red-700',
+                          },
+                          3: {
+                            label: 'Canceled',
+                            className: 'bg-gray-100 text-gray-700',
+                          },
+                        }
+                        const status =
+                          statusLabels[lead.status] || statusLabels[0]
+                        return (
+                          <TableRow key={lead.id}>
+                            <TableCell className="font-mono text-xs">
+                              {lead.nutshellLeadId}
+                            </TableCell>
+                            <TableCell className="font-medium max-w-[200px] truncate">
+                              {lead.description || '—'}
+                            </TableCell>
+                            <TableCell className="text-xs">
+                              {lead.assigneeEmail || '—'}
+                            </TableCell>
+                            <TableCell>
+                              <span
+                                className={`text-xs font-medium px-2 py-0.5 rounded-full ${status.className}`}
+                              >
+                                {status.label}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-right font-medium">
+                              {lead.value
+                                ? `$${Number(lead.value).toLocaleString('en-US', { minimumFractionDigits: 2 })}`
+                                : '—'}
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground">
+                              {lead.nutshellCreatedAt
+                                ? new Date(
+                                    lead.nutshellCreatedAt,
+                                  ).toLocaleDateString()
+                                : '—'}
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })
+                    )}
+                  </TableBody>
+                  {leadStats && leadStats.wonCount > 0 && (
+                    <TableFooter>
+                      <TableRow>
+                        <TableCell colSpan={4}>Total Won Revenue</TableCell>
+                        <TableCell className="text-right font-bold">
+                          $
+                          {leadStats.totalWonValue.toLocaleString('en-US', {
+                            minimumFractionDigits: 2,
+                          })}
+                        </TableCell>
+                        <TableCell />
+                      </TableRow>
+                    </TableFooter>
+                  )}
+                </Table>
+              </div>
+            </TabsContent>
+          )}
         </Tabs>
       </div>
     </div>

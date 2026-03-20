@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/clear-openai-logs",
+      "schedule": "0 0 1 * *"
+    }
+  ]
+}
