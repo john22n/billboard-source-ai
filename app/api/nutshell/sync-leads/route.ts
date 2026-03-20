@@ -82,7 +82,7 @@ export async function POST() {
         {
           query: {
             modifiedTime: `> ${sinceDate}`,
-            sourceId,
+            source: [sourceId],
           },
           orderBy: 'createdTime',
           orderDirection: 'DESC',
