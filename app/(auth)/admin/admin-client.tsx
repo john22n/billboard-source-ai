@@ -156,6 +156,12 @@ export default function AdminClient({
   // Nutshell leads state
   const [leadStats, setLeadStats] = useState<LeadStats | null>(initialLeadStats)
   const [syncingLeads, setSyncingLeads] = useState(false)
+  const [syncProgress, setSyncProgress] = useState<{
+    total: number
+    synced: number
+    errors: number
+    message?: string
+  } | null>(null)
 
   const showLeadsTab = sessionEmail === 'tech@billboardsource.com'
 
@@ -285,18 +291,63 @@ export default function AdminClient({
 
   const handleSyncLeads = async () => {
     setSyncingLeads(true)
+    setSyncProgress(null)
     try {
       const response = await fetch('/api/nutshell/sync-leads', {
         method: 'POST',
       })
+
       if (!response.ok) throw new Error('Sync failed')
-      const data = await response.json()
-      showSuccessToast(`Synced ${data.synced} leads from Nutshell`)
-      router.refresh()
+
+      const reader = response.body?.getReader()
+      if (!reader) throw new Error('No response stream')
+
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          const dataMatch = line.match(/^data: (.+)$/m)
+          if (!dataMatch) continue
+
+          const data = JSON.parse(dataMatch[1])
+
+          if (data.type === 'progress') {
+            setSyncProgress({
+              total: data.total,
+              synced: data.synced,
+              errors: data.errors,
+              message: data.message,
+            })
+          } else if (data.type === 'status') {
+            setSyncProgress((prev) => ({
+              total: prev?.total ?? 0,
+              synced: prev?.synced ?? 0,
+              errors: prev?.errors ?? 0,
+              message: data.message,
+            }))
+          } else if (data.type === 'done') {
+            showSuccessToast(
+              `Synced ${data.synced} leads${data.errors > 0 ? ` (${data.errors} errors)` : ''}`,
+            )
+            router.refresh()
+          } else if (data.type === 'error') {
+            showErrorToast(data.message || 'Sync failed')
+          }
+        }
+      }
     } catch (error) {
       showErrorToast(getErrorMessage(error))
     } finally {
       setSyncingLeads(false)
+      setSyncProgress(null)
     }
   }
 
@@ -631,6 +682,44 @@ export default function AdminClient({
                     )}
                   </Button>
                 </div>
+
+                {/* Sync progress bar */}
+                {syncingLeads && syncProgress && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-sm text-muted-foreground">
+                      <span>
+                        {syncProgress.message ||
+                          `Syncing ${syncProgress.synced} / ${syncProgress.total} leads...`}
+                      </span>
+                      {syncProgress.total > 0 && (
+                        <span>
+                          {Math.round(
+                            ((syncProgress.synced + syncProgress.errors) /
+                              syncProgress.total) *
+                              100,
+                          )}
+                          %
+                        </span>
+                      )}
+                    </div>
+                    {syncProgress.total > 0 && (
+                      <div className="h-2 bg-muted rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-primary rounded-full transition-all duration-300"
+                          style={{
+                            width: `${((syncProgress.synced + syncProgress.errors) / syncProgress.total) * 100}%`,
+                          }}
+                        />
+                      </div>
+                    )}
+                    {syncProgress.errors > 0 && (
+                      <p className="text-xs text-red-500">
+                        {syncProgress.errors} error
+                        {syncProgress.errors !== 1 ? 's' : ''}
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {/* Stats cards */}
                 {leadStats && (

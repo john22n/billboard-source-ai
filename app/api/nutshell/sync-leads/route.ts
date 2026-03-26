@@ -1,4 +1,3 @@
-import { NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { upsertNutshellLead } from '@/lib/dal'
 
@@ -34,18 +33,37 @@ async function nutshellRequest(
   return response.json()
 }
 
+const CONCURRENCY = 10
+
+async function processInBatches<T, R>(
+  items: T[],
+  fn: (item: T) => Promise<R>,
+  concurrency: number,
+): Promise<R[]> {
+  const results: R[] = []
+  for (let i = 0; i < items.length; i += concurrency) {
+    const batch = items.slice(i, i + concurrency)
+    const batchResults = await Promise.all(batch.map(fn))
+    results.push(...batchResults)
+  }
+  return results
+}
+
 export async function POST() {
   try {
     const session = await getSession()
     if (!session || session.role !== 'admin') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      })
     }
 
     const nutshellApiKey = process.env.NUTSHELL_API_KEY
     if (!nutshellApiKey) {
-      return NextResponse.json(
-        { error: 'Nutshell integration not configured' },
-        { status: 500 },
+      return new Response(
+        JSON.stringify({ error: 'Nutshell integration not configured' }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } },
       )
     }
 
@@ -53,111 +71,157 @@ export async function POST() {
       `sky@billboardsource.com:${nutshellApiKey}`,
     ).toString('base64')
 
-    // Get the "Call (GPP2)" source ID so we only sync leads from that source
-    const sourceResult = await nutshellRequest(
-      'newSource',
-      { name: 'Call (GPP2)' },
-      credentials,
-    )
-    if (sourceResult.error || !sourceResult.result?.id) {
-      console.error('Failed to get source:', sourceResult.error)
-      return NextResponse.json(
-        { error: 'Failed to find "Call (GPP2)" source' },
-        { status: 400 },
-      )
-    }
-    const sourceId = Number(sourceResult.result.id)
+    const encoder = new TextEncoder()
+    const stream = new ReadableStream({
+      async start(controller) {
+        function send(data: Record<string, unknown>) {
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify(data)}\n\n`),
+          )
+        }
 
-    // Fetch leads from Nutshell - get recent leads (last 90 days) filtered by source
-    const since = new Date()
-    since.setDate(since.getDate() - 90)
-    const sinceDate = since.toISOString().split('T')[0]
+        try {
+          send({ type: 'status', message: 'Finding lead source...' })
 
-    // Nutshell API caps findLeads at 100 per page, so paginate
-    const leads: NutshellLead[] = []
-    let page = 1
-    while (true) {
-      const findResult = await nutshellRequest(
-        'findLeads',
-        {
-          query: {
-            modifiedTime: `> ${sinceDate}`,
-            source: [sourceId],
-          },
-          orderBy: 'createdTime',
-          orderDirection: 'DESC',
-          limit: 100,
-          page,
-          stubResponses: true,
-        },
-        credentials,
-      )
+          // Get the "Call (GPP2)" source ID
+          const sourceResult = await nutshellRequest(
+            'newSource',
+            { name: 'Call (GPP2)' },
+            credentials,
+          )
+          if (sourceResult.error || !sourceResult.result?.id) {
+            send({
+              type: 'error',
+              message: 'Failed to find "Call (GPP2)" source',
+            })
+            controller.close()
+            return
+          }
+          const sourceId = Number(sourceResult.result.id)
 
-      if (findResult.error) {
-        console.error('Nutshell findLeads error:', findResult.error)
-        return NextResponse.json(
-          { error: findResult.error.message || 'Failed to fetch leads' },
-          { status: 400 },
-        )
-      }
+          send({ type: 'status', message: 'Fetching leads from Nutshell...' })
 
-      const pageLeads: NutshellLead[] = findResult.result || []
-      leads.push(...pageLeads)
+          // Fetch leads with pagination
+          const since = new Date()
+          since.setDate(since.getDate() - 90)
+          const sinceDate = since.toISOString().split('T')[0]
 
-      if (pageLeads.length < 100) break
-      page++
-    }
+          const leads: NutshellLead[] = []
+          let page = 1
+          while (true) {
+            const findResult = await nutshellRequest(
+              'findLeads',
+              {
+                query: {
+                  modifiedTime: `> ${sinceDate}`,
+                  source: [sourceId],
+                },
+                orderBy: 'createdTime',
+                orderDirection: 'DESC',
+                limit: 100,
+                page,
+                stubResponses: true,
+              },
+              credentials,
+            )
 
-    let synced = 0
-    let errors = 0
+            if (findResult.error) {
+              send({
+                type: 'error',
+                message: findResult.error.message || 'Failed to fetch leads',
+              })
+              controller.close()
+              return
+            }
 
-    // Fetch full details for each lead and upsert
-    for (const lead of leads) {
-      try {
-        // Get full lead details (findLeads may return stubs)
-        const detailResult = await nutshellRequest(
-          'getLead',
-          {
-            leadId: lead.id,
-          },
-          credentials,
-        )
+            const pageLeads: NutshellLead[] = findResult.result || []
+            leads.push(...pageLeads)
 
-        const fullLead: NutshellLead = detailResult.result || lead
+            if (pageLeads.length < 100) break
+            page++
+          }
 
-        const valueAmount = fullLead.value?.amount
-          ? String(fullLead.value.amount)
-          : null
+          const total = leads.length
+          send({
+            type: 'progress',
+            message: `Found ${total} leads. Syncing...`,
+            total,
+            synced: 0,
+            errors: 0,
+          })
 
-        const assigneeEmail = fullLead.assignee?.emails?.[0] ?? null
+          let synced = 0
+          let errors = 0
 
-        await upsertNutshellLead({
-          nutshellLeadId: fullLead.id,
-          description: fullLead.description ?? null,
-          status: fullLead.status ?? 0,
-          value: valueAmount,
-          currency: fullLead.value?.currency ?? 'USD',
-          assigneeEmail,
-          nutshellCreatedAt: fullLead.createdTime
-            ? new Date(fullLead.createdTime)
-            : null,
-          closedAt: fullLead.closedTime ? new Date(fullLead.closedTime) : null,
-        })
-        synced++
-      } catch (err) {
-        console.error(`Failed to sync lead ${lead.id}:`, err)
-        errors++
-      }
-    }
+          // Fetch full details and upsert in concurrent batches
+          await processInBatches(
+            leads,
+            async (lead) => {
+              try {
+                const detailResult = await nutshellRequest(
+                  'getLead',
+                  { leadId: lead.id },
+                  credentials,
+                )
 
-    return NextResponse.json({
-      success: true,
-      totalFound: leads.length,
-      synced,
-      errors,
+                const fullLead: NutshellLead = detailResult.result || lead
+                const valueAmount = fullLead.value?.amount
+                  ? String(fullLead.value.amount)
+                  : null
+                const assigneeEmail = fullLead.assignee?.emails?.[0] ?? null
+
+                await upsertNutshellLead({
+                  nutshellLeadId: fullLead.id,
+                  description: fullLead.description ?? null,
+                  status: fullLead.status ?? 0,
+                  value: valueAmount,
+                  currency: fullLead.value?.currency ?? 'USD',
+                  assigneeEmail,
+                  nutshellCreatedAt: fullLead.createdTime
+                    ? new Date(fullLead.createdTime)
+                    : null,
+                  closedAt: fullLead.closedTime
+                    ? new Date(fullLead.closedTime)
+                    : null,
+                })
+                synced++
+              } catch (err) {
+                console.error(`Failed to sync lead ${lead.id}:`, err)
+                errors++
+              }
+
+              send({ type: 'progress', total, synced, errors })
+            },
+            CONCURRENCY,
+          )
+
+          send({
+            type: 'done',
+            totalFound: total,
+            synced,
+            errors,
+          })
+        } catch (error) {
+          console.error('Error syncing Nutshell leads:', error)
+          send({ type: 'error', message: 'Failed to sync leads' })
+        } finally {
+          controller.close()
+        }
+      },
+    })
+
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+      },
     })
   } catch (error) {
     console.error('Error syncing Nutshell leads:', error)
-    return NextResponse.json({ error: 'Failed to sync leads' }, { status: 500 })
+    return new Response(JSON.stringify({ error: 'Failed to sync leads' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    })
   }
 }
