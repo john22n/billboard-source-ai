@@ -15,8 +15,10 @@ export async function POST(req: Request) {
     const bodyText = await clonedReq.text();
     const formData = await req.formData();
 
-    // Validate Twilio signature
-    if (TWILIO_AUTH_TOKEN) {
+    // Validate Twilio signature — skip on preview deployments
+    const isProduction = process.env.VERCEL_ENV === 'production';
+
+    if (TWILIO_AUTH_TOKEN && isProduction) {
       const twilioSignature = req.headers.get('X-Twilio-Signature') || '';
       const url = new URL(req.url);
       const params: Record<string, string> = {};
