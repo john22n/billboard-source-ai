@@ -15,8 +15,10 @@ export async function POST(req: Request) {
     const bodyText = await clonedReq.text();
     const formData = await req.formData();
 
-    // Validate Twilio signature
-    if (TWILIO_AUTH_TOKEN) {
+    // Validate Twilio signature — skip on preview deployments
+    const isProduction = process.env.VERCEL_ENV === 'production';
+
+    if (TWILIO_AUTH_TOKEN && isProduction) {
       const twilioSignature = req.headers.get('X-Twilio-Signature') || '';
       const url = new URL(req.url);
       const params: Record<string, string> = {};
@@ -90,20 +92,18 @@ export async function POST(req: Request) {
       callType,
       phoneNumber,
       primary_owner: primaryOwner,
-      excluded_workers: [],  // initialized empty so NOT IN expression never throws on fresh calls
+      excluded_workers: [],
     });
 
     const appUrl = (
       process.env.NEXT_PUBLIC_APP_URL ?? `${new URL(req.url).protocol}//${new URL(req.url).host}`
     ).replace(/\/$/, '');
 
-    // ── Build waitUrl with bypass token ──────────────────────────────────────
     const waitUrlObj = new URL(`${appUrl}/api/taskrouter/wait`);
     if (process.env.VERCEL_BYPASS_TOKEN) {
       waitUrlObj.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
     }
 
-    // ── Build enqueueActionUrl with bypass token ──────────────────────────────
     const enqueueActionUrlObj = new URL(`${appUrl}/api/taskrouter/enqueue-complete`);
     if (process.env.VERCEL_BYPASS_TOKEN) {
       enqueueActionUrlObj.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
@@ -114,6 +114,7 @@ export async function POST(req: Request) {
 
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
+  <Say voice="Polly.Joanna">This call may be recorded for quality and training purposes.</Say>
   <Say voice="Polly.Joanna">Please hold while we connect you with the next available representative.</Say>
   <Enqueue workflowSid="${WORKFLOW_SID}"
            action="${escapedEnqueueActionUrl}"
