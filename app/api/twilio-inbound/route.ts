@@ -114,7 +114,6 @@ export async function POST(req: Request) {
 
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="Polly.Joanna">This call may be recorded for quality and training purposes.</Say>
   <Say voice="Polly.Joanna">Please hold while we connect you with the next available representative.</Say>
   <Enqueue workflowSid="${WORKFLOW_SID}"
            action="${escapedEnqueueActionUrl}"
