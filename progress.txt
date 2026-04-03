@@ -1,0 +1,4 @@
+DONE: leads tab in admin page does not reload numbers in the UI after sync-lead api call.
+FIX: Added a useEffect in admin-client.tsx that calls setLeadStats(initialLeadStats) whenever
+the initialLeadStats prop changes. Since router.refresh() causes the server component to re-render
+and pass fresh data as a prop, the UI now updates correctly after the sync completes.
