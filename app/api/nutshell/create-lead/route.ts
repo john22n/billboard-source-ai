@@ -229,6 +229,11 @@ export async function POST(req: NextRequest) {
     }
 
     // 3. Find or Create Contacts and link to Account
+    // NOTE: We intentionally match contacts by email only. Name is NOT used as a
+    // lookup key because names are not unique — two callers can share the same name
+    // but be completely different people. Using name as a fallback would silently
+    // attach new leads to the wrong existing contact. If no email match is found,
+    // a new contact is always created.
     async function findOrCreateContact(contact: ContactInfo, linkAccountId: number | null): Promise<number | null> {
       const validEmail = contact.email?.trim() && isValidEmail(contact.email.trim()) ? contact.email.trim() : null;
       const hasContactInfo = contact.name?.trim() || contact.phone?.trim() || validEmail;
@@ -237,7 +242,7 @@ export async function POST(req: NextRequest) {
 
       let contactId: number | null = null;
 
-      // First try to find existing contact by email
+      // Match by email only — names are not unique identifiers
       if (validEmail) {
         const searchResult = await nutshellRequest('searchByEmail', {
           emailAddressString: validEmail,
@@ -247,22 +252,8 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // If not found by email, search by name
-      if (!contactId && contact.name?.trim()) {
-        const searchResult = await nutshellRequest('searchUniversal', {
-          string: contact.name.trim(),
-        }, credentials);
-        const foundContact = searchResult.result?.contacts?.find(
-          (c: { name?: string }) => c.name?.toLowerCase() === contact.name?.trim().toLowerCase()
-        );
-        if (foundContact?.id) {
-          contactId = Number(foundContact.id);
-        }
-      }
-
       // If contact exists and we have an account, link them
       if (contactId && linkAccountId && linkAccountId > 0) {
-        // Get the contact to check current accounts and get rev
         const getContactResult = await nutshellRequest('getContact', {
           contactId,
         }, credentials);
@@ -271,7 +262,6 @@ export async function POST(req: NextRequest) {
           const currentAccounts = getContactResult.result.accounts || [];
           const alreadyLinked = currentAccounts.some((a: { id?: number }) => Number(a.id) === linkAccountId);
           
-          // Only update if not already linked
           if (!alreadyLinked) {
             const updatedAccounts = [...currentAccounts.map((a: { id?: number }) => ({ id: a.id })), { id: linkAccountId }];
             await nutshellRequest('editContact', {
@@ -285,7 +275,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Create new contact only if not found
+      // No email match found — always create a new contact
       if (!contactId) {
         const contactPayload: Record<string, unknown> = {};
         if (contact.name?.trim()) contactPayload.name = contact.name.trim();
@@ -293,7 +283,6 @@ export async function POST(req: NextRequest) {
         if (contact.phone?.trim()) contactPayload.phone = [contact.phone.trim()];
         if (validEmail) contactPayload.email = [validEmail];
         
-        // Link to account when creating
         if (linkAccountId && linkAccountId > 0) {
           contactPayload.accounts = [{ id: linkAccountId }];
         }
@@ -335,7 +324,6 @@ export async function POST(req: NextRequest) {
       const typeLower = data.typeName.toLowerCase();
       let typeTag: string | null = null;
 
-      // Match patterns like "Est. B2B", "Established B2B", "est b2b", etc.
       if (/\b(est\.?|established)\s*b2b\b/i.test(typeLower)) {
         typeTag = 'Type: Established B2B';
       } else if (/\b(est\.?|established)\s*b2c\b/i.test(typeLower)) {
@@ -420,14 +408,12 @@ export async function POST(req: NextRequest) {
       if (pipeline?.id) {
         stagesetId = Number(pipeline.id);
 
-        // Find milestones for this pipeline
         const milestonesResult = await nutshellRequest('findMilestones', {}, credentials);
         if (milestonesResult.result) {
           const pipelineMilestones = milestonesResult.result.filter(
             (m: { stagesetId?: number }) => m.stagesetId === stagesetId
           );
 
-          // Map lead type to stage name
           let targetStageName: string | null = null;
           if (data.leadType === 'Availer' || data.leadType === 'Panel Requester') {
             targetStageName = 'Proposal';
@@ -450,7 +436,6 @@ export async function POST(req: NextRequest) {
     // 6. Build custom fields with actual Nutshell field names
     const customFields: Record<string, string> = {};
 
-    // OOH Experience (Ever used billboards before?)
     if (data.billboardsBeforeYN) {
       const experience = data.billboardsBeforeYN === 'Y'
         ? `Yes${data.billboardsBeforeDetails ? ` - ${data.billboardsBeforeDetails}` : ''}`
@@ -458,7 +443,6 @@ export async function POST(req: NextRequest) {
       customFields['OOH Experience'] = experience;
     }
 
-    // Target Market(s) - City/State/Area
     const locationParts = [
       data.targetCity,
       data.state,
@@ -468,12 +452,10 @@ export async function POST(req: NextRequest) {
       customFields['Target Market(s) - City/State/Area'] = locationParts.join(', ');
     }
 
-    // Potential Start Date?
     if (data.startMonth) {
       customFields['Potential Start Date?'] = data.startMonth;
     }
 
-    // Contract Length? - ensure it's a string, not an array
     if (data.campaignLength) {
       const length = Array.isArray(data.campaignLength)
         ? data.campaignLength[0]
@@ -483,42 +465,34 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // OOH Type of Interest (board type)
     if (data.boardType) {
       customFields['OOH Type of Interest'] = data.boardType;
     }
 
-    // Budget
     if (data.budget) {
       customFields['Budget'] = data.budget;
     }
 
-    // Rate Estimate (Ballpark)
     if (data.ballpark) {
       customFields['Rate Estimate'] = data.ballpark;
     }
 
-    // Business Age (Years in Business)
     if (data.yearsInBusiness) {
       customFields['Business Age'] = data.yearsInBusiness;
     }
 
-    // Consumer Target (Target Audience)
     if (data.targetAudience) {
       customFields['Consumer Target'] = data.targetAudience;
     }
 
-    // Other Ads - send whatever value is in the form
     if (data.hasMediaExperience !== null && data.hasMediaExperience !== '') {
       customFields['Other Ads'] = String(data.hasMediaExperience).trim();
     }
 
-    // Promised Deliverables (I'll send over)
     if (data.sendOver && data.sendOver.length > 0) {
       customFields['Promised Deliverables'] = data.sendOver.join(', ');
     }
 
-    // Notes: custom field (Purpose Recap & Additional Notes from form)
     if (data.notes) {
       customFields['Notes:'] = data.notes;
     }
@@ -545,7 +519,6 @@ export async function POST(req: NextRequest) {
       noteParts.push(`Sending: ${data.sendOver.join(', ')}`);
     }
 
-    // Add transcript to note with spacing
     if (data.transcript?.trim()) {
       noteParts.push('');
       noteParts.push('--- CALL TRANSCRIPT ---');
@@ -577,22 +550,18 @@ export async function POST(req: NextRequest) {
       },
     };
 
-    // Only add contacts if we have valid contact IDs
     if (contactIds.length > 0) {
       leadPayload.contacts = contactIds.map(id => ({ id }));
     }
 
-    // Only add accounts if we have a valid account ID
     if (accountId && accountId > 0) {
       leadPayload.accounts = [{ id: accountId }];
     }
 
-    // Only add tags if we have any
     if (tags.length > 0) {
       leadPayload.tags = tags;
     }
 
-    // Only add pipeline and milestone if set
     if (stagesetId && stagesetId > 0) {
       leadPayload.stagesetId = stagesetId;
     }
@@ -600,17 +569,14 @@ export async function POST(req: NextRequest) {
       leadPayload.milestoneId = milestoneId;
     }
 
-    // Add source "Call (GPP2)" if available
     if (sourceId && sourceId > 0) {
       leadPayload.sources = [{ id: sourceId }];
     }
 
-    // Only add custom fields if we have any
     if (Object.keys(customFields).length > 0) {
       leadPayload.customFields = customFields;
     }
 
-    // Only add note if we have content
     if (noteParts.length > 0) {
       leadPayload.note = noteParts.join('\n');
     }
