@@ -156,6 +156,10 @@ export default function AdminClient({
   // Nutshell leads state
   const [leadStats, setLeadStats] = useState<LeadStats | null>(initialLeadStats)
   const [syncingLeads, setSyncingLeads] = useState(false)
+
+  useEffect(() => {
+    setLeadStats(initialLeadStats)
+  }, [initialLeadStats])
   const [syncProgress, setSyncProgress] = useState<{
     total: number
     synced: number
