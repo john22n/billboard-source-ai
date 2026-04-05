@@ -1,6 +1,6 @@
 /**
  * TaskRouter Assignment Callback
- * 
+ *
  * Called when TaskRouter needs to assign a task to a worker.
  * Returns instructions to dial the worker's browser client.
  */
@@ -15,7 +15,6 @@ export async function POST(req: Request) {
     const bodyText = await clonedReq.text();
     const formData = await req.formData();
 
-    // Validate Twilio signature (skip in dev, log failures in prod)
     if (TWILIO_AUTH_TOKEN) {
       const twilioSignature = req.headers.get('X-Twilio-Signature') || '';
       const url = new URL(req.url);
@@ -41,9 +40,9 @@ export async function POST(req: Request) {
       }
     }
 
-    const taskSid        = formData.get('TaskSid')        as string;
-    const reservationSid = formData.get('ReservationSid') as string;
-    const workerSid      = formData.get('WorkerSid')      as string;
+    const taskSid          = formData.get('TaskSid')          as string;
+    const reservationSid   = formData.get('ReservationSid')   as string;
+    const workerSid        = formData.get('WorkerSid')        as string;
     const workerAttributes = formData.get('WorkerAttributes') as string;
     const taskAttributes   = formData.get('TaskAttributes')   as string;
 
@@ -79,6 +78,7 @@ export async function POST(req: Request) {
     const workspaceSid = formData.get('WorkspaceSid') as string;
 
     // ── VOICEMAIL WORKER ─────────────────────────────────────────────────────
+    // No recording changes here — voicemail is handled by its own route
     if (workerAttrs.email === 'voicemail@system') {
       console.log('📼 Voicemail worker assigned - using redirect instruction');
 
@@ -125,6 +125,7 @@ export async function POST(req: Request) {
     }
 
     // ── SIMULTANEOUS RING ────────────────────────────────────────────────────
+    // Recording is handled inside simultaneous-dial/route.ts via <Dial> attribute
     if (workerAttrs.simultaneous_ring && workerAttrs.cell_phone) {
       console.log('📱 Worker has simultaneous_ring=true — using parallel dial instead of conference');
 
@@ -178,6 +179,11 @@ export async function POST(req: Request) {
       from: taskAttrs.from || process.env.TWILIO_MAIN_NUMBER || '+18338547126',
       post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
       timeout: 20,
+      // ── call recording ──────────────────────────────────────────────────────
+      record:                           'record-from-answer',
+      recording_status_callback:        `${appUrl}/api/recordings/call`,
+      recording_status_callback_method: 'POST',
+      // ────────────────────────────────────────────────────────────────────────
       conference_status_callback:       callCompleteUrl.toString(),
       conference_status_callback_event: 'start, end, join, leave',
       end_conference_on_exit:           true,

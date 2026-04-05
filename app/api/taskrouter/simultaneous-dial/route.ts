@@ -51,8 +51,6 @@ export async function POST(req: Request) {
     ).replace(/\/$/, '');
     const businessNumber = process.env.TWILIO_MAIN_NUMBER ?? '+18338547126';
 
-    // Use the real caller's number as the caller ID so McDonald sees who is
-    // calling on his cell. Falls back to the business number if not available.
     const callerId = callerFrom || businessNumber;
 
     // ── dial-complete callback ────────────────────────────────────────────────
@@ -72,13 +70,17 @@ export async function POST(req: Request) {
       clientStatusUrl.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
     }
 
-    // ── cell screening URL — played when cell answers before bridging ─────────
-    // Carrier voicemail cannot press 1, so it times out → cell leg hangs up
-    // → simultaneous-dial-complete fires with no-answer → re-enqueues
+    // ── cell screening URL ────────────────────────────────────────────────────
     const cellScreenUrl = new URL(`${appUrl}/api/taskrouter/cell-screen`);
     cellScreenUrl.searchParams.set('taskSid', taskSid);
     if (process.env.VERCEL_BYPASS_TOKEN) {
       cellScreenUrl.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
+    }
+
+    // ── recording status callback — tagged as a call recording ───────────────
+    const recordingCallbackUrl = new URL(`${appUrl}/api/recordings/call`);
+    if (process.env.VERCEL_BYPASS_TOKEN) {
+      recordingCallbackUrl.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
     }
 
     const escapeXml = (s: string): string =>
@@ -92,6 +94,9 @@ export async function POST(req: Request) {
 <Response>
   <Dial callerId="${escapeXml(callerId)}"
         timeout="20"
+        record="record-from-answer"
+        recordingStatusCallback="${escapeXml(recordingCallbackUrl.toString())}"
+        recordingStatusCallbackMethod="POST"
         action="${escapeXml(dialCompleteUrl.toString())}"
         method="POST">
     <Client statusCallback="${escapeXml(clientStatusUrl.toString())}"
