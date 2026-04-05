@@ -208,7 +208,7 @@ export default function SalesCallTranscriber({
     if (
       !callActive &&
       !hasDoneFinalExtractionRef.current &&
-      fullTranscriptRef.current.length > 50
+      fullTranscriptRef.current.length > 20
     ) {
       hasDoneFinalExtractionRef.current = true
       console.log('📞 Call ended - running final extraction')
@@ -239,7 +239,7 @@ export default function SalesCallTranscriber({
   }, [transcripts, interimTranscript])
 
   useEffect(() => {
-    if (fullTranscript.length > 50 && !isExtracting && callActive) {
+    if (fullTranscript.length > 20 && !isExtracting && callActive) {
       extractFields(fullTranscript)
     }
   }, [fullTranscript, extractFields, isExtracting, callActive])
