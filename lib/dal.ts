@@ -1,9 +1,8 @@
 import { db } from '@/db'
 import { getSession } from './auth'
-import { and, eq, inArray, sql } from 'drizzle-orm'
+import { and, eq, inArray, lt, sql } from 'drizzle-orm'
 import { cache } from 'react'
-import { openaiLogs, user } from '@/db/schema'
-
+import { openaiLogs, user, nutshellLeads } from '@/db/schema'
 
 export const getCurrentUser = cache(async () => {
   const session = await getSession()
@@ -11,7 +10,11 @@ export const getCurrentUser = cache(async () => {
 
   // skip database query during prerendering if we dont have a session
   // hack until we have PPR http://nextjs.org/docs/app/buidling-your-application/rendering/parital-prerendering
-  if (typeof window == 'undefined' && process.env.NEXT_PHASE === 'phase-production-build') return null
+  if (
+    typeof window == 'undefined' &&
+    process.env.NEXT_PHASE === 'phase-production-build'
+  )
+    return null
 
   try {
     const result = await db
@@ -35,7 +38,6 @@ export const getUserByEmail = cache(async (email: string) => {
   }
 })
 
-
 export async function createPendingLog(userId: string, sessionId: string) {
   const [logEntry] = await db
     .insert(openaiLogs)
@@ -45,30 +47,33 @@ export async function createPendingLog(userId: string, sessionId: string) {
       promptTokens: 0,
       completionTokens: 0,
       totalTokens: 0,
-      cost: "0.000000",
+      cost: '0.000000',
       sessionId,
-      status: "pending"
+      status: 'pending',
     })
-    .returning();
-  
-  return logEntry;
+    .returning()
+
+  return logEntry
 }
 
 export async function getAllUsers() {
-  return await db.select().from(user);
+  return await db.select().from(user)
 }
 
 export async function deleteUsersByIds(ids: string[]) {
-  return await db.delete(user).where(inArray(user.id, ids));
+  return await db.delete(user).where(inArray(user.id, ids))
 }
 
-export async function updateUserTwilioPhone(userId: string, twilioPhoneNumber: string | null) {
+export async function updateUserTwilioPhone(
+  userId: string,
+  twilioPhoneNumber: string | null,
+) {
   const result = await db
     .update(user)
     .set({ twilioPhoneNumber })
     .where(eq(user.id, userId))
-    .returning();
-  return result[0] || null;
+    .returning()
+  return result[0] || null
 }
 
 export async function getUserCosts() {
@@ -76,39 +81,47 @@ export async function getUserCosts() {
     .select({
       id: user.id,
       email: user.email,
-      cost: sql<number>`COALESCE(SUM(CAST(${openaiLogs.cost} AS NUMERIC)), 0)`.as('cost')
+      cost: sql<number>`COALESCE(SUM(CAST(${openaiLogs.cost} AS NUMERIC)), 0)`.as(
+        'cost',
+      ),
     })
     .from(user)
     .leftJoin(openaiLogs, eq(user.id, openaiLogs.userId))
     .groupBy(user.id, user.email)
-    .orderBy(user.email);
+    .orderBy(user.email)
 }
 
 export async function updateLogCost(
   logId: number,
   userId: string,
-  durationSeconds: number
+  durationSeconds: number,
 ) {
- 
-  const durationMinutes = durationSeconds / 60;
-  const actualCost = durationMinutes * 0.06;
+  const durationMinutes = durationSeconds / 60
+  const actualCost = durationMinutes * 0.06
 
   const result = await db
     .update(openaiLogs)
     .set({
-      totalTokens: Math.round(durationSeconds), 
+      totalTokens: Math.round(durationSeconds),
       cost: actualCost.toFixed(6),
-      status: "completed"
+      status: 'completed',
     })
-    .where(
-      and(
-        eq(openaiLogs.id, logId),
-        eq(openaiLogs.userId, userId)
-      )
-    )
-    .returning();
+    .where(and(eq(openaiLogs.id, logId), eq(openaiLogs.userId, userId)))
+    .returning()
 
-  return result[0] || null;
+  return result[0] || null
+}
+
+export async function clearMonthlyOpenAILogs() {
+  const now = new Date()
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+
+  const result = await db
+    .delete(openaiLogs)
+    .where(lt(openaiLogs.createdAt, startOfMonth))
+    .returning()
+
+  return result.length
 }
 
 export async function promoteToAdmin(email: string) {
@@ -117,9 +130,78 @@ export async function promoteToAdmin(email: string) {
     .set({ role: 'admin' })
     .where(eq(user.email, email))
     .returning()
-  
+
   return result[0] || null
 }
+// ===================== Nutshell Lead Tracking =====================
+
+export async function upsertNutshellLead(lead: {
+  nutshellLeadId: number
+  description?: string | null
+  status?: number
+  value?: string | null
+  currency?: string | null
+  assigneeEmail?: string | null
+  createdByUserId?: string | null
+  nutshellCreatedAt?: Date | null
+  closedAt?: Date | null
+}) {
+  const [result] = await db
+    .insert(nutshellLeads)
+    .values({
+      nutshellLeadId: lead.nutshellLeadId,
+      description: lead.description ?? null,
+      status: lead.status ?? 0,
+      value: lead.value ?? null,
+      currency: lead.currency ?? 'USD',
+      assigneeEmail: lead.assigneeEmail ?? null,
+      createdByUserId: lead.createdByUserId ?? null,
+      nutshellCreatedAt: lead.nutshellCreatedAt ?? null,
+      closedAt: lead.closedAt ?? null,
+      syncedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: nutshellLeads.nutshellLeadId,
+      set: {
+        description: lead.description ?? undefined,
+        status: lead.status ?? undefined,
+        value: lead.value ?? undefined,
+        currency: lead.currency ?? undefined,
+        assigneeEmail: lead.assigneeEmail ?? undefined,
+        closedAt: lead.closedAt ?? undefined,
+        syncedAt: new Date(),
+      },
+    })
+    .returning()
+  return result
+}
+
+export async function getNutshellLeadStats() {
+  const leads = await db
+    .select()
+    .from(nutshellLeads)
+    .orderBy(sql`${nutshellLeads.nutshellCreatedAt} DESC NULLS LAST`)
+
+  const totalLeads = leads.length
+  const wonLeads = leads.filter((l) => l.status === 1)
+  const openLeads = leads.filter((l) => l.status === 0)
+  const lostLeads = leads.filter((l) => l.status === 2)
+
+  const totalWonValue = wonLeads.reduce((sum, l) => {
+    const val = l.value ? Number(l.value) : 0
+    return sum + (Number.isFinite(val) ? val : 0)
+  }, 0)
+
+  return {
+    leads,
+    totalLeads,
+    wonCount: wonLeads.length,
+    openCount: openLeads.length,
+    lostCount: lostLeads.length,
+    totalWonValue,
+  }
+}
+
 /*
 // Fetcher functions for React Query
 export async function getIssue(id: number) {
