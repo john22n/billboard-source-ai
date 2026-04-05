@@ -104,8 +104,24 @@ export function useBillboardFormExtraction() {
       if (finalObject) {
         const data = finalObject as Partial<BillboardFormData>
 
-        // ✅ Final merge — ensures any fields missed by streaming are applied
-        updateFromAI(data)
+        // ✅ Final merge — only push fields that actually differ from the store
+        const storeFields = useFormStore.getState().fields
+        const changed: Partial<BillboardFormData> = {}
+        for (const [key, value] of Object.entries(data)) {
+          if (key === 'confidence') continue
+          if (value === null || value === undefined) continue
+          const current = storeFields[key as keyof BillboardFormData]
+          if (
+            current !== null &&
+            current !== undefined &&
+            JSON.stringify(current) === JSON.stringify(value)
+          )
+            continue
+          changed[key as keyof BillboardFormData] = value as never
+        }
+        if (Object.keys(changed).length > 0) {
+          updateFromAI(changed)
+        }
 
         setCompletedFormData(data)
         setExtractionCount((prev) => prev + 1)
@@ -117,28 +133,38 @@ export function useBillboardFormExtraction() {
   })
 
   // ✅ Apply streaming partial data to the form as it arrives (throttled)
+  // Only calls updateFromAI when a streamed value differs from the current store value.
   useEffect(() => {
     if (!isLoading || !object || isCleared) return
 
-    // Collect only newly completed fields from the streaming partial
     const partial = object as Partial<BillboardFormData>
-    const newFields: Partial<BillboardFormData> = {}
+    const storeFields = useFormStore.getState().fields
     let hasNew = false
 
     for (const [key, value] of Object.entries(partial)) {
       if (key === 'confidence') continue
       if (value === null || value === undefined) continue
-      // Skip empty strings/arrays (field still streaming)
       if (typeof value === 'string' && value.trim() === '') continue
       if (Array.isArray(value) && value.length === 0) continue
 
-      // Only apply if the value changed from what we already applied
+      // Already applied this exact value from this stream
       const prev = appliedStreamFieldsRef.current[key]
       if (prev !== undefined && JSON.stringify(prev) === JSON.stringify(value))
         continue
 
-      newFields[key as keyof BillboardFormData] = value as never
+      // Store already has this exact value — mark applied and skip
+      const current = storeFields[key as keyof BillboardFormData]
+      if (
+        current !== null &&
+        current !== undefined &&
+        JSON.stringify(current) === JSON.stringify(value)
+      ) {
+        appliedStreamFieldsRef.current[key] = value
+        continue
+      }
+
       hasNew = true
+      break
     }
 
     if (!hasNew) return
@@ -149,8 +175,8 @@ export function useBillboardFormExtraction() {
     streamThrottleRef.current = setTimeout(() => {
       streamThrottleRef.current = null
 
-      // Re-check for new fields at the time the throttle fires
       const currentPartial = object as Partial<BillboardFormData>
+      const currentStoreFields = useFormStore.getState().fields
       const fieldsToApply: Partial<BillboardFormData> = {}
 
       for (const [key, value] of Object.entries(currentPartial)) {
@@ -165,6 +191,17 @@ export function useBillboardFormExtraction() {
           JSON.stringify(prev) === JSON.stringify(value)
         )
           continue
+
+        // Skip if store already has this exact value
+        const current = currentStoreFields[key as keyof BillboardFormData]
+        if (
+          current !== null &&
+          current !== undefined &&
+          JSON.stringify(current) === JSON.stringify(value)
+        ) {
+          appliedStreamFieldsRef.current[key] = value
+          continue
+        }
 
         fieldsToApply[key as keyof BillboardFormData] = value as never
         appliedStreamFieldsRef.current[key] = value
@@ -184,10 +221,27 @@ export function useBillboardFormExtraction() {
       if (object) {
         console.log('🏁 Stream completed (backup detection):', object)
 
-        // ✅ Use the store's smart merge
-        updateFromAI(object as Partial<BillboardFormData>)
+        // ✅ Only push fields that actually differ from the store
+        const data = object as Partial<BillboardFormData>
+        const storeFields = useFormStore.getState().fields
+        const changed: Partial<BillboardFormData> = {}
+        for (const [key, value] of Object.entries(data)) {
+          if (key === 'confidence') continue
+          if (value === null || value === undefined) continue
+          const current = storeFields[key as keyof BillboardFormData]
+          if (
+            current !== null &&
+            current !== undefined &&
+            JSON.stringify(current) === JSON.stringify(value)
+          )
+            continue
+          changed[key as keyof BillboardFormData] = value as never
+        }
+        if (Object.keys(changed).length > 0) {
+          updateFromAI(changed)
+        }
 
-        setCompletedFormData(object as Partial<BillboardFormData>)
+        setCompletedFormData(data)
         setExtractionCount((prev) => prev + 1)
       }
       // Reset streaming tracker
