@@ -82,6 +82,38 @@ export function useBillboardFormExtraction() {
   const updateFromAI = useFormStore((s) => s.updateFromAI)
   const resetStore = useFormStore((s) => s.reset)
 
+  // Shared helper: collect fields from a partial that differ from the current store
+  const collectChangedFields = useCallback(
+    (partial: Partial<BillboardFormData>): Partial<BillboardFormData> => {
+      const storeFields = useFormStore.getState().fields
+      const changed: Partial<BillboardFormData> = {}
+      for (const [key, value] of Object.entries(partial)) {
+        if (key === 'confidence' || value === null || value === undefined)
+          continue
+        const current = storeFields[key as keyof BillboardFormData]
+        if (current === value) continue
+        if (
+          current !== null &&
+          current !== undefined &&
+          typeof current === typeof value
+        ) {
+          // Flat array comparison (sendOver, campaignLength)
+          if (
+            Array.isArray(current) &&
+            Array.isArray(value) &&
+            current.length === value.length &&
+            current.every((v, i) => v === (value as unknown[])[i])
+          )
+            continue
+          // String/boolean identity already caught by === above
+        }
+        changed[key as keyof BillboardFormData] = value as never
+      }
+      return changed
+    },
+    [],
+  )
+
   const { object, submit, isLoading, error, stop } = useObject({
     api: '/api/extract-billboard-fields',
     schema: billboardLeadSchema,
@@ -104,21 +136,7 @@ export function useBillboardFormExtraction() {
       if (finalObject) {
         const data = finalObject as Partial<BillboardFormData>
 
-        // ✅ Final merge — only push fields that actually differ from the store
-        const storeFields = useFormStore.getState().fields
-        const changed: Partial<BillboardFormData> = {}
-        for (const [key, value] of Object.entries(data)) {
-          if (key === 'confidence') continue
-          if (value === null || value === undefined) continue
-          const current = storeFields[key as keyof BillboardFormData]
-          if (
-            current !== null &&
-            current !== undefined &&
-            JSON.stringify(current) === JSON.stringify(value)
-          )
-            continue
-          changed[key as keyof BillboardFormData] = value as never
-        }
+        const changed = collectChangedFields(data)
         if (Object.keys(changed).length > 0) {
           updateFromAI(changed)
         }
@@ -138,36 +156,17 @@ export function useBillboardFormExtraction() {
     if (!isLoading || !object || isCleared) return
 
     const partial = object as Partial<BillboardFormData>
-    const storeFields = useFormStore.getState().fields
-    let hasNew = false
 
-    for (const [key, value] of Object.entries(partial)) {
-      if (key === 'confidence') continue
-      if (value === null || value === undefined) continue
-      if (typeof value === 'string' && value.trim() === '') continue
-      if (Array.isArray(value) && value.length === 0) continue
-
-      // Already applied this exact value from this stream
+    // Quick check: anything new since last applied batch?
+    const changed = collectChangedFields(partial)
+    // Also filter out fields already applied in this stream session
+    const newKeys = Object.keys(changed).filter((key) => {
       const prev = appliedStreamFieldsRef.current[key]
-      if (prev !== undefined && JSON.stringify(prev) === JSON.stringify(value))
-        continue
-
-      // Store already has this exact value — mark applied and skip
-      const current = storeFields[key as keyof BillboardFormData]
-      if (
-        current !== null &&
-        current !== undefined &&
-        JSON.stringify(current) === JSON.stringify(value)
-      ) {
-        appliedStreamFieldsRef.current[key] = value
-        continue
-      }
-
-      hasNew = true
-      break
-    }
-
-    if (!hasNew) return
+      return (
+        prev === undefined || prev !== changed[key as keyof BillboardFormData]
+      )
+    })
+    if (newKeys.length === 0) return
 
     // Throttle store updates to max every 300ms during streaming
     if (streamThrottleRef.current) return
@@ -175,34 +174,14 @@ export function useBillboardFormExtraction() {
     streamThrottleRef.current = setTimeout(() => {
       streamThrottleRef.current = null
 
-      const currentPartial = object as Partial<BillboardFormData>
-      const currentStoreFields = useFormStore.getState().fields
+      const currentChanged = collectChangedFields(
+        object as Partial<BillboardFormData>,
+      )
       const fieldsToApply: Partial<BillboardFormData> = {}
 
-      for (const [key, value] of Object.entries(currentPartial)) {
-        if (key === 'confidence') continue
-        if (value === null || value === undefined) continue
-        if (typeof value === 'string' && value.trim() === '') continue
-        if (Array.isArray(value) && value.length === 0) continue
-
+      for (const [key, value] of Object.entries(currentChanged)) {
         const prev = appliedStreamFieldsRef.current[key]
-        if (
-          prev !== undefined &&
-          JSON.stringify(prev) === JSON.stringify(value)
-        )
-          continue
-
-        // Skip if store already has this exact value
-        const current = currentStoreFields[key as keyof BillboardFormData]
-        if (
-          current !== null &&
-          current !== undefined &&
-          JSON.stringify(current) === JSON.stringify(value)
-        ) {
-          appliedStreamFieldsRef.current[key] = value
-          continue
-        }
-
+        if (prev !== undefined && prev === value) continue
         fieldsToApply[key as keyof BillboardFormData] = value as never
         appliedStreamFieldsRef.current[key] = value
       }
@@ -211,32 +190,17 @@ export function useBillboardFormExtraction() {
         updateFromAI(fieldsToApply)
       }
     }, 300)
-  }, [isLoading, object, isCleared, updateFromAI])
+  }, [isLoading, object, isCleared, updateFromAI, collectChangedFields])
 
   // Backup: Detect when loading completes and capture final object
   // This fires if onFinish doesn't work properly
   useEffect(() => {
     if (prevIsLoadingRef.current && !isLoading) {
-      // Transition from loading → not loading
       if (object) {
         console.log('🏁 Stream completed (backup detection):', object)
 
-        // ✅ Only push fields that actually differ from the store
         const data = object as Partial<BillboardFormData>
-        const storeFields = useFormStore.getState().fields
-        const changed: Partial<BillboardFormData> = {}
-        for (const [key, value] of Object.entries(data)) {
-          if (key === 'confidence') continue
-          if (value === null || value === undefined) continue
-          const current = storeFields[key as keyof BillboardFormData]
-          if (
-            current !== null &&
-            current !== undefined &&
-            JSON.stringify(current) === JSON.stringify(value)
-          )
-            continue
-          changed[key as keyof BillboardFormData] = value as never
-        }
+        const changed = collectChangedFields(data)
         if (Object.keys(changed).length > 0) {
           updateFromAI(changed)
         }
@@ -244,11 +208,10 @@ export function useBillboardFormExtraction() {
         setCompletedFormData(data)
         setExtractionCount((prev) => prev + 1)
       }
-      // Reset streaming tracker
       appliedStreamFieldsRef.current = {}
     }
     prevIsLoadingRef.current = isLoading
-  }, [isLoading, object, updateFromAI])
+  }, [isLoading, object, updateFromAI, collectChangedFields])
 
   const extractFields = useCallback(
     (newTranscript: string) => {

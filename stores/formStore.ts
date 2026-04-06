@@ -374,18 +374,9 @@ export const useFormStore = create<FormStore>()((set, get) => ({
 
       const currentValue = fields[fieldKey]
 
-      // ✅ Check if field is locked
+      // ✅ Check if field is locked — only update on meaningfully different info
       if (lockedFields.has(key)) {
-        // Only update if the value is strictly different (not just an expansion/rewording)
-        const currentNorm =
-          typeof currentValue === 'string'
-            ? normalizeString(currentValue)
-            : JSON.stringify(currentValue)
-        const newNorm =
-          typeof value === 'string'
-            ? normalizeString(value)
-            : JSON.stringify(value)
-        if (currentNorm !== newNorm) {
+        if (isDifferentValue(currentValue, value)) {
           console.log(
             `🔄 Updating locked field ${key}: caller provided different info`,
           )
