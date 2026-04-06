@@ -471,7 +471,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 5. Find "NEW BSI Pipeline" and determine milestone (stage) based on lead type
+    // 5. Find "NEW BSI Pipeline" and set ALL leads to Qualifying stage
     let stagesetId: number | undefined
     let milestoneId: number | undefined
 
@@ -487,7 +487,6 @@ export async function POST(req: NextRequest) {
       if (pipeline?.id) {
         stagesetId = Number(pipeline.id)
 
-        // Find milestones for this pipeline
         const milestonesResult = await nutshellRequest(
           'findMilestones',
           {},
@@ -498,24 +497,12 @@ export async function POST(req: NextRequest) {
             (m: { stagesetId?: number }) => m.stagesetId === stagesetId,
           )
 
-          // Map lead type to stage name
-          let targetStageName: string | null = null
-          if (
-            data.leadType === 'Availer' ||
-            data.leadType === 'Panel Requester'
-          ) {
-            targetStageName = 'Proposal'
-          } else if (data.leadType === 'Tire Kicker') {
-            targetStageName = 'Qualify'
-          }
-
-          if (targetStageName) {
-            const milestone = pipelineMilestones.find(
-              (m: { name?: string }) => m.name === targetStageName,
-            )
-            if (milestone?.id) {
-              milestoneId = Number(milestone.id)
-            }
+          // ✅ CHANGE 1: All leads go to Qualifying regardless of lead type
+          const milestone = pipelineMilestones.find(
+            (m: { name?: string }) => m.name === 'Qualify',
+          )
+          if (milestone?.id) {
+            milestoneId = Number(milestone.id)
           }
         }
       }
@@ -634,9 +621,9 @@ export async function POST(req: NextRequest) {
     }
 
     // 9. Create the lead
-    const leadDescription = data.businessName?.trim()
-      ? `${data.businessName.trim()} - ${data.entityName?.trim() || data.name?.trim() || 'Lead'}`
-      : data.entityName?.trim() || data.name?.trim() || 'Billboard Lead'
+    // ✅ CHANGE 2: Lead name is just the entity/business name — no business type prefix
+    const leadDescription =
+      data.entityName?.trim() || data.name?.trim() || 'Billboard Lead'
 
     const leadPayload: Record<string, unknown> = {
       description: leadDescription,

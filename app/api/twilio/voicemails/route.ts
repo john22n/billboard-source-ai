@@ -67,7 +67,9 @@ export async function GET() {
     }
 
     const recordingsData = await recordingsResponse.json()
-    const recordings: TwilioRecording[] = recordingsData.recordings || []
+    const recordings: TwilioRecording[] = (recordingsData.recordings || []).filter(
+      (r: TwilioRecording) => r.source === 'RecordVerb'
+    )
 
     // For each recording, fetch the call details (to get "From") and transcription
     const voicemails: Voicemail[] = await Promise.all(
