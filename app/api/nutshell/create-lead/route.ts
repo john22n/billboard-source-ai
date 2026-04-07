@@ -269,13 +269,11 @@ export async function POST(req: NextRequest) {
 
       let contactId: number | null = null
 
-      // Match by email only — names are not unique identifiers
+      // Match by email ONLY — name is not a unique identifier
       if (validEmail) {
         const searchResult = await nutshellRequest(
           'searchByEmail',
-          {
-            emailAddressString: validEmail,
-          },
+          { emailAddressString: validEmail },
           credentials,
         )
         if (searchResult.result?.contacts?.[0]?.id) {
@@ -283,32 +281,11 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // If not found by email, search by name
-      if (!contactId && contact.name?.trim()) {
-        const searchResult = await nutshellRequest(
-          'searchUniversal',
-          {
-            string: contact.name.trim(),
-          },
-          credentials,
-        )
-        const foundContact = searchResult.result?.contacts?.find(
-          (c: { name?: string }) =>
-            c.name?.toLowerCase() === contact.name?.trim().toLowerCase(),
-        )
-        if (foundContact?.id) {
-          contactId = Number(foundContact.id)
-        }
-      }
-
-      // If contact exists and we have an account, link them
-      if (contactId && linkAccountId && linkAccountId > 0) {
-        // Get the contact to check current accounts and get rev
+      // If found by email, update their info with fresh form data
+      if (contactId) {
         const getContactResult = await nutshellRequest(
           'getContact',
-          {
-            contactId,
-          },
+          { contactId },
           credentials,
         )
 
@@ -318,57 +295,64 @@ export async function POST(req: NextRequest) {
             (a: { id?: number }) => Number(a.id) === linkAccountId,
           )
 
-          // Only update if not already linked
-          if (!alreadyLinked) {
-            const updatedAccounts = [
-              ...currentAccounts.map((a: { id?: number }) => ({ id: a.id })),
-              { id: linkAccountId },
-            ]
-            await nutshellRequest(
-              'editContact',
-              {
-                contactId,
-                rev: getContactResult.result.rev,
-                contact: {
-                  accounts: updatedAccounts,
-                },
-              },
-              credentials,
-            )
+          const updatedAccounts = alreadyLinked
+            ? currentAccounts.map((a: { id?: number }) => ({ id: a.id }))
+            : [
+                ...currentAccounts.map((a: { id?: number }) => ({ id: a.id })),
+                ...(linkAccountId && linkAccountId > 0
+                  ? [{ id: linkAccountId }]
+                  : []),
+              ]
+
+          // Build update payload with fresh form data
+          const updatePayload: Record<string, unknown> = {
+            accounts: updatedAccounts,
           }
+          if (contact.name?.trim()) updatePayload.name = contact.name.trim()
+          if (contact.position?.trim())
+            updatePayload.description = contact.position.trim()
+          if (contact.phone?.trim())
+            updatePayload.phone = [contact.phone.trim()]
+          if (validEmail) updatePayload.email = [validEmail]
+
+          await nutshellRequest(
+            'editContact',
+            {
+              contactId,
+              rev: getContactResult.result.rev,
+              contact: updatePayload,
+            },
+            credentials,
+          )
         }
+
+        return contactId
       }
 
-      // No email match found — always create a new contact
-      if (!contactId) {
-        const contactPayload: Record<string, unknown> = {}
-        if (contact.name?.trim()) contactPayload.name = contact.name.trim()
-        if (contact.position?.trim())
-          contactPayload.description = contact.position.trim()
-        if (contact.phone?.trim()) contactPayload.phone = [contact.phone.trim()]
-        if (validEmail) contactPayload.email = [validEmail]
-
-        // Link to account when creating
-        if (linkAccountId && linkAccountId > 0) {
-          contactPayload.accounts = [{ id: linkAccountId }]
-        }
-
-        const contactResult = await nutshellRequest(
-          'newContact',
-          {
-            contact: contactPayload,
-          },
-          credentials,
-        )
-
-        if (contactResult.result?.id) {
-          contactId = Number(contactResult.result.id)
-        } else if (contactResult.error) {
-          console.error('Failed to create contact:', contactResult.error)
-        }
+      // No email match found — create a new contact (no name fallback)
+      const contactPayload: Record<string, unknown> = {}
+      if (contact.name?.trim()) contactPayload.name = contact.name.trim()
+      if (contact.position?.trim())
+        contactPayload.description = contact.position.trim()
+      if (contact.phone?.trim()) contactPayload.phone = [contact.phone.trim()]
+      if (validEmail) contactPayload.email = [validEmail]
+      if (linkAccountId && linkAccountId > 0) {
+        contactPayload.accounts = [{ id: linkAccountId }]
       }
 
-      return contactId
+      const contactResult = await nutshellRequest(
+        'newContact',
+        { contact: contactPayload },
+        credentials,
+      )
+
+      if (contactResult.result?.id) {
+        return Number(contactResult.result.id)
+      } else if (contactResult.error) {
+        console.error('Failed to create contact:', contactResult.error)
+      }
+
+      return null
     }
 
     // Build list of all contacts (primary + additional)
@@ -471,7 +455,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 5. Find "NEW BSI Pipeline" and determine milestone (stage) based on lead type
+    // 5. Find "NEW BSI Pipeline" and set ALL leads to Qualifying stage
     let stagesetId: number | undefined
     let milestoneId: number | undefined
 
@@ -487,7 +471,6 @@ export async function POST(req: NextRequest) {
       if (pipeline?.id) {
         stagesetId = Number(pipeline.id)
 
-        // Find milestones for this pipeline
         const milestonesResult = await nutshellRequest(
           'findMilestones',
           {},
@@ -498,24 +481,11 @@ export async function POST(req: NextRequest) {
             (m: { stagesetId?: number }) => m.stagesetId === stagesetId,
           )
 
-          // Map lead type to stage name
-          let targetStageName: string | null = null
-          if (
-            data.leadType === 'Availer' ||
-            data.leadType === 'Panel Requester'
-          ) {
-            targetStageName = 'Proposal'
-          } else if (data.leadType === 'Tire Kicker') {
-            targetStageName = 'Qualify'
-          }
-
-          if (targetStageName) {
-            const milestone = pipelineMilestones.find(
-              (m: { name?: string }) => m.name === targetStageName,
-            )
-            if (milestone?.id) {
-              milestoneId = Number(milestone.id)
-            }
+          const milestone = pipelineMilestones.find(
+            (m: { name?: string }) => m.name === 'Qualify',
+          )
+          if (milestone?.id) {
+            milestoneId = Number(milestone.id)
           }
         }
       }
@@ -634,9 +604,8 @@ export async function POST(req: NextRequest) {
     }
 
     // 9. Create the lead
-    const leadDescription = data.businessName?.trim()
-      ? `${data.businessName.trim()} - ${data.entityName?.trim() || data.name?.trim() || 'Lead'}`
-      : data.entityName?.trim() || data.name?.trim() || 'Billboard Lead'
+    const leadDescription =
+      data.entityName?.trim() || data.name?.trim() || 'Billboard Lead'
 
     const leadPayload: Record<string, unknown> = {
       description: leadDescription,
