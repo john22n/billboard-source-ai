@@ -90,6 +90,28 @@ async function nutshellRequest(
   return response.json()
 }
 
+// Retry wrapper — retries up to `retries` times with exponential backoff
+async function nutshellRequestWithRetry(
+  method: string,
+  params: Record<string, unknown>,
+  credentials: string,
+  retries = 2,
+) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const result = await nutshellRequest(method, params, credentials)
+      if (!result.error) return result
+      // If Nutshell returned a JSON error (not a network failure), don't retry
+      if (attempt === retries) return result
+    } catch (err) {
+      if (attempt === retries) throw err
+      // Wait 1s on first retry, 2s on second
+      await new Promise((res) => setTimeout(res, 1000 * (attempt + 1)))
+      console.warn(`Retrying ${method} (attempt ${attempt + 1})...`)
+    }
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const session = await getSession()
@@ -557,7 +579,7 @@ export async function POST(req: NextRequest) {
       customFields['Notes:'] = data.notes
     }
 
-    // 7. Build note for timeline
+    // 7. Build note body separately — NOT attached to lead payload
     const noteParts: string[] = []
 
     if (data.accomplishDetails) {
@@ -603,7 +625,7 @@ export async function POST(req: NextRequest) {
       console.error('Failed to get/create source:', sourceResult.error)
     }
 
-    // 9. Create the lead
+    // 9. Create the lead (no note — posted separately below)
     const leadDescription =
       data.entityName?.trim() || data.name?.trim() || 'Billboard Lead'
 
@@ -642,22 +664,21 @@ export async function POST(req: NextRequest) {
       leadPayload.customFields = customFields
     }
 
-    if (noteParts.length > 0) {
-      leadPayload.note = noteParts.join('\n')
-    }
+    // Note is intentionally excluded here — posted via newNote after lead creation
 
     console.log(
       'Creating Nutshell lead with payload:',
       JSON.stringify(leadPayload, null, 2),
     )
 
-    const leadResult = await nutshellRequest(
+    // Use retry wrapper for newLead to handle transient Nutshell timeouts
+    const leadResult = await nutshellRequestWithRetry(
       'newLead',
       { lead: leadPayload },
       credentials,
     )
 
-    if (leadResult.error) {
+    if (leadResult?.error) {
       console.error('Nutshell newLead error:', leadResult.error)
       return NextResponse.json(
         {
@@ -668,7 +689,24 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const leadId = leadResult.result?.id
+    const leadId = leadResult?.result?.id
+
+    // 10. Post note separately after lead is created
+    if (leadId && noteParts.length > 0) {
+      try {
+        await nutshellRequest(
+          'newNote',
+          {
+            entity: { id: leadId, entityType: 'Leads' },
+            note: noteParts.join('\n'),
+          },
+          credentials,
+        )
+      } catch (noteError) {
+        // Don't fail the request if note fails — lead was already created
+        console.error('Failed to post note to Nutshell lead:', noteError)
+      }
+    }
 
     // Save lead to our DB for tracking
     if (leadId) {
