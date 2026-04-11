@@ -8,8 +8,6 @@ const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!
 const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!
 const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!
 
-const client = twilio(ACCOUNT_SID, AUTH_TOKEN)
-
 function emailToDisplayName(email: string): string {
   const local = email.split('@')[0]
   const parts = local.split('.')
@@ -36,6 +34,8 @@ export async function GET() {
         { headers: { 'Cache-Control': 'private, max-age=15, stale-while-revalidate=30' } },
       )
     }
+
+    const client = twilio(ACCOUNT_SID, AUTH_TOKEN)
 
     const twilioWorkers = await client.taskrouter.v1
       .workspaces(WORKSPACE_SID)
