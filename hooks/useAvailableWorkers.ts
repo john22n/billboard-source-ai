@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef } from 'react'
 
 export interface AvailableWorker {
-  sid: string
   displayName: string
 }
 
@@ -26,7 +25,10 @@ export function useAvailableWorkers(): UseAvailableWorkersResult {
     const controller = new AbortController()
 
     const fetchWorkers = async () => {
-      if (authFailedRef.current) return
+      if (authFailedRef.current) {
+        setIsLoading(false)
+        return
+      }
 
       try {
         const res = await fetch('/api/workers/available', { signal: controller.signal })

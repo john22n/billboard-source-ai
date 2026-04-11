@@ -4,9 +4,9 @@ import { user } from '@/db/schema'
 import { inArray } from 'drizzle-orm'
 import { getSessionWithoutRefresh } from '@/lib/auth'
 
-const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!
-const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!
-const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!
+const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID
+const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN
+const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID
 
 function emailToDisplayName(email: string): string {
   const local = email.split('@')[0]
@@ -31,11 +31,11 @@ export async function GET() {
       console.error('❌ Missing required Twilio env vars for /api/workers/available')
       return Response.json(
         { workers: [] },
-        { headers: { 'Cache-Control': 'private, max-age=15, stale-while-revalidate=30' } },
+        { headers: { 'Cache-Control': 'no-store' } },
       )
     }
 
-    const client = twilio(ACCOUNT_SID, AUTH_TOKEN)
+    const client = twilio(ACCOUNT_SID as string, AUTH_TOKEN as string)
 
     const twilioWorkers = await client.taskrouter.v1
       .workspaces(WORKSPACE_SID)
@@ -44,7 +44,7 @@ export async function GET() {
     if (twilioWorkers.length === 0) {
       return Response.json(
         { workers: [] },
-        { headers: { 'Cache-Control': 'private, max-age=15, stale-while-revalidate=30' } },
+        { headers: { 'Cache-Control': 'no-store' } },
       )
     }
 
@@ -62,12 +62,12 @@ export async function GET() {
     const workers = twilioWorkers.map((w) => {
       const email = sidToEmail.get(w.sid)
       const displayName = email ? emailToDisplayName(email) : w.friendlyName
-      return { sid: w.sid, displayName }
+      return { displayName }
     })
 
     return Response.json(
       { workers },
-      { headers: { 'Cache-Control': 'private, max-age=15, stale-while-revalidate=30' } },
+      { headers: { 'Cache-Control': 'no-store' } },
     )
   } catch (error) {
     console.error('❌ Available workers GET error:', error)
