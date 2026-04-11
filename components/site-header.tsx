@@ -2,6 +2,7 @@
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { WorkerStatusToggle } from "@/components/WorkerStatusToggle"
+import { OnPhonesIndicator } from "@/components/OnPhonesIndicator"
 import { BrainCircuit } from "lucide-react"
 
 export function SiteHeader() {
@@ -16,6 +17,7 @@ export function SiteHeader() {
         <h1 className="text-base font-medium">
           <BrainCircuit className="size-4" />
         </h1>
+        <OnPhonesIndicator />
         <div className="ml-auto flex items-center gap-1 sm:gap-2">
           <span className="hidden sm:inline text-sm text-muted-foreground">Available to take calls?</span>
           <WorkerStatusToggle />
