@@ -59,11 +59,12 @@ export async function GET() {
       matchedUsers.map((u) => [u.taskRouterWorkerSid, u.email]),
     )
 
-    const workers = twilioWorkers.map((w) => {
-      const email = sidToEmail.get(w.sid)
-      const displayName = email ? emailToDisplayName(email) : w.friendlyName
-      return { displayName }
-    })
+    const workers = twilioWorkers
+      .filter((w) => sidToEmail.has(w.sid))
+      .map((w) => {
+        const email = sidToEmail.get(w.sid)!
+        return { displayName: emailToDisplayName(email) }
+      })
 
     return Response.json(
       { workers },
