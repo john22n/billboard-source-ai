@@ -2,6 +2,7 @@ import { redirect } from "next/navigation"
 import { Suspense } from "react"
 import { AppSidebar } from "@/components/app-sidebar"
 import { SiteHeader } from "@/components/site-header"
+import { SidebarOverlay } from "@/components/SidebarOverlay"
 import {
   SidebarInset,
   SidebarProvider,
@@ -47,8 +48,9 @@ export default async function Page() {
         } as React.CSSProperties
       }
     >
+      <SidebarOverlay />
       <AppSidebar
-        variant="inset"
+        variant="sidebar"
         user={{
           name: session.email.split('@')[0],
           email: session.email,
