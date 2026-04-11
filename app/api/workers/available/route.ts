@@ -8,6 +8,8 @@ const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!
 const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!
 const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!
 
+const client = twilio(ACCOUNT_SID, AUTH_TOKEN)
+
 function emailToDisplayName(email: string): string {
   const local = email.split('@')[0]
   const parts = local.split('.')
@@ -27,11 +29,13 @@ export async function GET() {
       return Response.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    if (!WORKSPACE_SID) {
-      return Response.json({ workers: [] })
+    if (!ACCOUNT_SID || !AUTH_TOKEN || !WORKSPACE_SID) {
+      console.error('❌ Missing required Twilio env vars for /api/workers/available')
+      return Response.json(
+        { workers: [] },
+        { headers: { 'Cache-Control': 'private, max-age=15, stale-while-revalidate=30' } },
+      )
     }
-
-    const client = twilio(ACCOUNT_SID, AUTH_TOKEN)
 
     const twilioWorkers = await client.taskrouter.v1
       .workspaces(WORKSPACE_SID)
