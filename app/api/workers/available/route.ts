@@ -59,8 +59,10 @@ export async function GET() {
       matchedUsers.map((u) => [u.taskRouterWorkerSid, u.email]),
     )
 
+    const currentUserWorkerSid = matchedUsers.find((u) => u.email === session.email)?.taskRouterWorkerSid
+
     const workers = twilioWorkers
-      .filter((w) => sidToEmail.has(w.sid) && w.sid !== session.taskRouterWorkerSid)
+      .filter((w) => sidToEmail.has(w.sid) && w.sid !== currentUserWorkerSid)
       .map((w) => {
         const email = sidToEmail.get(w.sid)!
         return { displayName: emailToDisplayName(email) }
