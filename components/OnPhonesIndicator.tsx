@@ -9,9 +9,9 @@ export function OnPhonesIndicator() {
 
   if (isLoading) {
     return (
-      <div className="hidden sm:flex items-center gap-2 rounded-full border border-primary/20 px-3 py-1 animate-pulse">
-        <div className="size-3.5 rounded-full bg-primary/20" />
-        <div className="h-3 w-28 rounded-full bg-primary/10" />
+      <div className="hidden sm:flex items-center gap-2 rounded-full border border-border px-3 py-1 animate-pulse">
+        <div className="size-3.5 rounded-full bg-muted-foreground/20" />
+        <div className="h-3 w-28 rounded-full bg-muted-foreground/10" />
       </div>
     )
   }
@@ -21,12 +21,22 @@ export function OnPhonesIndicator() {
   const active = count > 0
 
   return (
-    <div className="hidden sm:flex items-center gap-2 rounded-full border border-primary/20 px-3 py-1 text-sm transition-all duration-300">
+    <div className="hidden sm:flex items-center gap-2 rounded-full border border-border px-3 py-1 text-sm">
       <Phone
-        className={cn('size-3.5 text-primary shrink-0', active && 'animate-pulse')}
+        className={cn(
+          'size-3.5 shrink-0',
+          active ? 'text-primary animate-pulse' : 'text-muted-foreground',
+        )}
       />
       <span className="flex items-center gap-1.5 min-w-0">
-        <span className="font-semibold text-primary tabular-nums">{count}</span>
+        <span
+          className={cn(
+            'font-semibold tabular-nums',
+            active ? 'text-primary' : 'text-muted-foreground',
+          )}
+        >
+          {count}
+        </span>
         <span className="text-muted-foreground select-none">·</span>
         <span className={cn('truncate', active ? 'text-foreground' : 'text-muted-foreground')}>
           {active ? names.join(', ') : 'No one on phones'}
