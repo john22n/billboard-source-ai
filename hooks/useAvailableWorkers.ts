@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 
 interface UseAvailableWorkersResult {
   count: number
+  names: string[]
   isLoading: boolean
   error: string | null
 }
@@ -12,6 +13,7 @@ const POLL_INTERVAL = 30_000 // 30 seconds
 
 export function useAvailableWorkers(): UseAvailableWorkersResult {
   const [count, setCount] = useState(0)
+  const [names, setNames] = useState<string[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const authFailedRef = useRef(false)
@@ -41,8 +43,9 @@ export function useAvailableWorkers(): UseAvailableWorkersResult {
           throw new Error((data as { error?: string }).error ?? 'Failed to fetch available workers')
         }
 
-        const data = (await res.json()) as { count: number }
+        const data = (await res.json()) as { count: number; names: string[] }
         setCount(data.count ?? 0)
+        setNames(data.names ?? [])
         setError(null)
       } catch (err) {
         if ((err as Error).name === 'AbortError') return
@@ -62,5 +65,5 @@ export function useAvailableWorkers(): UseAvailableWorkersResult {
     }
   }, [])
 
-  return { count, isLoading, error }
+  return { count, names, isLoading, error }
 }

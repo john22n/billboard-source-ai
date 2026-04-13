@@ -1,12 +1,18 @@
 import twilio from 'twilio'
 import { db } from '@/db'
 import { user } from '@/db/schema'
-import { eq } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import { getSessionWithoutRefresh } from '@/lib/auth'
 
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID
 const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN
 const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID
+
+function firstNameFromEmail(email: string): string {
+  const local = email.split('@')[0]
+  const first = local.split('.')[0]
+  return first.charAt(0).toUpperCase() + first.slice(1).toLowerCase()
+}
 
 export async function GET() {
   try {
@@ -18,7 +24,7 @@ export async function GET() {
     if (!ACCOUNT_SID || !AUTH_TOKEN || !WORKSPACE_SID) {
       console.error('❌ Missing required Twilio env vars for /api/workers/available')
       return Response.json(
-        { count: 0 },
+        { count: 0, names: [] },
         { headers: { 'Cache-Control': 'no-store' } },
       )
     }
@@ -34,12 +40,34 @@ export async function GET() {
       .workspaces(WORKSPACE_SID)
       .workers.list({ activityName: 'Available' })
 
-    const count = twilioWorkers.filter(
+    const otherWorkers = twilioWorkers.filter(
       (w) => w.sid !== currentUser?.taskRouterWorkerSid,
-    ).length
+    )
+
+    if (otherWorkers.length === 0) {
+      return Response.json(
+        { count: 0, names: [] },
+        { headers: { 'Cache-Control': 'no-store' } },
+      )
+    }
+
+    const otherSids = otherWorkers.map((w) => w.sid)
+
+    const matchedUsers = await db
+      .select({ email: user.email, taskRouterWorkerSid: user.taskRouterWorkerSid })
+      .from(user)
+      .where(inArray(user.taskRouterWorkerSid, otherSids))
+
+    const sidToEmail = new Map(
+      matchedUsers.map((u) => [u.taskRouterWorkerSid, u.email]),
+    )
+
+    const names = otherWorkers
+      .filter((w) => sidToEmail.has(w.sid))
+      .map((w) => firstNameFromEmail(sidToEmail.get(w.sid)!))
 
     return Response.json(
-      { count },
+      { count: names.length, names },
       { headers: { 'Cache-Control': 'no-store' } },
     )
   } catch (error) {
