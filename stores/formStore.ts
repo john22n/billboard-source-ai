@@ -239,9 +239,8 @@ export const useFormStore = create<FormStore>()((set, get) => ({
       twilioPhone,
       twilioPhonePreFilled,
     } = get()
-    const newFields = { ...fields }
     const changed = new Set<string>()
-    const newLockedFields = new Set(lockedFields)
+    let needsNewLocks = false
 
     // Helper to normalize phone numbers for comparison (last 10 digits only)
     const normalizePhone = (phone: string | null | undefined): string =>
@@ -295,18 +294,18 @@ export const useFormStore = create<FormStore>()((set, get) => ({
         return false // Same or very similar
       }
 
-      // Array comparison - check if new array has additional items
+      // Array comparison - check both directions (additions AND removals)
       if (Array.isArray(currentVal) && Array.isArray(newVal)) {
+        if (currentVal.length !== newVal.length) return true
         const currentSet = new Set(
           currentVal.map((v) => String(v).toLowerCase()),
         )
         const newSet = new Set(newVal.map((v) => String(v).toLowerCase()))
-
-        // Check if new array has items not in current
+        if (currentSet.size !== newSet.size) return true
         for (const item of newSet) {
           if (!currentSet.has(item)) return true
         }
-        return false // All items already present
+        return false
       }
 
       // Boolean comparison
@@ -332,12 +331,7 @@ export const useFormStore = create<FormStore>()((set, get) => ({
       if (ALWAYS_UPDATE_FIELDS.includes(fieldKey)) {
         if (value !== null && value !== undefined) {
           const currentValue = fields[fieldKey]
-          if (
-            typeof currentValue === 'string' && typeof value === 'string'
-              ? currentValue.trim() !== (value as string).trim()
-              : JSON.stringify(currentValue) !== JSON.stringify(value)
-          ) {
-            ;(newFields as Record<string, unknown>)[key] = value
+          if (isDifferentValue(currentValue, value)) {
             changed.add(key)
           }
         }
@@ -346,7 +340,6 @@ export const useFormStore = create<FormStore>()((set, get) => ({
 
       // ✅ Skip if user has edited this field (user always wins)
       if (userEditedFields.has(key)) {
-        console.log(`🔒 Skipping ${key}: user-edited`)
         continue
       }
 
@@ -377,11 +370,6 @@ export const useFormStore = create<FormStore>()((set, get) => ({
       // ✅ Check if field is locked — only update on meaningfully different info
       if (lockedFields.has(key)) {
         if (isDifferentValue(currentValue, value)) {
-          console.log(
-            `🔄 Updating locked field ${key}: caller provided different info`,
-          )
-          console.log(`   Old: "${currentValue}" → New: "${value}"`)
-          ;(newFields as Record<string, unknown>)[key] = value
           changed.add(key)
         }
         continue
@@ -389,23 +377,36 @@ export const useFormStore = create<FormStore>()((set, get) => ({
 
       // ✅ Field is not locked - fill it if empty or different
       if (isEmptyValue(currentValue) || isDifferentValue(currentValue, value)) {
-        console.log(`✅ Filling ${key} with:`, value)
-        ;(newFields as Record<string, unknown>)[key] = value
         changed.add(key)
-        newLockedFields.add(key) // Lock the field after filling
+        needsNewLocks = true
       }
     }
 
-    if (changed.size > 0) {
-      console.log(`📝 Updated ${changed.size} fields:`, Array.from(changed))
-      set({
-        fields: newFields,
-        lockedFields: newLockedFields,
-        recentlyChangedFields: changed,
-      })
-    } else {
-      console.log('📝 No fields updated (all same values or user-edited)')
+    if (changed.size === 0) return
+
+    // Build new state only when something actually changed
+    const newFields = { ...fields }
+    for (const key of changed) {
+      ;(newFields as Record<string, unknown>)[key] = data[key as FormFieldKey]
     }
+
+    const update: Partial<FormStore> = {
+      fields: newFields,
+      recentlyChangedFields: changed,
+    }
+
+    // Only create a new lockedFields Set if new locks were added
+    if (needsNewLocks) {
+      const newLockedFields = new Set(lockedFields)
+      for (const key of changed) {
+        if (!ALWAYS_UPDATE_FIELDS.includes(key as FormFieldKey)) {
+          newLockedFields.add(key)
+        }
+      }
+      update.lockedFields = newLockedFields
+    }
+
+    set(update as Parameters<typeof set>[0])
   },
 
   // ✅ Get snapshot of current form data
