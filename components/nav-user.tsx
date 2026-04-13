@@ -88,9 +88,9 @@ export function NavUser({
               size="lg"
               className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
             >
-              <Avatar className="h-8 w-8 rounded-lg">
+              <Avatar className="h-8 w-8 rounded-lg grayscale">
                 <AvatarImage src={user.avatar} alt={user.name} />
-                <AvatarFallback className="rounded-lg bg-indigo-100 text-indigo-700 font-bold">
+                <AvatarFallback className="rounded-lg">
                   {user.name?.charAt(0).toUpperCase() || "U"}
                 </AvatarFallback>
               </Avatar>
@@ -113,7 +113,7 @@ export function NavUser({
               <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
                 <Avatar className="h-8 w-8 rounded-lg">
                   <AvatarImage src={user.avatar} alt={user.name} />
-                  <AvatarFallback className="rounded-lg bg-indigo-100 text-indigo-700 font-bold">
+                  <AvatarFallback className="rounded-lg">
                     {user.name?.charAt(0).toUpperCase() || "U"}
                   </AvatarFallback>
                 </Avatar>
@@ -156,7 +156,7 @@ export function NavUser({
             <DialogHeader>
               <DialogTitle>Security Settings</DialogTitle>
             </DialogHeader>
-          <PasskeyManager />
+            <PasskeyManager />
           </DialogContent>
         </Dialog>
       </SidebarMenuItem>
