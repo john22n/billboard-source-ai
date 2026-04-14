@@ -25,14 +25,14 @@ export function OnPhonesIndicator() {
       <Phone
         className={cn(
           'size-3.5 shrink-0',
-          active ? 'text-primary animate-pulse' : 'text-muted-foreground',
+          active ? 'text-indigo-600 animate-pulse' : 'text-muted-foreground',
         )}
       />
       <span className="flex items-center gap-1.5 min-w-0">
         <span
           className={cn(
             'font-semibold tabular-nums',
-            active ? 'text-primary' : 'text-muted-foreground',
+            active ? 'text-indigo-600' : 'text-muted-foreground',
           )}
         >
           {count}
