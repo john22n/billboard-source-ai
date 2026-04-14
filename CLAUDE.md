@@ -99,7 +99,7 @@ Dual authentication: JWT-based password auth + WebAuthn passkeys.
 - JWT expires after 4 hours; auto-refreshes if within 1 hour of expiration
 - Two session getters:
   - `getSession()` - with auto-refresh (use for user-initiated actions)
-  - `getSessionWithoutRefresh()` - no refresh (use for SSE/background checks)
+  - `getSessionWithoutRefresh()` - no refresh (use for polling/background checks)
 - Protected routes redirect to `/` if no session exists
 - **Domain restriction**: Only `@billboardsource.com` emails allowed
 - **Roles**: `user` (default) and `admin` for management access
@@ -152,6 +152,12 @@ Dual authentication: JWT-based password auth + WebAuthn passkeys.
    - `status` (text) - 'pending' or 'completed'
    - `createdAt` (timestamp)
 
+5. **`nutshellLeads` table** (`nutshell_leads`) - Nutshell CRM lead sync tracking:
+   - `id` (serial) - Primary key
+   - `nutshellLeadId` (integer) - Unique Nutshell lead ID (UPSERT key)
+   - `name`, `status`, `assignee` (text)
+   - `createdAt`, `updatedAt` (timestamp)
+
 4. **`billboardLocations` table** (`billboard_locations`) - Market intelligence with vector search:
    - `id` (serial) - Primary key
    - Location: `city` (text, not null), `state` (text, not null), `county` (text)
@@ -174,6 +180,7 @@ Dual authentication: JWT-based password auth + WebAuthn passkeys.
 - `updateUserTwilioPhone()` - Update user's Twilio DID
 - `promoteToAdmin()` - Role management
 - `getIssue()` / `getIssues()` - Issue queries
+- `upsertNutshellLead()` / `getNutshellLeadStats()` - Nutshell lead sync
 
 ### AI Integration Patterns
 
@@ -250,7 +257,7 @@ Dual authentication: JWT-based password auth + WebAuthn passkeys.
 | ------------------------------- | ------------------------------------------------------------------- |
 | `useBillboardFormExtraction.ts` | Streaming field extraction with debounce, retry, confidence scoring |
 | `useOpenAITranscription.ts`     | OpenAI transcription management                                     |
-| `useWorkerStatus.tsx`           | Twilio TaskRouter worker activity status (SSE)                      |
+| `useWorkerStatus.tsx`           | Twilio TaskRouter worker activity status (10s polling)              |
 | `useAutoLogout.ts`              | Auto-logout on session expiration                                   |
 | `use-mobile.ts`                 | Mobile viewport detection                                           |
 
@@ -306,8 +313,8 @@ Dual authentication: JWT-based password auth + WebAuthn passkeys.
 | `/api/taskrouter/voicemail-transcription`    | Voicemail transcription callback                    |
 | `/api/taskrouter/wait`                       | Queue wait music/message                            |
 | `/api/taskrouter/worker-availability`        | Get/set worker availability                         |
-| `/api/taskrouter/worker-status`              | Get worker status                                   |
-| `/api/taskrouter/worker-status-stream`       | SSE stream for worker status                        |
+| `/api/taskrouter/worker-status`              | Get/set worker status (polling endpoint)            |
+| `/api/taskrouter/client-status`              | Cancel cell phone leg when browser client rejects   |
 | **Passkeys**                              |                                        |
 | `/api/passkey/auth-options`               | Generate passkey auth options          |
 | `/api/passkey/auth-verify`                | Verify passkey authentication          |
@@ -317,6 +324,9 @@ Dual authentication: JWT-based password auth + WebAuthn passkeys.
 | `/api/passkey/list`                       | List user's passkeys                   |
 | **CRM**                                   |                                        |
 | `/api/nutshell/create-lead`               | Create lead in Nutshell CRM            |
+| `/api/nutshell/sync-leads`                | Admin SSE stream: sync leads from Nutshell (last 90 days) to local DB |
+| **Cron**                                  |                                        |
+| `/api/cron/clear-openai-logs`             | Clear prior-month OpenAI logs (requires CRON_SECRET bearer token) |
 
 ### Server Actions
 
@@ -335,7 +345,7 @@ Call routing system using Twilio TaskRouter:
 - Workers (sales reps) mapped to users via `taskRouterWorkerSid`
 - Worker activity states: offline, available, unavailable
 - `WorkerStatusToggle` component lets reps set availability
-- `useWorkerStatus` hook streams status via SSE (`/api/taskrouter/worker-status-stream`)
+- `useWorkerStatus` hook polls status every 10s via `/api/taskrouter/worker-status`; uses `navigator.sendBeacon()` for offline state on page unload
 - Voicemail handling: recording, transcription, email notification via Resend
 - Scripts in `scripts/` for setup, debugging, and diagnostics
 
@@ -355,11 +365,6 @@ The cell phone leg uses a "press 1" screening step to prevent carrier voicemail 
 **Worker attribute merge strategy** (`/api/taskrouter/worker-status` POST):
 - Always fetches existing Twilio worker attributes before updating so custom fields (`simultaneous_ring`, `cell_phone`, `contact_uri`) are preserved
 - Retries up to 3× on 409 Conflict (concurrent update race condition)
-
-**SSE worker status stream** (`/api/taskrouter/worker-status-stream`):
-- Uses `getSessionWithoutRefresh()` — won't extend the session timer
-- Auth failures (401) are returned as SSE-formatted data (not HTTP 401) so the client can handle gracefully without triggering browser error behavior
-- Keepalive comment (`: keepalive`) sent every 30 seconds
 
 **Dashboard layout provider order** (`app/dashboard/layout.tsx`):
 - `WorkerStatusProvider` wraps `TwilioProvider` — this order is required because `TwilioProvider` reads from `useWorkerStatus()`
@@ -383,9 +388,12 @@ CSV upload uses chunked processing (no background jobs):
 `/api/nutshell/create-lead` creates leads in Nutshell CRM:
 
 - Uses JSON-RPC API
-- Finds user by email, creates lead with form data
-- Auto-assigns to authenticated user
+- Finds user by email, creates lead with form data; auto-assigns to authenticated user
+- Call transcript is posted as a **separate `newNote`** after lead creation (not embedded in the lead payload) to avoid 504 timeouts on large payloads
+- `nutshellRequestWithRetry()` wrapper provides exponential-backoff retries (1s, 2s) on `newLead` calls for transient failures
 - PricingPanel has submit-to-Nutshell button
+
+`/api/nutshell/sync-leads` (admin only) syncs Nutshell leads modified in the last 90 days into the local `nutshell_leads` table via SSE progress stream.
 
 ### Cost Tracking System
 
@@ -446,6 +454,9 @@ VERCEL_BYPASS_TOKEN=       # Vercel Deployment Protection bypass secret (Twilio 
 
 # Feature flags
 NEXT_PUBLIC_AUTO_LOGOUT_EXCLUDED_EMAILS=  # Comma-separated emails exempt from 8pm auto-logout
+
+# Cron
+CRON_SECRET=               # Bearer token for /api/cron/* endpoints
 ```
 
 ## Code Conventions
@@ -474,7 +485,6 @@ NEXT_PUBLIC_AUTO_LOGOUT_EXCLUDED_EMAILS=  # Comma-separated emails exempt from 8
 
 - Use `streamObject()` with `toTextStreamResponse()` for SSE
 - Client-side: `experimental_useObject` from `@ai-sdk/react`
-- SSE manager in `lib/sse-manager.ts` for custom SSE endpoints
 - Implement abort controllers for request cancellation
 
 ## Project Structure
@@ -484,7 +494,7 @@ app/
   (auth)/
     login/            # Login page (password + passkey)
     admin/            # Admin dashboard (RBAC protected)
-  api/                # API routes (34 endpoints)
+  api/                # API routes (40+ endpoints)
   dashboard/          # Protected dashboard (with own layout)
   layout.tsx          # Root layout with fonts
   page.tsx            # Landing page (Spline 3D)
@@ -515,7 +525,7 @@ components/
   nav-documents.tsx
   data-table.tsx
 db/
-  schema.ts           # Drizzle schema (4 tables)
+  schema.ts           # Drizzle schema (5 tables)
   index.ts            # Database connection
 drizzle/              # Migration files
 hooks/
@@ -535,7 +545,6 @@ lib/
   openai-pricing.ts   # Cost calculation
   summarize.ts        # Summarization utilities
   error-handling.ts   # Error handling utilities
-  sse-manager.ts      # Server-Sent Events manager
   utils.ts            # General utilities
 types/
   sales-call.ts       # Shared types (LeadSentiment enum, etc.)
@@ -598,6 +607,7 @@ npm test -- path/to/test.spec.ts  # Run single file
 
 - Verify `NUTSHELL_API_KEY` is set
 - Check user email exists in Nutshell
+- 504 timeouts: transcript is posted as a separate note after lead creation to reduce payload size; `nutshellRequestWithRetry()` handles transient failures with backoff
 
 **Build errors:**
 
