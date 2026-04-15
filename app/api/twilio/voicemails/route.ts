@@ -17,6 +17,11 @@ interface TwilioRecording {
   uri: string
 }
 
+interface TwilioRecordingsResponse {
+  recordings: TwilioRecording[]
+  next_page_uri: string | null
+}
+
 interface TwilioTranscription {
   sid: string
   transcription_text: string
@@ -51,25 +56,40 @@ export async function GET() {
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
     const dateCreatedAfter = sevenDaysAgo.toISOString().split('T')[0]
 
-    const recordingsUrl = `https://api.twilio.com/2010-04-01/Accounts/${ACCOUNT_SID}/Recordings.json?DateCreatedAfter=${dateCreatedAfter}&PageSize=50`
+    // Paginate through all recordings to avoid missing voicemails
+    // buried behind DialVerb call recordings in the first page
+    let allRecordings: TwilioRecording[] = []
+    let nextPageUrl: string | null =
+      `https://api.twilio.com/2010-04-01/Accounts/${ACCOUNT_SID}/Recordings.json?DateCreatedAfter=${dateCreatedAfter}&PageSize=100`
 
-    const recordingsResponse = await fetch(recordingsUrl, {
-      headers: { Authorization: `Basic ${authHeader}` },
-    })
+    while (nextPageUrl) {
+      const recordingsResponse = await fetch(nextPageUrl, {
+        headers: { Authorization: `Basic ${authHeader}` },
+      })
 
-    if (!recordingsResponse.ok) {
-      const errorText = await recordingsResponse.text()
-      console.error('Failed to fetch recordings:', errorText)
-      return NextResponse.json(
-        { error: 'Failed to fetch recordings from Twilio' },
-        { status: 500 }
-      )
+      if (!recordingsResponse.ok) {
+        const errorText = await recordingsResponse.text()
+        console.error('Failed to fetch recordings:', errorText)
+        return NextResponse.json(
+          { error: 'Failed to fetch recordings from Twilio' },
+          { status: 500 }
+        )
+      }
+
+      const recordingsData: TwilioRecordingsResponse = await recordingsResponse.json()
+      allRecordings = allRecordings.concat(recordingsData.recordings || [])
+
+      // Twilio provides next_page_uri when there are more results
+      nextPageUrl = recordingsData.next_page_uri
+        ? `https://api.twilio.com${recordingsData.next_page_uri}`
+        : null
     }
 
-    const recordingsData = await recordingsResponse.json()
-    const recordings: TwilioRecording[] = (recordingsData.recordings || []).filter(
+    const recordings = allRecordings.filter(
       (r: TwilioRecording) => r.source === 'RecordVerb'
     )
+
+    console.log(`Total recordings: ${allRecordings.length}, voicemails after filter: ${recordings.length}`)
 
     // For each recording, fetch the call details (to get "From") and transcription
     const voicemails: Voicemail[] = await Promise.all(
