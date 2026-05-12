@@ -24,7 +24,7 @@ export async function GET() {
     if (!ACCOUNT_SID || !AUTH_TOKEN || !WORKSPACE_SID) {
       console.error('❌ Missing required Twilio env vars for /api/workers/available')
       return Response.json(
-        { count: 0, names: [] },
+        { workers: [] },
         { headers: { 'Cache-Control': 'no-store' } },
       )
     }
@@ -36,38 +36,54 @@ export async function GET() {
 
     const client = twilio(ACCOUNT_SID as string, AUTH_TOKEN as string)
 
-    const twilioWorkers = await client.taskrouter.v1
-      .workspaces(WORKSPACE_SID)
-      .workers.list({ activityName: 'Available' })
+    // Fetch Available and Busy workers in parallel
+    const [availableWorkers, busyWorkers] = await Promise.all([
+      client.taskrouter.v1.workspaces(WORKSPACE_SID).workers.list({ activityName: 'Available' }),
+      client.taskrouter.v1.workspaces(WORKSPACE_SID).workers.list({ activityName: 'Busy' }),
+    ])
 
-    const otherWorkers = twilioWorkers.filter(
+    // Busy workers are on an active call
+    const onCallSids = new Set(busyWorkers.map((w) => w.sid))
+
+    // Available workers sorted ascending by dateStatusChanged (oldest = next in round-robin)
+    // Busy (on-call) workers appended at the end
+    const sortedAvailable = availableWorkers
+      .filter((w) => w.sid !== currentUser?.taskRouterWorkerSid)
+      .sort((a, b) => new Date(a.dateStatusChanged).getTime() - new Date(b.dateStatusChanged).getTime())
+
+    const filteredBusy = busyWorkers.filter(
       (w) => w.sid !== currentUser?.taskRouterWorkerSid,
     )
 
-    if (otherWorkers.length === 0) {
+    const allWorkers = [...sortedAvailable, ...filteredBusy]
+
+    if (allWorkers.length === 0) {
       return Response.json(
-        { count: 0, names: [] },
+        { workers: [] },
         { headers: { 'Cache-Control': 'no-store' } },
       )
     }
 
-    const otherSids = otherWorkers.map((w) => w.sid)
+    const allSids = allWorkers.map((w) => w.sid)
 
     const matchedUsers = await db
       .select({ email: user.email, taskRouterWorkerSid: user.taskRouterWorkerSid })
       .from(user)
-      .where(inArray(user.taskRouterWorkerSid, otherSids))
+      .where(inArray(user.taskRouterWorkerSid, allSids))
 
     const sidToEmail = new Map(
       matchedUsers.map((u) => [u.taskRouterWorkerSid, u.email]),
     )
 
-    const names = otherWorkers
+    const workers = allWorkers
       .filter((w) => sidToEmail.has(w.sid))
-      .map((w) => firstNameFromEmail(sidToEmail.get(w.sid)!))
+      .map((w) => ({
+        name: firstNameFromEmail(sidToEmail.get(w.sid)!),
+        status: onCallSids.has(w.sid) ? ('on_call' as const) : ('available' as const),
+      }))
 
     return Response.json(
-      { count: names.length, names },
+      { workers },
       { headers: { 'Cache-Control': 'no-store' } },
     )
   } catch (error) {

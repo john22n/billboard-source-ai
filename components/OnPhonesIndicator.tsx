@@ -5,7 +5,7 @@ import { useAvailableWorkers } from '@/hooks/useAvailableWorkers'
 import { cn } from '@/lib/utils'
 
 export function OnPhonesIndicator() {
-  const { count, names, isLoading, error } = useAvailableWorkers()
+  const { workers, isLoading, error } = useAvailableWorkers()
 
   if (isLoading) {
     return (
@@ -18,7 +18,7 @@ export function OnPhonesIndicator() {
 
   if (error) return null
 
-  const active = count > 0
+  const active = workers.length > 0
 
   return (
     <div className="hidden sm:flex items-center gap-2 rounded-full border border-border px-3 py-1 text-sm">
@@ -29,18 +29,30 @@ export function OnPhonesIndicator() {
         )}
       />
       <span className="flex items-center gap-1.5 min-w-0">
-        <span
-          className={cn(
-            'font-semibold tabular-nums',
-            active ? 'text-indigo-600' : 'text-muted-foreground',
-          )}
-        >
-          {count}
-        </span>
-        <span className="text-muted-foreground select-none">·</span>
-        <span className={cn('truncate', active ? 'text-foreground' : 'text-muted-foreground')}>
-          {active ? names.join(', ') : 'No one on phones'}
-        </span>
+        {active ? (
+          workers.map((worker, i) => (
+            <span key={worker.name} className="flex items-center gap-1">
+              {i > 0 && (
+                <span className="text-muted-foreground select-none">·</span>
+              )}
+              {worker.status === 'on_call' && (
+                <span className="inline-block size-1.5 rounded-full bg-green-500 animate-pulse shrink-0" />
+              )}
+              <span
+                className={cn(
+                  'truncate',
+                  worker.status === 'on_call'
+                    ? 'text-green-600'
+                    : 'text-foreground',
+                )}
+              >
+                {worker.name}
+              </span>
+            </span>
+          ))
+        ) : (
+          <span className="text-muted-foreground">No one on phones</span>
+        )}
       </span>
     </div>
   )

@@ -2,9 +2,13 @@
 
 import { useState, useEffect, useRef } from 'react'
 
+export interface WorkerEntry {
+  name: string
+  status: 'available' | 'on_call'
+}
+
 interface UseAvailableWorkersResult {
-  count: number
-  names: string[]
+  workers: WorkerEntry[]
   isLoading: boolean
   error: string | null
 }
@@ -12,8 +16,7 @@ interface UseAvailableWorkersResult {
 const POLL_INTERVAL = 30_000 // 30 seconds
 
 export function useAvailableWorkers(): UseAvailableWorkersResult {
-  const [count, setCount] = useState(0)
-  const [names, setNames] = useState<string[]>([])
+  const [workers, setWorkers] = useState<WorkerEntry[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const authFailedRef = useRef(false)
@@ -43,9 +46,8 @@ export function useAvailableWorkers(): UseAvailableWorkersResult {
           throw new Error((data as { error?: string }).error ?? 'Failed to fetch available workers')
         }
 
-        const data = (await res.json()) as { count: number; names: string[] }
-        setCount(data.count ?? 0)
-        setNames(data.names ?? [])
+        const data = (await res.json()) as { workers: WorkerEntry[] }
+        setWorkers(data.workers ?? [])
         setError(null)
       } catch (err) {
         if ((err as Error).name === 'AbortError') return
@@ -65,5 +67,5 @@ export function useAvailableWorkers(): UseAvailableWorkersResult {
     }
   }, [])
 
-  return { count, names, isLoading, error }
+  return { workers, isLoading, error }
 }
