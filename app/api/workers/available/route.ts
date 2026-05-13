@@ -42,6 +42,10 @@ export async function GET() {
       client.taskrouter.v1.workspaces(WORKSPACE_SID).workers.list({ activityName: 'Busy' }),
     ])
 
+    console.log('✅ Available workers from Twilio:', availableWorkers.length)
+    console.log('✅ Available worker SIDs:', availableWorkers.map((w) => w.sid))
+    console.log('✅ Current user SID:', currentUser?.taskRouterWorkerSid)
+
     // Busy workers are on an active call
     const onCallSids = new Set(busyWorkers.map((w) => w.sid))
 
@@ -57,6 +61,8 @@ export async function GET() {
 
     const allWorkers = [...sortedAvailable, ...filteredBusy]
 
+    console.log('✅ Other workers after filter:', allWorkers.length)
+
     if (allWorkers.length === 0) {
       return Response.json(
         { workers: [] },
@@ -71,6 +77,8 @@ export async function GET() {
       .from(user)
       .where(inArray(user.taskRouterWorkerSid, allSids))
 
+    console.log('✅ Matched users from DB:', matchedUsers.length)
+
     const sidToEmail = new Map(
       matchedUsers.map((u) => [u.taskRouterWorkerSid, u.email]),
     )
@@ -81,6 +89,8 @@ export async function GET() {
         name: firstNameFromEmail(sidToEmail.get(w.sid)!),
         status: onCallSids.has(w.sid) ? ('on_call' as const) : ('available' as const),
       }))
+
+    console.log('✅ Final workers returned:', workers)
 
     return Response.json(
       { workers },
