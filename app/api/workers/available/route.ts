@@ -86,10 +86,7 @@ export async function GET() {
     // Sort by dateStatusChanged ascending (oldest = next in round-robin)
     const sorted = otherWorkers
       .filter((w) => sidToEmail.has(w.sid))
-      .sort(
-        (a, b) =>
-          new Date(a.dateStatusChanged).getTime() - new Date(b.dateStatusChanged).getTime(),
-      )
+      .sort((a, b) => new Date(a.dateUpdated).getTime() - new Date(b.dateUpdated).getTime())
 
     const workers = sorted.map((w) => ({
       name: firstNameFromEmail(sidToEmail.get(w.sid)!),
