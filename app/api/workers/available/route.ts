@@ -36,59 +36,65 @@ export async function GET() {
 
     const client = twilio(ACCOUNT_SID as string, AUTH_TOKEN as string)
 
-    // Fetch Available and Busy workers in parallel
-    const [availableWorkers, busyWorkers] = await Promise.all([
+    // Fetch available workers and assigned tasks in parallel
+    const [availableWorkers, assignedTasks] = await Promise.all([
       client.taskrouter.v1.workspaces(WORKSPACE_SID).workers.list({ activityName: 'Available' }),
-      client.taskrouter.v1.workspaces(WORKSPACE_SID).workers.list({ activityName: 'Busy' }),
+      client.taskrouter.v1.workspaces(WORKSPACE_SID).tasks.list({ assignmentStatus: ['assigned'] }),
     ])
 
     console.log('✅ Available workers from Twilio:', availableWorkers.length)
-    console.log('✅ Available worker SIDs:', availableWorkers.map((w) => w.sid))
-    console.log('✅ Current user SID:', currentUser?.taskRouterWorkerSid)
+    console.log('✅ Assigned tasks:', assignedTasks.length)
 
-    // Busy workers are on an active call
-    const onCallSids = new Set(busyWorkers.map((w) => w.sid))
+    // For each assigned task fetch its accepted reservations to get the worker SID
+    const reservationResults = await Promise.all(
+      assignedTasks.map((task) =>
+        client.taskrouter.v1
+          .workspaces(WORKSPACE_SID)
+          .tasks(task.sid)
+          .reservations.list({ reservationStatus: 'accepted' })
+      )
+    )
 
-    // Available workers sorted ascending by dateStatusChanged (oldest = next in round-robin)
-    // Busy (on-call) workers appended at the end
-    const sortedAvailable = availableWorkers
-      .filter((w) => w.sid !== currentUser?.taskRouterWorkerSid)
-      .sort((a, b) => new Date(a.dateStatusChanged).getTime() - new Date(b.dateStatusChanged).getTime())
+    // Build a set of worker SIDs currently on an active call
+    const onCallSids = new Set(reservationResults.flat().map((r) => r.workerSid))
 
-    const filteredBusy = busyWorkers.filter(
+    console.log('✅ On-call worker SIDs:', [...onCallSids])
+
+    // Exclude the currently logged-in user
+    const otherWorkers = availableWorkers.filter(
       (w) => w.sid !== currentUser?.taskRouterWorkerSid,
     )
 
-    const allWorkers = [...sortedAvailable, ...filteredBusy]
-
-    console.log('✅ Other workers after filter:', allWorkers.length)
-
-    if (allWorkers.length === 0) {
+    if (otherWorkers.length === 0) {
       return Response.json(
         { workers: [] },
         { headers: { 'Cache-Control': 'no-store' } },
       )
     }
 
-    const allSids = allWorkers.map((w) => w.sid)
+    const otherSids = otherWorkers.map((w) => w.sid)
 
     const matchedUsers = await db
       .select({ email: user.email, taskRouterWorkerSid: user.taskRouterWorkerSid })
       .from(user)
-      .where(inArray(user.taskRouterWorkerSid, allSids))
-
-    console.log('✅ Matched users from DB:', matchedUsers.length)
+      .where(inArray(user.taskRouterWorkerSid, otherSids))
 
     const sidToEmail = new Map(
       matchedUsers.map((u) => [u.taskRouterWorkerSid, u.email]),
     )
 
-    const workers = allWorkers
+    // Sort by dateStatusChanged ascending (oldest = next in round-robin)
+    const sorted = otherWorkers
       .filter((w) => sidToEmail.has(w.sid))
-      .map((w) => ({
-        name: firstNameFromEmail(sidToEmail.get(w.sid)!),
-        status: onCallSids.has(w.sid) ? ('on_call' as const) : ('available' as const),
-      }))
+      .sort(
+        (a, b) =>
+          new Date(a.dateStatusChanged).getTime() - new Date(b.dateStatusChanged).getTime(),
+      )
+
+    const workers = sorted.map((w) => ({
+      name: firstNameFromEmail(sidToEmail.get(w.sid)!),
+      status: onCallSids.has(w.sid) ? ('on_call' as const) : ('available' as const),
+    }))
 
     console.log('✅ Final workers returned:', workers)
 
