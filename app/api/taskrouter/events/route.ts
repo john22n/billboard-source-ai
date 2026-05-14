@@ -62,6 +62,17 @@ export async function POST(req: Request) {
         console.log('Reason:', formData.get('TaskCanceledReason') || 'unknown')
         break
 
+      case 'task.completed':
+        console.log(`📞 Task completed for worker: ${workerSid}`)
+        if (workerSid) {
+          await db
+            .update(user)
+            .set({ lastCallAt: new Date() })
+            .where(eq(user.taskRouterWorkerSid, workerSid))
+          console.log(`✅ Updated lastCallAt for worker: ${workerSid}`)
+        }
+        break
+
       case 'worker.activity.update':
         console.log(`👤 Worker activity updated: ${workerSid}`)
         const activitySid = formData.get('WorkerActivitySid') as string
