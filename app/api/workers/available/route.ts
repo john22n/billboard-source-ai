@@ -83,12 +83,15 @@ export async function GET() {
       matchedUsers.map((u) => [u.taskRouterWorkerSid, u]),
     )
 
-    // Sort by lastCallAt ascending — null (never taken a call) goes first
+    // Sort by lastCallAt ascending — if null fall back to dateStatusChanged ascending
+    // dateStatusChanged = how long they've been Available (oldest = longest duration = next in line)
     const sorted = otherWorkers
       .filter((w) => sidToUser.has(w.sid))
       .sort((a, b) => {
-        const aTime = sidToUser.get(a.sid)?.lastCallAt?.getTime() ?? 0
-        const bTime = sidToUser.get(b.sid)?.lastCallAt?.getTime() ?? 0
+        const aTime = sidToUser.get(a.sid)?.lastCallAt?.getTime()
+          ?? new Date(a.dateStatusChanged).getTime()
+        const bTime = sidToUser.get(b.sid)?.lastCallAt?.getTime()
+          ?? new Date(b.dateStatusChanged).getTime()
         return aTime - bTime
       })
 
