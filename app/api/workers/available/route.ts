@@ -55,10 +55,7 @@ export async function GET() {
 
     const onCallSids = new Set(reservationResults.flat().map((r) => r.workerSid))
 
-    // Exclude the currently logged-in user
-    const otherWorkers = availableWorkers.filter(
-      (w) => w.sid !== currentUser?.taskRouterWorkerSid,
-    )
+    const otherWorkers = availableWorkers
 
     if (otherWorkers.length === 0) {
       return Response.json(
