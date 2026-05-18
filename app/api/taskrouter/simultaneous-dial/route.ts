@@ -15,7 +15,7 @@
  *   clientIdentity — Twilio Client identity string
  *   cellPhone      — E.164 personal cell number
  *   callerFrom     — Real caller E.164 number from task attributes
- *   workerSid      — TaskRouter Worker SID (passed through to dial-complete)
+ *   workerSid      — TaskRouter Worker SID (passed through to dial-complete and client-status)
  */
 
 export async function POST(req: Request) {
@@ -64,8 +64,9 @@ export async function POST(req: Request) {
 
     // ── browser client status callback ───────────────────────────────────────
     const clientStatusUrl = new URL(`${appUrl}/api/taskrouter/client-status`);
-    clientStatusUrl.searchParams.set('cellPhone', cellPhone);
-    clientStatusUrl.searchParams.set('taskSid',   taskSid);
+    clientStatusUrl.searchParams.set('cellPhone',  cellPhone);
+    clientStatusUrl.searchParams.set('taskSid',    taskSid);
+    clientStatusUrl.searchParams.set('workerSid',  workerSid);
     if (process.env.VERCEL_BYPASS_TOKEN) {
       clientStatusUrl.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
     }
