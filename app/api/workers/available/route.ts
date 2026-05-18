@@ -1,7 +1,7 @@
 import twilio from 'twilio'
 import { db } from '@/db'
 import { user } from '@/db/schema'
-import { eq, inArray } from 'drizzle-orm'
+import { inArray } from 'drizzle-orm'
 import { getSessionWithoutRefresh } from '@/lib/auth'
 
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID
@@ -29,11 +29,6 @@ export async function GET() {
       )
     }
 
-    const [currentUser] = await db
-      .select({ taskRouterWorkerSid: user.taskRouterWorkerSid })
-      .from(user)
-      .where(eq(user.email, session.email))
-
     const client = twilio(ACCOUNT_SID as string, AUTH_TOKEN as string)
 
     // Fetch available workers and assigned tasks in parallel
@@ -55,16 +50,14 @@ export async function GET() {
 
     const onCallSids = new Set(reservationResults.flat().map((r) => r.workerSid))
 
-    const otherWorkers = availableWorkers
-
-    if (otherWorkers.length === 0) {
+    if (availableWorkers.length === 0) {
       return Response.json(
         { workers: [] },
         { headers: { 'Cache-Control': 'no-store' } },
       )
     }
 
-    const otherSids = otherWorkers.map((w) => w.sid)
+    const allSids = availableWorkers.map((w) => w.sid)
 
     // Fetch matched users including lastCallAt for round-robin sort
     const matchedUsers = await db
@@ -74,7 +67,7 @@ export async function GET() {
         lastCallAt: user.lastCallAt,
       })
       .from(user)
-      .where(inArray(user.taskRouterWorkerSid, otherSids))
+      .where(inArray(user.taskRouterWorkerSid, allSids))
 
     const sidToUser = new Map(
       matchedUsers.map((u) => [u.taskRouterWorkerSid, u]),
@@ -82,7 +75,7 @@ export async function GET() {
 
     // Sort by lastCallAt ascending — if null fall back to dateStatusChanged ascending
     // dateStatusChanged = how long they've been Available (oldest = longest duration = next in line)
-    const sorted = otherWorkers
+    const sorted = availableWorkers
       .filter((w) => sidToUser.has(w.sid))
       .sort((a, b) => {
         const aTime = sidToUser.get(a.sid)?.lastCallAt?.getTime()
