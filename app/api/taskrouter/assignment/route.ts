@@ -78,7 +78,6 @@ export async function POST(req: Request) {
     const workspaceSid = formData.get('WorkspaceSid') as string;
 
     // ── VOICEMAIL WORKER ─────────────────────────────────────────────────────
-    // No recording changes here — voicemail is handled by its own route
     if (workerAttrs.email === 'voicemail@system') {
       console.log('📼 Voicemail worker assigned - using redirect instruction');
 
@@ -125,7 +124,6 @@ export async function POST(req: Request) {
     }
 
     // ── SIMULTANEOUS RING ────────────────────────────────────────────────────
-    // Recording is handled inside simultaneous-dial/route.ts via <Dial> attribute
     if (workerAttrs.simultaneous_ring && workerAttrs.cell_phone) {
       console.log('📱 Worker has simultaneous_ring=true — using parallel dial instead of conference');
 
@@ -169,6 +167,7 @@ export async function POST(req: Request) {
     const callCompleteUrl = new URL(`${appUrl}/api/taskrouter/call-complete`);
     callCompleteUrl.searchParams.set('taskSid',      taskSid);
     callCompleteUrl.searchParams.set('workspaceSid', workspaceSid);
+    callCompleteUrl.searchParams.set('workerSid',    workerSid);
     if (process.env.VERCEL_BYPASS_TOKEN) {
       callCompleteUrl.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
     }

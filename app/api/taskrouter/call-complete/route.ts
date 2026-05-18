@@ -4,12 +4,14 @@
  * Called when conference events occur (start, end, join, leave).
  * Completes the task when the conference ends.
  * If the conference ended without being answered, redirects caller to voicemail.
+ * When the worker joins the conference, switches them to Busy for true round-robin.
  */
 import twilio from 'twilio';
 
-const ACCOUNT_SID  = process.env.TWILIO_ACCOUNT_SID!;
-const AUTH_TOKEN   = process.env.TWILIO_AUTH_TOKEN!;
-const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!;
+const ACCOUNT_SID       = process.env.TWILIO_ACCOUNT_SID!;
+const AUTH_TOKEN        = process.env.TWILIO_AUTH_TOKEN!;
+const WORKSPACE_SID     = process.env.TASKROUTER_WORKSPACE_SID!;
+const BUSY_ACTIVITY_SID = process.env.TASKROUTER_ACTIVITY_BUSY_SID!;
 
 const client = twilio(ACCOUNT_SID, AUTH_TOKEN);
 
@@ -24,6 +26,7 @@ export async function POST(req: Request) {
     const url          = new URL(req.url);
     const taskSid      = url.searchParams.get('taskSid');
     const workspaceSid = url.searchParams.get('workspaceSid') || WORKSPACE_SID;
+    const workerSid    = url.searchParams.get('workerSid');
 
     const appUrl = (
       process.env.NEXT_PUBLIC_APP_URL ?? `${url.protocol}//${url.host}`
@@ -36,11 +39,30 @@ export async function POST(req: Request) {
     console.log('ConferenceSid:',       conferenceSid);
     console.log('CallSid:',             callSid);
     console.log('TaskSid:',             taskSid);
+    console.log('WorkerSid:',           workerSid);
     console.log('═══════════════════════════════════════════');
 
     if (!taskSid || !workspaceSid) {
       console.error('❌ Missing taskSid or workspaceSid');
       return new Response('Missing parameters', { status: 400 });
+    }
+
+    // ── Worker joined conference — switch to Busy for true round-robin ────────
+    if (statusCallbackEvent === 'participant-join' && workerSid && BUSY_ACTIVITY_SID) {
+      try {
+        // Only switch to Busy when the second participant joins (worker joining)
+        // First participant is always the customer
+        const participants = await client.conferences(conferenceSid).participants.list();
+        if (participants.length >= 2) {
+          await client.taskrouter.v1
+            .workspaces(workspaceSid)
+            .workers(workerSid)
+            .update({ activitySid: BUSY_ACTIVITY_SID })
+          console.log(`✅ Worker ${workerSid} switched to Busy`)
+        }
+      } catch (err) {
+        console.error('❌ Failed to switch worker to Busy:', err)
+      }
     }
 
     if (statusCallbackEvent === 'conference-end') {
@@ -102,7 +124,7 @@ export async function POST(req: Request) {
       } catch (error) {
         console.error('❌ Failed to handle conference-end:', error);
       }
-    } else {
+    } else if (statusCallbackEvent !== 'participant-join') {
       console.log(`ℹ️ Conference event: ${statusCallbackEvent}`);
     }
 
