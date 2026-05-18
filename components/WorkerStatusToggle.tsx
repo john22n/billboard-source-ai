@@ -16,7 +16,7 @@ const STATUS_CONFIG: Record<
   available:   { label: "Available", short: "Avail", dot: "bg-green-500",  blink: "animate-pulse" },
   unavailable: { label: "Away",      short: "Away",  dot: "bg-yellow-500", blink: "animate-pulse" },
   offline:     { label: "Offline",   short: "Off",   dot: "bg-gray-400",   blink: ""              },
-  busy:        { label: "On Call",   short: "Call",  dot: "bg-indigo-500", blink: "animate-pulse" },
+  busy:        { label: "Busy",   short: "Busy",  dot: "bg-indigo-500", blink: "animate-pulse" },
 };
 
 interface WorkerStatusToggleProps {
