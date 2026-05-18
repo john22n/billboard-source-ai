@@ -5,9 +5,12 @@
  * Voicemail redirect is handled by the assignment callback using redirect instruction.
  */
 
+import twilio from 'twilio'
 import { db } from '@/db'
 import { user } from '@/db/schema'
 import { eq } from 'drizzle-orm'
+
+const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN
 
 const ACTIVITY_MAP: Record<string, 'available' | 'unavailable' | 'offline'> = {
   [process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID || '']: 'available',
@@ -17,7 +20,34 @@ const ACTIVITY_MAP: Record<string, 'available' | 'unavailable' | 'offline'> = {
 
 export async function POST(req: Request) {
   try {
+    const clonedReq = req.clone()
+    const bodyText = await clonedReq.text()
     const formData = await req.formData()
+
+    // Validate Twilio signature — skip on preview deployments
+    const isProduction = process.env.VERCEL_ENV === 'production'
+
+    if (TWILIO_AUTH_TOKEN && isProduction) {
+      const twilioSignature = req.headers.get('X-Twilio-Signature') || ''
+      const url = new URL(req.url)
+
+      const params: Record<string, string> = {}
+      new URLSearchParams(bodyText).forEach((value, key) => {
+        params[key] = value
+      })
+
+      const isValid = twilio.validateRequest(
+        TWILIO_AUTH_TOKEN,
+        twilioSignature,
+        url.toString(),
+        params,
+      )
+
+      if (!isValid) {
+        console.error('❌ Invalid Twilio signature on events callback')
+        return new Response('Forbidden', { status: 403 })
+      }
+    }
 
     const eventType = formData.get('EventType') as string
     const taskSid = formData.get('TaskSid') as string
