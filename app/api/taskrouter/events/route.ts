@@ -16,10 +16,11 @@ const AUTH_TOKEN         = process.env.TWILIO_AUTH_TOKEN!
 const WORKSPACE_SID      = process.env.TASKROUTER_WORKSPACE_SID!
 const BUSY_ACTIVITY_SID  = process.env.TASKROUTER_ACTIVITY_BUSY_SID!
 
-const ACTIVITY_MAP: Record<string, 'available' | 'unavailable' | 'offline'> = {
-  [process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID || '']: 'available',
+const ACTIVITY_MAP: Record<string, 'available' | 'unavailable' | 'offline' | 'busy'> = {
+  [process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID   || '']: 'available',
   [process.env.TASKROUTER_ACTIVITY_UNAVAILABLE_SID || '']: 'unavailable',
-  [process.env.TASKROUTER_ACTIVITY_OFFLINE_SID || '']: 'offline',
+  [process.env.TASKROUTER_ACTIVITY_OFFLINE_SID     || '']: 'offline',
+  [process.env.TASKROUTER_ACTIVITY_BUSY_SID        || '']: 'busy',
 }
 
 export async function POST(req: Request) {
@@ -125,6 +126,13 @@ export async function POST(req: Request) {
         if (activitySid && workerSid) {
           const newStatus = ACTIVITY_MAP[activitySid] || 'offline'
           console.log(`   Status: ${newStatus}`)
+
+          // Skip DB update for Busy — it's transient and set automatically
+          // We don't want to overwrite the worker's manually chosen status
+          if (newStatus === 'busy') {
+            console.log(`   ⏭️ Skipping DB update for Busy activity`)
+            break
+          }
 
           const currentUser = await db
             .select({
