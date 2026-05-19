@@ -89,6 +89,13 @@ export async function POST(req: Request) {
               .workers(workerSid)
               .update({ activitySid: BUSY_ACTIVITY_SID })
             console.log(`✅ Worker ${workerSid} switched to Busy`)
+
+            // Update DB so the toggle reflects busy state
+            await db
+              .update(user)
+              .set({ workerActivity: 'busy' })
+              .where(eq(user.taskRouterWorkerSid, workerSid))
+            console.log(`✅ Updated DB workerActivity to busy for worker: ${workerSid}`)
           } catch (err) {
             console.error('❌ Failed to switch worker to Busy:', err)
           }
@@ -127,8 +134,7 @@ export async function POST(req: Request) {
           const newStatus = ACTIVITY_MAP[activitySid] || 'offline'
           console.log(`   Status: ${newStatus}`)
 
-          // Skip DB update for Busy — it's transient and set automatically
-          // We don't want to overwrite the worker's manually chosen status
+          // Skip DB update for Busy — handled in reservation.accepted above
           if (newStatus === 'busy') {
             console.log(`   ⏭️ Skipping DB update for Busy activity`)
             break
