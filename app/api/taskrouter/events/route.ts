@@ -10,17 +10,12 @@ import { db } from '@/db'
 import { user } from '@/db/schema'
 import { eq } from 'drizzle-orm'
 
-const TWILIO_AUTH_TOKEN  = process.env.TWILIO_AUTH_TOKEN
-const ACCOUNT_SID        = process.env.TWILIO_ACCOUNT_SID!
-const AUTH_TOKEN         = process.env.TWILIO_AUTH_TOKEN!
-const WORKSPACE_SID      = process.env.TASKROUTER_WORKSPACE_SID!
-const BUSY_ACTIVITY_SID  = process.env.TASKROUTER_ACTIVITY_BUSY_SID!
+const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN
 
-const ACTIVITY_MAP: Record<string, 'available' | 'unavailable' | 'offline' | 'busy'> = {
+const ACTIVITY_MAP: Record<string, 'available' | 'unavailable' | 'offline'> = {
   [process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID   || '']: 'available',
   [process.env.TASKROUTER_ACTIVITY_UNAVAILABLE_SID || '']: 'unavailable',
   [process.env.TASKROUTER_ACTIVITY_OFFLINE_SID     || '']: 'offline',
-  [process.env.TASKROUTER_ACTIVITY_BUSY_SID        || '']: 'busy',
 }
 
 export async function POST(req: Request) {
@@ -54,12 +49,10 @@ export async function POST(req: Request) {
       }
     }
 
-    const eventType      = formData.get('EventType')      as string
-    const taskSid        = formData.get('TaskSid')        as string
-    const taskQueueName  = formData.get('TaskQueueName')  as string
-    const workerSid      = formData.get('WorkerSid')      as string
-    const reservationSid = formData.get('ReservationSid') as string
-    const taskAttributes = formData.get('TaskAttributes') as string
+    const eventType     = formData.get('EventType')     as string
+    const taskSid       = formData.get('TaskSid')       as string
+    const taskQueueName = formData.get('TaskQueueName') as string
+    const workerSid     = formData.get('WorkerSid')     as string
 
     switch (eventType) {
       case 'task.created':
@@ -81,25 +74,6 @@ export async function POST(req: Request) {
 
       case 'reservation.accepted':
         console.log(`✅ Reservation accepted by worker: ${workerSid}`)
-        if (workerSid && WORKSPACE_SID && BUSY_ACTIVITY_SID) {
-          try {
-            const client = twilio(ACCOUNT_SID, AUTH_TOKEN)
-            await client.taskrouter.v1
-              .workspaces(WORKSPACE_SID)
-              .workers(workerSid)
-              .update({ activitySid: BUSY_ACTIVITY_SID })
-            console.log(`✅ Worker ${workerSid} switched to Busy`)
-
-            // Update DB so the toggle reflects busy state
-            await db
-              .update(user)
-              .set({ workerActivity: 'busy' })
-              .where(eq(user.taskRouterWorkerSid, workerSid))
-            console.log(`✅ Updated DB workerActivity to busy for worker: ${workerSid}`)
-          } catch (err) {
-            console.error('❌ Failed to switch worker to Busy:', err)
-          }
-        }
         break
 
       case 'reservation.rejected':
@@ -134,17 +108,8 @@ export async function POST(req: Request) {
           const newStatus = ACTIVITY_MAP[activitySid] || 'offline'
           console.log(`   Status: ${newStatus}`)
 
-          // Skip DB update for Busy — handled in reservation.accepted above
-          if (newStatus === 'busy') {
-            console.log(`   ⏭️ Skipping DB update for Busy activity`)
-            break
-          }
-
           const currentUser = await db
-            .select({
-              id: user.id,
-              email: user.email,
-            })
+            .select({ id: user.id, email: user.email })
             .from(user)
             .where(eq(user.taskRouterWorkerSid, workerSid))
             .limit(1)

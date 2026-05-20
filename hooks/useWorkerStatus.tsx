@@ -10,7 +10,7 @@ import {
   ReactNode,
 } from 'react'
 
-export type WorkerActivity = 'available' | 'unavailable' | 'offline' | 'busy'
+export type WorkerActivity = 'available' | 'unavailable' | 'offline'
 
 const POLL_INTERVAL = 10_000 // 10 seconds
 
@@ -127,9 +127,6 @@ export function WorkerStatusProvider({ children }: WorkerStatusProviderProps) {
       if (authFailedRef.current) {
         throw new Error('Session expired - please log in again')
       }
-
-      // Prevent manually setting to busy — it's only set automatically on a call
-      if (newStatus === 'busy') return
 
       try {
         setIsLoading(true)

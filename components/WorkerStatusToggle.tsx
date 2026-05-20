@@ -13,10 +13,9 @@ const STATUS_CONFIG: Record<
   WorkerActivity,
   { label: string; short: string; dot: string; blink: string }
 > = {
-  available:   { label: "Available", short: "Avail", dot: "bg-green-500",  blink: "animate-pulse" },
-  unavailable: { label: "Away",      short: "Away",  dot: "bg-yellow-500", blink: "animate-pulse" },
-  offline:     { label: "Offline",   short: "Off",   dot: "bg-gray-400",   blink: ""              },
-  busy:        { label: "Busy",   short: "Busy",  dot: "bg-indigo-500", blink: "animate-pulse" },
+  available: { label: "Available", short: "Avail", dot: "bg-green-500", blink: "animate-pulse" },
+  unavailable: { label: "Away", short: "Away", dot: "bg-yellow-500", blink: "animate-pulse" },
+  offline: { label: "Offline", short: "Off", dot: "bg-gray-400", blink: "" },
 };
 
 interface WorkerStatusToggleProps {
@@ -25,8 +24,6 @@ interface WorkerStatusToggleProps {
 
 export function WorkerStatusToggle({ className }: WorkerStatusToggleProps) {
   const { status, isLoading, error, setStatus } = useWorkerStatus();
-
-  const isBusy = status === 'busy'
 
   const handleChange = async (value: string) => {
     try {
@@ -38,28 +35,16 @@ export function WorkerStatusToggle({ className }: WorkerStatusToggleProps) {
 
   return (
     <div className={cn("flex items-center gap-1 sm:gap-2", className)}>
-      <Select
-        value={status}
-        onValueChange={handleChange}
-        disabled={isLoading || isBusy}
-      >
+      <Select value={status} onValueChange={handleChange} disabled={isLoading}>
         <SelectTrigger className={cn(
           "w-[85px] sm:w-[130px] h-7 sm:h-8 text-[10px] sm:text-xs font-medium bg-transparent hover:bg-accent hover:text-accent-foreground",
-          (isLoading || isBusy) && "opacity-70 cursor-not-allowed"
+          isLoading && "opacity-50"
         )}>
           <SelectValue>
             <span className="flex items-center gap-1.5 sm:gap-2">
-              <span className={cn(
-                "w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full",
-                STATUS_CONFIG[status].dot,
-                STATUS_CONFIG[status].blink
-              )} />
-              <span className="sm:hidden">
-                {isLoading ? "..." : STATUS_CONFIG[status].short}
-              </span>
-              <span className="hidden sm:inline">
-                {isLoading ? "..." : STATUS_CONFIG[status].label}
-              </span>
+              <span className={cn("w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full", STATUS_CONFIG[status].dot, STATUS_CONFIG[status].blink)} />
+              <span className="sm:hidden">{isLoading ? "..." : STATUS_CONFIG[status].short}</span>
+              <span className="hidden sm:inline">{isLoading ? "..." : STATUS_CONFIG[status].label}</span>
             </span>
           </SelectValue>
         </SelectTrigger>
