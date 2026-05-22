@@ -13,7 +13,7 @@ interface UseAvailableWorkersResult {
   error: string | null
 }
 
-const POLL_INTERVAL = 30_000 // 30 seconds
+const POLL_INTERVAL = 15_000 // 15 seconds
 
 export function useAvailableWorkers(): UseAvailableWorkersResult {
   const [workers, setWorkers] = useState<WorkerEntry[]>([])
