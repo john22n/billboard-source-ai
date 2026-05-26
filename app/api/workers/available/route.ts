@@ -60,12 +60,11 @@ export async function GET() {
 
     const allSids = availableWorkers.map((w) => w.sid)
 
-    // Fetch matched users including lastCallAt for round-robin sort
+    // Fetch matched users to resolve names
     const matchedUsers = await db
       .select({
         email: user.email,
         taskRouterWorkerSid: user.taskRouterWorkerSid,
-        lastCallAt: user.lastCallAt,
       })
       .from(user)
       .where(inArray(user.taskRouterWorkerSid, allSids))
@@ -74,17 +73,13 @@ export async function GET() {
       matchedUsers.map((u) => [u.taskRouterWorkerSid, u]),
     )
 
-    // Sort by lastCallAt ascending — if null fall back to dateStatusChanged ascending
-    // dateStatusChanged = how long they've been Available (oldest = longest duration = next in line)
+    // Sort by dateStatusChanged ascending — oldest = longest duration = next in line
+    // This matches Twilio's exact round-robin routing order
     const sorted = availableWorkers
       .filter((w) => sidToUser.has(w.sid))
-      .sort((a, b) => {
-        const aTime = sidToUser.get(a.sid)?.lastCallAt?.getTime()
-          ?? new Date(a.dateStatusChanged).getTime()
-        const bTime = sidToUser.get(b.sid)?.lastCallAt?.getTime()
-          ?? new Date(b.dateStatusChanged).getTime()
-        return aTime - bTime
-      })
+      .sort((a, b) =>
+        new Date(a.dateStatusChanged).getTime() - new Date(b.dateStatusChanged).getTime()
+      )
 
     const workers = sorted.map((w) => ({
       name: firstNameFromEmail(sidToUser.get(w.sid)!.email),

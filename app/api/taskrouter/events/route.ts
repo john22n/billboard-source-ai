@@ -10,12 +10,17 @@ import { db } from '@/db'
 import { user } from '@/db/schema'
 import { eq } from 'drizzle-orm'
 
-const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN
+const TWILIO_AUTH_TOKEN  = process.env.TWILIO_AUTH_TOKEN
+const ACCOUNT_SID        = process.env.TWILIO_ACCOUNT_SID!
+const AUTH_TOKEN         = process.env.TWILIO_AUTH_TOKEN!
+const WORKSPACE_SID      = process.env.TASKROUTER_WORKSPACE_SID!
+const BUSY_ACTIVITY_SID  = process.env.TASKROUTER_ACTIVITY_BUSY_SID!
 
-const ACTIVITY_MAP: Record<string, 'available' | 'unavailable' | 'offline'> = {
+const ACTIVITY_MAP: Record<string, 'available' | 'unavailable' | 'offline' | 'busy'> = {
   [process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID   || '']: 'available',
   [process.env.TASKROUTER_ACTIVITY_UNAVAILABLE_SID || '']: 'unavailable',
   [process.env.TASKROUTER_ACTIVITY_OFFLINE_SID     || '']: 'offline',
+  [process.env.TASKROUTER_ACTIVITY_BUSY_SID        || '']: 'busy',
 }
 
 export async function POST(req: Request) {
@@ -74,6 +79,25 @@ export async function POST(req: Request) {
 
       case 'reservation.accepted':
         console.log(`✅ Reservation accepted by worker: ${workerSid}`)
+        if (workerSid && WORKSPACE_SID && BUSY_ACTIVITY_SID) {
+          // Skip Busy switch for voicemail worker
+          const workerAttrsRaw = formData.get('WorkerAttributes') as string
+          const workerAttrs = JSON.parse(workerAttrsRaw || '{}')
+          if (workerAttrs.email === 'voicemail@system') {
+            console.log('⏭️ Skipping Busy switch for voicemail worker')
+            break
+          }
+          try {
+            const client = twilio(ACCOUNT_SID, AUTH_TOKEN)
+            await client.taskrouter.v1
+              .workspaces(WORKSPACE_SID)
+              .workers(workerSid)
+              .update({ activitySid: BUSY_ACTIVITY_SID })
+            console.log(`✅ Worker ${workerSid} switched to Busy`)
+          } catch (err) {
+            console.error('❌ Failed to switch worker to Busy:', err)
+          }
+        }
         break
 
       case 'reservation.rejected':
@@ -107,6 +131,12 @@ export async function POST(req: Request) {
         if (activitySid && workerSid) {
           const newStatus = ACTIVITY_MAP[activitySid] || 'offline'
           console.log(`   Status: ${newStatus}`)
+
+          // Skip DB update for Busy — it's transient and set automatically
+          if (newStatus === 'busy') {
+            console.log(`   ⏭️ Skipping DB update for Busy activity`)
+            break
+          }
 
           const currentUser = await db
             .select({ id: user.id, email: user.email })
