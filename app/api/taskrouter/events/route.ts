@@ -15,6 +15,7 @@ const ACCOUNT_SID        = process.env.TWILIO_ACCOUNT_SID!
 const AUTH_TOKEN         = process.env.TWILIO_AUTH_TOKEN!
 const WORKSPACE_SID      = process.env.TASKROUTER_WORKSPACE_SID!
 const BUSY_ACTIVITY_SID  = process.env.TASKROUTER_ACTIVITY_BUSY_SID!
+const AVAILABLE_ACTIVITY_SID = process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID!
 
 const ACTIVITY_MAP: Record<string, 'available' | 'unavailable' | 'offline' | 'busy'> = {
   [process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID   || '']: 'available',
@@ -106,6 +107,24 @@ export async function POST(req: Request) {
 
       case 'reservation.timeout':
         console.log(`⏰ Reservation timeout for worker: ${workerSid}`)
+        if (workerSid && WORKSPACE_SID && BUSY_ACTIVITY_SID && AVAILABLE_ACTIVITY_SID) {
+          try {
+            const client = twilio(ACCOUNT_SID, AUTH_TOKEN)
+            // Switch to Busy then immediately back to Available
+            // This resets dateStatusChanged putting them at the back of the queue
+            await client.taskrouter.v1
+              .workspaces(WORKSPACE_SID)
+              .workers(workerSid)
+              .update({ activitySid: BUSY_ACTIVITY_SID })
+            await client.taskrouter.v1
+              .workspaces(WORKSPACE_SID)
+              .workers(workerSid)
+              .update({ activitySid: AVAILABLE_ACTIVITY_SID })
+            console.log(`✅ Worker ${workerSid} reset to back of queue after timeout`)
+          } catch (err) {
+            console.error('❌ Failed to reset worker after timeout:', err)
+          }
+        }
         break
 
       case 'task.canceled':
