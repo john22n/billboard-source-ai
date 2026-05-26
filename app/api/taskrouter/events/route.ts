@@ -115,13 +115,6 @@ export async function POST(req: Request) {
 
       case 'task.completed':
         console.log(`📞 Task completed for worker: ${workerSid}`)
-        if (workerSid) {
-          await db
-            .update(user)
-            .set({ lastCallAt: new Date() })
-            .where(eq(user.taskRouterWorkerSid, workerSid))
-          console.log(`✅ Updated lastCallAt for worker: ${workerSid}`)
-        }
         break
 
       case 'worker.activity.update':
