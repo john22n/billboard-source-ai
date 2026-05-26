@@ -21,37 +21,38 @@ export function OnPhonesIndicator() {
   const active = workers.length > 0
 
   return (
-    <div className="hidden sm:flex items-center gap-2 rounded-full border border-border px-3 py-1 text-sm">
+    <div className="hidden sm:flex items-center gap-1.5 rounded-full border border-border bg-secondary/50 px-2 py-1 text-sm">
       <Phone
         className={cn(
-          'size-3.5 shrink-0',
+          'size-3.5 shrink-0 mx-1',
           active ? 'text-indigo-600 animate-pulse' : 'text-muted-foreground',
         )}
       />
-      <span className="flex items-center gap-1.5 min-w-0">
+      <span className="flex items-center gap-1 min-w-0">
         {active ? (
           workers.map((worker, i) => (
             <span key={worker.name} className="flex items-center gap-1">
               {i > 0 && (
-                <span className="text-muted-foreground select-none">·</span>
+                <span className="text-muted-foreground/50 select-none text-xs">·</span>
               )}
-              {worker.status === 'on_call' && (
-                <span className="inline-block size-1.5 rounded-full bg-green-500 animate-pulse shrink-0" />
+              {worker.status === 'on_call' ? (
+                <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-50 text-green-700 border border-green-200">
+                  <span className="inline-block size-1.5 rounded-full bg-green-500 animate-pulse shrink-0" />
+                  {worker.name}
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-background border border-border">
+                  <span className="text-muted-foreground/60 text-[10px]">{i + 1}</span>
+                  {worker.name}
+                  {i === 0 && (
+                    <span className="text-indigo-500 text-[10px] font-medium">next</span>
+                  )}
+                </span>
               )}
-              <span
-                className={cn(
-                  'truncate',
-                  worker.status === 'on_call'
-                    ? 'text-green-600'
-                    : 'text-foreground',
-                )}
-              >
-                {worker.name}
-              </span>
             </span>
           ))
         ) : (
-          <span className="text-muted-foreground">No one on phones</span>
+          <span className="text-muted-foreground text-xs px-1">No one on phones</span>
         )}
       </span>
     </div>
