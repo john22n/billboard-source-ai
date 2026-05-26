@@ -10,11 +10,11 @@ import { db } from '@/db'
 import { user } from '@/db/schema'
 import { eq } from 'drizzle-orm'
 
-const TWILIO_AUTH_TOKEN  = process.env.TWILIO_AUTH_TOKEN
-const ACCOUNT_SID        = process.env.TWILIO_ACCOUNT_SID!
-const AUTH_TOKEN         = process.env.TWILIO_AUTH_TOKEN!
-const WORKSPACE_SID      = process.env.TASKROUTER_WORKSPACE_SID!
-const BUSY_ACTIVITY_SID  = process.env.TASKROUTER_ACTIVITY_BUSY_SID!
+const TWILIO_AUTH_TOKEN      = process.env.TWILIO_AUTH_TOKEN
+const ACCOUNT_SID            = process.env.TWILIO_ACCOUNT_SID!
+const AUTH_TOKEN             = process.env.TWILIO_AUTH_TOKEN!
+const WORKSPACE_SID          = process.env.TASKROUTER_WORKSPACE_SID!
+const BUSY_ACTIVITY_SID      = process.env.TASKROUTER_ACTIVITY_BUSY_SID!
 const AVAILABLE_ACTIVITY_SID = process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID!
 
 const ACTIVITY_MAP: Record<string, 'available' | 'unavailable' | 'offline' | 'busy'> = {
@@ -22,6 +22,24 @@ const ACTIVITY_MAP: Record<string, 'available' | 'unavailable' | 'offline' | 'bu
   [process.env.TASKROUTER_ACTIVITY_UNAVAILABLE_SID || '']: 'unavailable',
   [process.env.TASKROUTER_ACTIVITY_OFFLINE_SID     || '']: 'offline',
   [process.env.TASKROUTER_ACTIVITY_BUSY_SID        || '']: 'busy',
+}
+
+async function resetWorkerToBack(workerSid: string, label: string) {
+  if (!workerSid || !WORKSPACE_SID || !BUSY_ACTIVITY_SID || !AVAILABLE_ACTIVITY_SID) return
+  try {
+    const client = twilio(ACCOUNT_SID, AUTH_TOKEN)
+    await client.taskrouter.v1
+      .workspaces(WORKSPACE_SID)
+      .workers(workerSid)
+      .update({ activitySid: BUSY_ACTIVITY_SID })
+    await client.taskrouter.v1
+      .workspaces(WORKSPACE_SID)
+      .workers(workerSid)
+      .update({ activitySid: AVAILABLE_ACTIVITY_SID })
+    console.log(`✅ Worker ${workerSid} reset to back of queue after ${label}`)
+  } catch (err) {
+    console.error(`❌ Failed to reset worker after ${label}:`, err)
+  }
 }
 
 export async function POST(req: Request) {
@@ -103,28 +121,12 @@ export async function POST(req: Request) {
 
       case 'reservation.rejected':
         console.log(`🚫 Reservation rejected by worker: ${workerSid}`)
+        await resetWorkerToBack(workerSid, 'rejection')
         break
 
       case 'reservation.timeout':
         console.log(`⏰ Reservation timeout for worker: ${workerSid}`)
-        if (workerSid && WORKSPACE_SID && BUSY_ACTIVITY_SID && AVAILABLE_ACTIVITY_SID) {
-          try {
-            const client = twilio(ACCOUNT_SID, AUTH_TOKEN)
-            // Switch to Busy then immediately back to Available
-            // This resets dateStatusChanged putting them at the back of the queue
-            await client.taskrouter.v1
-              .workspaces(WORKSPACE_SID)
-              .workers(workerSid)
-              .update({ activitySid: BUSY_ACTIVITY_SID })
-            await client.taskrouter.v1
-              .workspaces(WORKSPACE_SID)
-              .workers(workerSid)
-              .update({ activitySid: AVAILABLE_ACTIVITY_SID })
-            console.log(`✅ Worker ${workerSid} reset to back of queue after timeout`)
-          } catch (err) {
-            console.error('❌ Failed to reset worker after timeout:', err)
-          }
-        }
+        await resetWorkerToBack(workerSid, 'timeout')
         break
 
       case 'task.canceled':
