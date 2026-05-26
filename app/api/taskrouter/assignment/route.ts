@@ -78,7 +78,6 @@ export async function POST(req: Request) {
     const workspaceSid = formData.get('WorkspaceSid') as string;
 
     // ── VOICEMAIL WORKER ─────────────────────────────────────────────────────
-    // No recording changes here — voicemail is handled by its own route
     if (workerAttrs.email === 'voicemail@system') {
       console.log('📼 Voicemail worker assigned - using redirect instruction');
 
@@ -125,7 +124,6 @@ export async function POST(req: Request) {
     }
 
     // ── SIMULTANEOUS RING ────────────────────────────────────────────────────
-    // Recording is handled inside simultaneous-dial/route.ts via <Dial> attribute
     if (workerAttrs.simultaneous_ring && workerAttrs.cell_phone) {
       console.log('📱 Worker has simultaneous_ring=true — using parallel dial instead of conference');
 
@@ -169,6 +167,7 @@ export async function POST(req: Request) {
     const callCompleteUrl = new URL(`${appUrl}/api/taskrouter/call-complete`);
     callCompleteUrl.searchParams.set('taskSid',      taskSid);
     callCompleteUrl.searchParams.set('workspaceSid', workspaceSid);
+    callCompleteUrl.searchParams.set('workerSid',    workerSid);
     if (process.env.VERCEL_BYPASS_TOKEN) {
       callCompleteUrl.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
     }
@@ -179,11 +178,9 @@ export async function POST(req: Request) {
       from: taskAttrs.from || process.env.TWILIO_MAIN_NUMBER || '+18338547126',
       post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
       timeout: 20,
-      // ── call recording ──────────────────────────────────────────────────────
       record:                           'record-from-answer',
       recording_status_callback:        `${appUrl}/api/recordings/call`,
       recording_status_callback_method: 'POST',
-      // ────────────────────────────────────────────────────────────────────────
       conference_status_callback:       callCompleteUrl.toString(),
       conference_status_callback_event: 'start, end, join, leave',
       end_conference_on_exit:           true,
