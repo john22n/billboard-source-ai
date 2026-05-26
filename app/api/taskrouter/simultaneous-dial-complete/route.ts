@@ -8,8 +8,9 @@
  *   - completed (duration >= 4s)  → clean hangup (genuine answer)
  *   - completed (duration < 4s)   → treat as no-answer (carrier voicemail)
  *   - completed (duration = null) → treat as no-answer (rejected during screening)
- *   - canceled / no-answer        → re-enqueue with retried=true + excluded_workers
- *                                   so TaskRouter skips cell user on the next attempt
+ *   - canceled / no-answer        → reset worker to back of queue, re-enqueue with
+ *                                   retried=true + excluded_workers so TaskRouter
+ *                                   skips cell user on the next attempt
  *   - canceled / no-answer (retried=true) → voicemail (prevent loop)
  *   - busy / failed               → voicemail
  *
@@ -21,10 +22,12 @@
 
 import twilio from 'twilio';
 
-const ACCOUNT_SID   = process.env.TWILIO_ACCOUNT_SID!;
-const AUTH_TOKEN    = process.env.TWILIO_AUTH_TOKEN!;
-const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!;
-const WORKFLOW_SID  = process.env.TASKROUTER_WORKFLOW_SID!;
+const ACCOUNT_SID            = process.env.TWILIO_ACCOUNT_SID!;
+const AUTH_TOKEN             = process.env.TWILIO_AUTH_TOKEN!;
+const WORKSPACE_SID          = process.env.TASKROUTER_WORKSPACE_SID!;
+const WORKFLOW_SID           = process.env.TASKROUTER_WORKFLOW_SID!;
+const BUSY_ACTIVITY_SID      = process.env.TASKROUTER_ACTIVITY_BUSY_SID!;
+const AVAILABLE_ACTIVITY_SID = process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID!;
 
 // Only trust "completed" as a genuine answer if the call lasted at least this long.
 // - null duration = rejected during call screening prompt → re-enqueue
@@ -61,6 +64,24 @@ export async function POST(req: Request) {
 
     const client = twilio(ACCOUNT_SID, AUTH_TOKEN);
 
+    // ── Helper: reset worker to back of queue ────────────────────────────────
+    const resetWorkerToBack = async () => {
+      if (!workerSid || !BUSY_ACTIVITY_SID || !AVAILABLE_ACTIVITY_SID) return
+      try {
+        await client.taskrouter.v1
+          .workspaces(workspaceSid)
+          .workers(workerSid)
+          .update({ activitySid: BUSY_ACTIVITY_SID })
+        await client.taskrouter.v1
+          .workspaces(workspaceSid)
+          .workers(workerSid)
+          .update({ activitySid: AVAILABLE_ACTIVITY_SID })
+        console.log(`✅ Worker ${workerSid} reset to back of queue after missed simultaneous dial`)
+      } catch (err) {
+        console.error('❌ Failed to reset worker after missed simultaneous dial:', err)
+      }
+    }
+
     // ── Helper: build voicemail redirect TwiML ───────────────────────────────
     const buildVoicemailTwiml = () => {
       const voicemailUrl = new URL(`${appUrl}/api/taskrouter/voicemail`);
@@ -79,10 +100,6 @@ export async function POST(req: Request) {
     // ── completed → only trust it if duration confirms a real answer ─────────
     if (!dialCallStatus || dialCallStatus === 'completed') {
 
-      // Genuine answer requires a known duration >= threshold.
-      // null duration = rejected during screening prompt.
-      // short duration = carrier voicemail.
-      // Both cases should re-enqueue.
       const isGenuineAnswer =
         durationSeconds != null &&
         durationSeconds >= GENUINE_ANSWER_THRESHOLD_SECONDS;
@@ -118,7 +135,6 @@ export async function POST(req: Request) {
         });
       }
 
-      // Not a genuine answer — override and fall through to re-enqueue
       const reason = durationSeconds === null
         ? 'null duration (rejected during screening)'
         : `duration=${durationSeconds}s < ${GENUINE_ANSWER_THRESHOLD_SECONDS}s (carrier voicemail)`;
@@ -156,8 +172,11 @@ export async function POST(req: Request) {
       console.warn('⚠️ Missing taskSid or workspaceSid — task will not be completed');
     }
 
-    // ── canceled or no-answer → re-enqueue once, then voicemail ─────────────
+    // ── canceled or no-answer → reset worker, re-enqueue once, then voicemail
     if (dialCallStatus === 'canceled' || dialCallStatus === 'no-answer') {
+
+      // Reset worker to back of queue since they missed the call
+      await resetWorkerToBack()
 
       // Already retried once — stop looping, go to voicemail
       if (taskAttributes.retried) {
@@ -168,7 +187,6 @@ export async function POST(req: Request) {
         });
       }
 
-      // Build excluded_workers array — carry forward any previously excluded workers
       const previouslyExcluded = Array.isArray(taskAttributes.excluded_workers)
         ? (taskAttributes.excluded_workers as string[])
         : [];
@@ -178,14 +196,12 @@ export async function POST(req: Request) {
 
       console.log('🔄 No answer — re-enqueueing, excluded workers:', excludedWorkers);
 
-      // ── Build waitUrl with bypass token ──────────────────────────────────
       const waitUrlObj = new URL(`${appUrl}/api/taskrouter/wait`);
       waitUrlObj.searchParams.set('retry', 'true');
       if (process.env.VERCEL_BYPASS_TOKEN) {
         waitUrlObj.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
       }
 
-      // ── Build enqueueActionUrl with bypass token ──────────────────────────
       const enqueueActionUrlObj = new URL(`${appUrl}/api/taskrouter/enqueue-complete`);
       if (process.env.VERCEL_BYPASS_TOKEN) {
         enqueueActionUrlObj.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
