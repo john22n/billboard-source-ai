@@ -8,6 +8,9 @@ const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID
 const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN
 const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID
 
+// Voicemail worker email to exclude from the list
+const VOICEMAIL_EMAIL = 'voicemail@system'
+
 function firstNameFromEmail(email: string): string {
   const local = email.split('@')[0]
   const first = local.split('.')[0]
@@ -31,36 +34,28 @@ export async function GET() {
 
     const client = twilio(ACCOUNT_SID as string, AUTH_TOKEN as string)
 
-    // Fetch available workers and assigned tasks in parallel
-    const [availableWorkers, assignedTasks] = await Promise.all([
+    // Fetch Available and Busy workers in parallel
+    const [availableWorkers, busyWorkers] = await Promise.all([
       client.taskrouter.v1.workspaces(WORKSPACE_SID).workers.list({ activityName: 'Available' }),
-      client.taskrouter.v1.workspaces(WORKSPACE_SID).tasks.list({ assignmentStatus: ['assigned'] }),
+      client.taskrouter.v1.workspaces(WORKSPACE_SID).workers.list({ activityName: 'Busy' }),
     ])
 
-    // For each assigned task fetch its accepted reservations to detect on-call workers
-    const reservationResults = await Promise.all(
-      assignedTasks.map((task) =>
-        client.taskrouter.v1
-          .workspaces(WORKSPACE_SID)
-          .tasks(task.sid)
-          .reservations.list()
-          .then((res) => res.filter((r) => r.reservationStatus === 'accepted'))
-      )
-    )
+    // Busy workers are on an active call
+    const onCallSids = new Set(busyWorkers.map((w) => w.sid))
 
-    // Build set of worker SIDs currently on an active call
-    const onCallSids = new Set(reservationResults.flat().map((r) => r.workerSid))
+    // Merge both lists
+    const allWorkers = [...availableWorkers, ...busyWorkers]
 
-    if (availableWorkers.length === 0) {
+    if (allWorkers.length === 0) {
       return Response.json(
         { workers: [] },
         { headers: { 'Cache-Control': 'no-store' } },
       )
     }
 
-    const allSids = availableWorkers.map((w) => w.sid)
+    const allSids = allWorkers.map((w) => w.sid)
 
-    // Fetch matched users to resolve names
+    // Fetch matched users to resolve names — exclude voicemail worker
     const matchedUsers = await db
       .select({
         email: user.email,
@@ -70,16 +65,22 @@ export async function GET() {
       .where(inArray(user.taskRouterWorkerSid, allSids))
 
     const sidToUser = new Map(
-      matchedUsers.map((u) => [u.taskRouterWorkerSid, u]),
+      matchedUsers
+        .filter((u) => u.email !== VOICEMAIL_EMAIL)
+        .map((u) => [u.taskRouterWorkerSid, u]),
     )
 
-    // Sort by dateStatusChanged ascending — oldest = longest duration = next in line
-    // This matches Twilio's exact round-robin routing order
-    const sorted = availableWorkers
+    // Sort available workers by dateStatusChanged ascending — oldest = longest duration = next in line
+    // Busy (on-call) workers appended at the end
+    const sortedAvailable = availableWorkers
       .filter((w) => sidToUser.has(w.sid))
       .sort((a, b) =>
         new Date(a.dateStatusChanged).getTime() - new Date(b.dateStatusChanged).getTime()
       )
+
+    const sortedBusy = busyWorkers.filter((w) => sidToUser.has(w.sid))
+
+    const sorted = [...sortedAvailable, ...sortedBusy]
 
     const workers = sorted.map((w) => ({
       name: firstNameFromEmail(sidToUser.get(w.sid)!.email),
