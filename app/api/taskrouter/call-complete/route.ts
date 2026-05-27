@@ -3,16 +3,14 @@
  *
  * Called when conference events occur (start, end, join, leave).
  * Completes the task when the conference ends.
- * If the conference ended without being answered, redirects caller to voicemail
- * and resets the worker's dateStatusChanged so they move to the back of the queue.
+ * If the conference ended without being answered, redirects caller to voicemail.
+ * Worker reset is handled by reservation.canceled in events/route.ts.
  */
 import twilio from 'twilio';
 
-const ACCOUNT_SID            = process.env.TWILIO_ACCOUNT_SID!;
-const AUTH_TOKEN             = process.env.TWILIO_AUTH_TOKEN!;
-const WORKSPACE_SID          = process.env.TASKROUTER_WORKSPACE_SID!;
-const BUSY_ACTIVITY_SID      = process.env.TASKROUTER_ACTIVITY_BUSY_SID!;
-const AVAILABLE_ACTIVITY_SID = process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID!;
+const ACCOUNT_SID   = process.env.TWILIO_ACCOUNT_SID!;
+const AUTH_TOKEN    = process.env.TWILIO_AUTH_TOKEN!;
+const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!;
 
 const client = twilio(ACCOUNT_SID, AUTH_TOKEN);
 
@@ -81,25 +79,7 @@ export async function POST(req: Request) {
 
         if (!wasAnswered && callerCallSid) {
           console.log('📼 Conference ended unanswered — redirecting caller to voicemail');
-
-          // Reset worker dateStatusChanged so they move to the back of the queue
-          if (workerSid && BUSY_ACTIVITY_SID && AVAILABLE_ACTIVITY_SID) {
-            try {
-              await client.taskrouter.v1
-                .workspaces(workspaceSid)
-                .workers(workerSid)
-                .update({ activitySid: BUSY_ACTIVITY_SID })
-              await client.taskrouter.v1
-                .workspaces(workspaceSid)
-                .workers(workerSid)
-                .update({ activitySid: AVAILABLE_ACTIVITY_SID })
-              console.log(`✅ Worker ${workerSid} reset to back of queue after unanswered conference`)
-            } catch (resetErr) {
-              console.error('❌ Failed to reset worker after unanswered conference:', resetErr)
-            }
-          } else {
-            console.log(`⚠️ Cannot reset worker — workerSid: ${workerSid}, BUSY_ACTIVITY_SID: ${BUSY_ACTIVITY_SID}, AVAILABLE_ACTIVITY_SID: ${AVAILABLE_ACTIVITY_SID}`)
-          }
+          // Note: worker reset is handled by reservation.canceled in events/route.ts
 
           const voicemailUrl = new URL(`${appUrl}/api/taskrouter/voicemail`);
           voicemailUrl.searchParams.set('taskSid',      taskSid);
