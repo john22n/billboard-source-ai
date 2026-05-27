@@ -119,6 +119,11 @@ export async function POST(req: Request) {
         }
         break
 
+      case 'reservation.canceled':
+        console.log(`❌ Reservation canceled for worker: ${workerSid}`)
+        await resetWorkerToBack(workerSid, 'cancellation')
+        break
+
       case 'reservation.rejected':
         console.log(`🚫 Reservation rejected by worker: ${workerSid}`)
         await resetWorkerToBack(workerSid, 'rejection')
