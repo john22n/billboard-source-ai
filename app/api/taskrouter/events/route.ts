@@ -171,7 +171,7 @@ export async function POST(req: Request) {
         break
 
       default:
-        console.log('ℹ️ Unhandled event type')
+        console.log(`ℹ️ Unhandled event type: ${eventType}`)
     }
 
     return new Response(null, { status: 204 })

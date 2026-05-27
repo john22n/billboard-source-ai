@@ -44,6 +44,7 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
   const isInitializing = useRef(false);
   const hasInitialized = useRef(false);
   const registrationTime = useRef<number>(0);
+  const isLoggedOut = useRef(false);
 
   const onCallAcceptedRef = useRef<((call: Call) => void) | null>(null);
   const onCallDisconnectedRef = useRef<(() => void) | null>(null);
@@ -76,6 +77,7 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
   }, [workerStatus]);
 
   const initTwilio = useCallback(async () => {
+    if (isLoggedOut.current) return false;
     if (isInitializing.current) {
       console.log('⚠️ Init already in progress');
       return false;
@@ -204,6 +206,8 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
       });
 
       device.on('unregistered', () => {
+        if (isLoggedOut.current) return;
+
         const durationMs = Date.now() - registrationTime.current;
         const durationSec = (durationMs / 1000).toFixed(2);
 
@@ -224,6 +228,15 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
           console.error('  2. Multiple tabs open');
           console.error('  3. Token validation failed');
           setDeviceError('Device unregistered immediately. Check for multiple tabs or identity conflicts.');
+        } else {
+          // Auto-reconnect after a short delay
+          console.log('🔄 Auto-reconnecting after unregistered event...')
+          setTimeout(() => {
+            if (!isLoggedOut.current && !isInitializing.current) {
+              hasInitialized.current = false
+              initTwilio()
+            }
+          }, 2000)
         }
       });
 
@@ -286,6 +299,7 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
     console.log('🎬 TwilioProvider mounted - initializing device');
     console.log('Environment:', process.env.NODE_ENV);
 
+    isLoggedOut.current = false;
     initTwilio();
 
     // NO cleanup - device should persist for the lifetime of the app
@@ -294,6 +308,7 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
 
   useEffect(() => {
     const checkInterval = setInterval(() => {
+      if (isLoggedOut.current) return;
       if (twilioDevice.current) {
         const state = twilioDevice.current.state;
 
@@ -304,6 +319,14 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
           setDeviceError('Twilio device was destroyed. Click "Reinitialize" to fix.');
           setStatus('Device destroyed');
           hasInitialized.current = false;
+        }
+
+        // Auto re-register if device is unregistered but not destroyed
+        if (state === 'unregistered' && hasInitialized.current && !isInitializing.current) {
+          console.warn('⚠️ Device is unregistered — re-registering...')
+          twilioDevice.current.register().catch((err) => {
+            console.error('❌ Failed to re-register device:', err)
+          })
         }
       }
     }, 2000);
@@ -384,6 +407,7 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
 
   const destroyDevice = useCallback(() => {
     console.log('🧹 Destroying Twilio device for logout');
+    isLoggedOut.current = true;
     if (activeCall.current) {
       activeCall.current.disconnect();
       activeCall.current = null;
@@ -410,6 +434,7 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
 
   const reinitialize = useCallback(async () => {
     console.log('🔄 Manual reinitialization requested');
+    isLoggedOut.current = false;
     hasInitialized.current = false;
     return await initTwilio();
   }, [initTwilio]);
