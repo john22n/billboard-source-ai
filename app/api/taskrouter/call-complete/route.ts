@@ -78,7 +78,7 @@ export async function POST(req: Request) {
         console.log(`📊 wasAnswered: ${wasAnswered}`)
 
         if (!wasAnswered && callerCallSid) {
-          console.log('📼 Conference ended unanswered — redirecting caller to voicemail');
+          console.log('📼 Conference ended unanswered — checking if caller is still on the line');
           // Note: worker reset is handled by reservation.canceled in events/route.ts
 
           const voicemailUrl = new URL(`${appUrl}/api/taskrouter/voicemail`);
@@ -89,11 +89,16 @@ export async function POST(req: Request) {
           }
 
           try {
-            await client.calls(callerCallSid).update({
-              url:    voicemailUrl.toString(),
-              method: 'POST',
-            });
-            console.log(`✅ Caller ${callerCallSid} redirected to voicemail`);
+            const callerCall = await client.calls(callerCallSid).fetch()
+            if (callerCall.status === 'in-progress') {
+              await client.calls(callerCallSid).update({
+                url:    voicemailUrl.toString(),
+                method: 'POST',
+              });
+              console.log(`✅ Caller ${callerCallSid} redirected to voicemail`);
+            } else {
+              console.log(`ℹ️ Caller already hung up (status: ${callerCall.status}) — skipping voicemail redirect`);
+            }
           } catch (redirectErr) {
             console.error('❌ Failed to redirect caller to voicemail:', redirectErr);
           }
