@@ -82,6 +82,20 @@ export async function POST(req: Request) {
       }
     }
 
+    // ── Helper: switch worker back to Available after answered call ───────────
+    const switchWorkerToAvailable = async () => {
+      if (!workerSid || !AVAILABLE_ACTIVITY_SID) return
+      try {
+        await client.taskrouter.v1
+          .workspaces(workspaceSid)
+          .workers(workerSid)
+          .update({ activitySid: AVAILABLE_ACTIVITY_SID })
+        console.log(`✅ Worker ${workerSid} switched back to Available after genuine answer`)
+      } catch (err) {
+        console.error('❌ Failed to switch worker back to Available:', err)
+      }
+    }
+
     // ── Helper: build voicemail redirect TwiML ───────────────────────────────
     const buildVoicemailTwiml = () => {
       const voicemailUrl = new URL(`${appUrl}/api/taskrouter/voicemail`);
@@ -128,6 +142,9 @@ export async function POST(req: Request) {
             console.error('❌ Failed to complete task:', taskErr);
           }
         }
+
+        // Switch worker back to Available so they don't stay stuck in Busy
+        await switchWorkerToAvailable()
 
         return new Response(HANGUP_TWIML, {
           status: 200,

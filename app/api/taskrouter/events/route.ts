@@ -119,6 +119,11 @@ export async function POST(req: Request) {
         }
         break
 
+      case 'reservation.canceled':
+        console.log(`❌ Reservation canceled for worker: ${workerSid}`)
+        await resetWorkerToBack(workerSid, 'cancellation')
+        break
+
       case 'reservation.rejected':
         console.log(`🚫 Reservation rejected by worker: ${workerSid}`)
         await resetWorkerToBack(workerSid, 'rejection')
@@ -171,7 +176,7 @@ export async function POST(req: Request) {
         break
 
       default:
-        console.log('ℹ️ Unhandled event type')
+        console.log(`ℹ️ Unhandled event type: ${eventType}`)
     }
 
     return new Response(null, { status: 204 })
