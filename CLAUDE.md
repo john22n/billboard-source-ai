@@ -6,6 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Billboard Source AI is a Next.js application for analyzing sales calls using OpenAI's APIs. The application provides real-time transcription, AI-powered analysis, automated form field extraction from sales conversations, billboard market intelligence lookup, Twilio TaskRouter call routing with voicemail, and Nutshell CRM integration.
 
+## Domain Language
+
+Read `CONTEXT.md` before changing Lead Intake, pricing, transcription, routing, or Nutshell CRM behavior. Use the glossary terms there for code, tests, issue writeups, and PRDs when they apply.
+
 ## Development Commands
 
 **Start development server:**
@@ -152,13 +156,13 @@ Dual authentication: JWT-based password auth + WebAuthn passkeys.
    - `status` (text) - 'pending' or 'completed'
    - `createdAt` (timestamp)
 
-5. **`nutshellLeads` table** (`nutshell_leads`) - Nutshell CRM lead sync tracking:
+4. **`nutshellLeads` table** (`nutshell_leads`) - Nutshell CRM lead sync tracking:
    - `id` (serial) - Primary key
    - `nutshellLeadId` (integer) - Unique Nutshell lead ID (UPSERT key)
    - `name`, `status`, `assignee` (text)
    - `createdAt`, `updatedAt` (timestamp)
 
-4. **`billboardLocations` table** (`billboard_locations`) - Market intelligence with vector search:
+5. **`billboardLocations` table** (`billboard_locations`) - Market intelligence with vector search:
    - `id` (serial) - Primary key
    - Location: `city` (text, not null), `state` (text, not null), `county` (text)
    - `market`, `avgDailyViews`, `fourWeekRange`, `marketRange`, `generalRange`, `details`, `avgViewsPerPeriod` (text)
@@ -277,56 +281,56 @@ Dual authentication: JWT-based password auth + WebAuthn passkeys.
 
 ### API Routes
 
-| Route                                        | Description                                         |
-| -------------------------------------------- | --------------------------------------------------- |
-| **Auth**                                     |                                                     |
-| `/api/auth/check-user`                       | Check if user exists                                |
-| `/api/auth/logout`                           | Logout / clear session                              |
-| **OpenAI**                                   |                                                     |
-| `/api/token`                                 | OpenAI realtime token generation                    |
-| `/api/transcribe-file`                       | File upload transcription                           |
-| `/api/extract-billboard-fields`              | Streaming form field extraction                     |
-| `/api/openai/update-cost`                    | Update call duration and cost                       |
-| `/api/openai/usage`                          | Fetch OpenAI API usage via Admin API                |
-| **Billboard**                                |                                                     |
-| `/api/billboard-pricing`                     | Market intelligence lookup (RAG)                    |
-| `/api/billboard-data/upload-blob`            | File upload to Vercel Blob                          |
-| `/api/billboard-data/start-process`          | Start chunked CSV processing                        |
-| `/api/billboard-data/process-chunk`          | Process single chunk of billboard data              |
-| **Twilio**                                   |                                                     |
-| `/api/twilio-token`                          | Twilio Voice SDK tokens                             |
-| `/api/twilio-inbound`                        | Incoming call webhook handler                       |
-| `/api/twilio-status`                         | Call status callback                                |
-| `/api/twilio/usage`                          | Fetch Twilio usage/costs                            |
-| `/api/twilio/voicemails`                     | Fetch voicemail recordings                          |
-| **TaskRouter**                               |                                                     |
-| `/api/taskrouter/assignment`                 | Task assignment callback                            |
-| `/api/taskrouter/call-complete`              | Call completion handler                             |
-| `/api/taskrouter/cell-screen`                | Simultaneous ring: plays "press 1" prompt to cell   |
-| `/api/taskrouter/cell-screen-accept`         | Simultaneous ring: cell worker pressed 1, connects  |
-| `/api/taskrouter/enqueue-complete`           | Enqueue completion handler                          |
-| `/api/taskrouter/events`                     | TaskRouter event webhook                            |
-| `/api/taskrouter/simultaneous-dial`          | Simultaneous ring: TwiML dial handler               |
-| `/api/taskrouter/simultaneous-dial-complete` | Simultaneous ring: dial action callback             |
-| `/api/taskrouter/voicemail`                  | Voicemail recording handler                         |
-| `/api/taskrouter/voicemail-complete`         | Voicemail completion callback                       |
-| `/api/taskrouter/voicemail-transcription`    | Voicemail transcription callback                    |
-| `/api/taskrouter/wait`                       | Queue wait music/message                            |
-| `/api/taskrouter/worker-availability`        | Get/set worker availability                         |
-| `/api/taskrouter/worker-status`              | Get/set worker status (polling endpoint)            |
-| `/api/taskrouter/client-status`              | Cancel cell phone leg when browser client rejects   |
-| **Passkeys**                              |                                        |
-| `/api/passkey/auth-options`               | Generate passkey auth options          |
-| `/api/passkey/auth-verify`                | Verify passkey authentication          |
-| `/api/passkey/register-options`           | Generate passkey registration options  |
-| `/api/passkey/register-verify`            | Verify passkey registration            |
-| `/api/passkey/delete`                     | Delete a passkey                       |
-| `/api/passkey/list`                       | List user's passkeys                   |
-| **CRM**                                   |                                        |
-| `/api/nutshell/create-lead`               | Create lead in Nutshell CRM            |
-| `/api/nutshell/sync-leads`                | Admin SSE stream: sync leads from Nutshell (last 90 days) to local DB |
-| **Cron**                                  |                                        |
-| `/api/cron/clear-openai-logs`             | Clear prior-month OpenAI logs (requires CRON_SECRET bearer token) |
+| Route                                        | Description                                                           |
+| -------------------------------------------- | --------------------------------------------------------------------- |
+| **Auth**                                     |                                                                       |
+| `/api/auth/check-user`                       | Check if user exists                                                  |
+| `/api/auth/logout`                           | Logout / clear session                                                |
+| **OpenAI**                                   |                                                                       |
+| `/api/token`                                 | OpenAI realtime token generation                                      |
+| `/api/transcribe-file`                       | File upload transcription                                             |
+| `/api/extract-billboard-fields`              | Streaming form field extraction                                       |
+| `/api/openai/update-cost`                    | Update call duration and cost                                         |
+| `/api/openai/usage`                          | Fetch OpenAI API usage via Admin API                                  |
+| **Billboard**                                |                                                                       |
+| `/api/billboard-pricing`                     | Market intelligence lookup (RAG)                                      |
+| `/api/billboard-data/upload-blob`            | File upload to Vercel Blob                                            |
+| `/api/billboard-data/start-process`          | Start chunked CSV processing                                          |
+| `/api/billboard-data/process-chunk`          | Process single chunk of billboard data                                |
+| **Twilio**                                   |                                                                       |
+| `/api/twilio-token`                          | Twilio Voice SDK tokens                                               |
+| `/api/twilio-inbound`                        | Incoming call webhook handler                                         |
+| `/api/twilio-status`                         | Call status callback                                                  |
+| `/api/twilio/usage`                          | Fetch Twilio usage/costs                                              |
+| `/api/twilio/voicemails`                     | Fetch voicemail recordings                                            |
+| **TaskRouter**                               |                                                                       |
+| `/api/taskrouter/assignment`                 | Task assignment callback                                              |
+| `/api/taskrouter/call-complete`              | Call completion handler                                               |
+| `/api/taskrouter/cell-screen`                | Simultaneous ring: plays "press 1" prompt to cell                     |
+| `/api/taskrouter/cell-screen-accept`         | Simultaneous ring: cell worker pressed 1, connects                    |
+| `/api/taskrouter/enqueue-complete`           | Enqueue completion handler                                            |
+| `/api/taskrouter/events`                     | TaskRouter event webhook                                              |
+| `/api/taskrouter/simultaneous-dial`          | Simultaneous ring: TwiML dial handler                                 |
+| `/api/taskrouter/simultaneous-dial-complete` | Simultaneous ring: dial action callback                               |
+| `/api/taskrouter/voicemail`                  | Voicemail recording handler                                           |
+| `/api/taskrouter/voicemail-complete`         | Voicemail completion callback                                         |
+| `/api/taskrouter/voicemail-transcription`    | Voicemail transcription callback                                      |
+| `/api/taskrouter/wait`                       | Queue wait music/message                                              |
+| `/api/taskrouter/worker-availability`        | Get/set worker availability                                           |
+| `/api/taskrouter/worker-status`              | Get/set worker status (polling endpoint)                              |
+| `/api/taskrouter/client-status`              | Cancel cell phone leg when browser client rejects                     |
+| **Passkeys**                                 |                                                                       |
+| `/api/passkey/auth-options`                  | Generate passkey auth options                                         |
+| `/api/passkey/auth-verify`                   | Verify passkey authentication                                         |
+| `/api/passkey/register-options`              | Generate passkey registration options                                 |
+| `/api/passkey/register-verify`               | Verify passkey registration                                           |
+| `/api/passkey/delete`                        | Delete a passkey                                                      |
+| `/api/passkey/list`                          | List user's passkeys                                                  |
+| **CRM**                                      |                                                                       |
+| `/api/nutshell/create-lead`                  | Create lead in Nutshell CRM                                           |
+| `/api/nutshell/sync-leads`                   | Admin SSE stream: sync leads from Nutshell (last 90 days) to local DB |
+| **Cron**                                     |                                                                       |
+| `/api/cron/clear-openai-logs`                | Clear prior-month OpenAI logs (requires CRON_SECRET bearer token)     |
 
 ### Server Actions
 
@@ -350,6 +354,7 @@ Call routing system using Twilio TaskRouter:
 - Scripts in `scripts/` for setup, debugging, and diagnostics
 
 **Assignment callback routing logic** (`/api/taskrouter/assignment`):
+
 1. `voicemail@system` worker → redirect to `/api/taskrouter/voicemail`
 2. Worker has `simultaneous_ring: true` + `cell_phone` → redirect to `/api/taskrouter/simultaneous-dial` (dials browser client + cell phone in parallel; first to answer wins)
 3. All others → conference instruction
@@ -358,18 +363,22 @@ Call routing system using Twilio TaskRouter:
 The cell phone leg uses a "press 1" screening step to prevent carrier voicemail from silently answering. `<Number url="/api/taskrouter/cell-screen">` intercepts the cell answer, plays a prompt, and only connects if worker presses 1 (`cell-screen-accept`). No key press or wrong key → `<Hangup/>` → treated as no-answer by simultaneous-dial-complete.
 
 **Simultaneous-dial-complete re-enqueue logic** (`/api/taskrouter/simultaneous-dial-complete`):
+
 - `completed` → task marked complete
 - `canceled`/`no-answer` and NOT already retried → re-enqueue call to next available worker (sets `retried: true` on task attributes to prevent loops)
 - `canceled`/`no-answer` and already retried, or `busy`/`failed` → redirect to voicemail
 
 **Worker attribute merge strategy** (`/api/taskrouter/worker-status` POST):
+
 - Always fetches existing Twilio worker attributes before updating so custom fields (`simultaneous_ring`, `cell_phone`, `contact_uri`) are preserved
 - Retries up to 3× on 409 Conflict (concurrent update race condition)
 
 **Dashboard layout provider order** (`app/dashboard/layout.tsx`):
+
 - `WorkerStatusProvider` wraps `TwilioProvider` — this order is required because `TwilioProvider` reads from `useWorkerStatus()`
 
 **TwilioProvider device lifecycle** (`components/providers/TwilioProvider.tsx`):
+
 - The Twilio Device is **never destroyed on component unmount** — it persists for the entire app session
 - Destroyed only explicitly via `destroyDevice()` (called on logout)
 - Polls every 2 seconds to detect unexpected destruction
