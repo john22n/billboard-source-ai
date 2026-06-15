@@ -13,15 +13,27 @@ import {
 } from 'drizzle-orm/pg-core'
 
 // Your existing tables
-export const user = pgTable('User', {
-  id: varchar('id', { length: 21 }).primaryKey().notNull(),
-  email: varchar('email', { length: 64 }).notNull(),
-  password: varchar('password', { length: 64 }),
-  role: varchar('role', { length: 20 }).default('user'),
-  twilioPhoneNumber: varchar('twilio_phone_number', { length: 20 }),
-  taskRouterWorkerSid: varchar('taskrouter_worker_sid', { length: 34 }),
-  workerActivity: varchar('worker_activity', { length: 20 }).default('offline'),
-})
+export const user = pgTable(
+  'User',
+  {
+    id: varchar('id', { length: 21 }).primaryKey().notNull(),
+    email: varchar('email', { length: 64 }).notNull(),
+    password: varchar('password', { length: 64 }),
+    role: varchar('role', { length: 20 }).default('user'),
+    twilioPhoneNumber: varchar('twilio_phone_number', { length: 20 }),
+    taskRouterWorkerSid: varchar('taskrouter_worker_sid', { length: 34 }),
+    workerActivity: varchar('worker_activity', { length: 20 }).default(
+      'offline',
+    ),
+  },
+  (table) => ({
+    // A Sales Rep Number belongs to exactly one Sales Rep. Enforced so the
+    // terminal Overflow Number can be unambiguously attributed (Feature 2).
+    twilioPhoneUnique: unique('user_twilio_phone_number_unique').on(
+      table.twilioPhoneNumber,
+    ),
+  }),
+)
 
 export type User = InferSelectModel<typeof user>
 
@@ -121,3 +133,52 @@ export const nutshellLeads = pgTable('nutshell_leads', {
 
 export type NutshellLead = InferSelectModel<typeof nutshellLeads>
 export type NewNutshellLead = typeof nutshellLeads.$inferInsert
+
+// Call Attempt Outcomes — one row per Call Attempt (a single offer of an
+// inbound sales call to a Sales Rep). Production-only; finalized once.
+// See docs/adr/0001-store-call-attempt-outcomes-in-db.md
+export const callAttemptOutcomes = pgTable(
+  'call_attempt_outcomes',
+  {
+    // Idempotency key. ReservationSid for TaskRouter attempts;
+    // `overflow:${callSid}` for the terminal overflow attempt.
+    id: varchar('id', { length: 96 }).primaryKey().notNull(),
+
+    userId: varchar('user_id', { length: 21 })
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+
+    reservationSid: varchar('reservation_sid', { length: 34 }),
+    taskSid: varchar('task_sid', { length: 34 }),
+    callSid: varchar('call_sid', { length: 34 }),
+    workerSid: varchar('worker_sid', { length: 34 }),
+    // The browser/worker call leg SID, used to match a browser Reject click.
+    workerCallSid: varchar('worker_call_sid', { length: 34 }),
+
+    attemptType: varchar('attempt_type', { length: 20 })
+      .notNull()
+      .default('taskrouter'), // 'taskrouter' | 'overflow'
+
+    outcome: varchar('outcome', { length: 20 }).notNull().default('pending'), // 'pending' | 'accepted' | 'rejected' | 'missed'
+
+    finalSource: varchar('final_source', { length: 80 }),
+
+    offeredAt: timestamp('offered_at').defaultNow().notNull(),
+    finalizedAt: timestamp('finalized_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    userOutcomeIdx: index('call_attempt_user_outcome_idx').on(
+      table.userId,
+      table.outcome,
+    ),
+    callSidIdx: index('call_attempt_call_sid_idx').on(table.callSid),
+    workerCallSidIdx: index('call_attempt_worker_call_sid_idx').on(
+      table.workerCallSid,
+    ),
+  }),
+)
+
+export type CallAttemptOutcome = InferSelectModel<typeof callAttemptOutcomes>
+export type NewCallAttemptOutcome = typeof callAttemptOutcomes.$inferInsert

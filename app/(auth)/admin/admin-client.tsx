@@ -112,10 +112,18 @@ interface LeadStats {
   totalWonValue: number
 }
 
+interface CallAttemptTotalsRow {
+  userId: string
+  missed: number
+  rejected: number
+  accepted: number
+}
+
 interface AdminClientProps {
   initialUsers: User[]
   initialCosts: UserCost[]
   initialLeadStats: LeadStats | null
+  initialCallAttemptTotals?: CallAttemptTotalsRow[]
   sessionEmail: string
 }
 
@@ -123,6 +131,7 @@ export default function AdminClient({
   initialUsers = [],
   initialCosts = [],
   initialLeadStats = null,
+  initialCallAttemptTotals = [],
   sessionEmail = '',
 }: AdminClientProps) {
   const [selectedUsers, setSelectedUsers] = useState<string[]>([])
@@ -145,13 +154,21 @@ export default function AdminClient({
   const [voicemailsLoading, setVoicemailsLoading] = useState(true)
   const [voicemailsError, setVoicemailsError] = useState<string | null>(null)
 
-  // Worker availability state
+  // Worker availability state (Average Workday Hours — Mon–Fri, Central Time)
   interface WorkerAvailability {
-    [userId: string]: { avgDailyHours: number; totalHours: number }
+    [userId: string]: {
+      avgWorkdayHours?: number
+      totalWorkdayHours?: number
+      avgDailyHours?: number
+    }
   }
   const [workerAvailability, setWorkerAvailability] =
     useState<WorkerAvailability>({})
   const [availabilityLoading, setAvailabilityLoading] = useState(true)
+
+  // Call Attempt Totals (Missed / Rejected / Accepted) keyed by user id
+  const callAttemptTotalsByUser: Record<string, CallAttemptTotalsRow> =
+    Object.fromEntries(initialCallAttemptTotals.map((t) => [t.userId, t]))
 
   // Nutshell leads state
   const [leadStats, setLeadStats] = useState<LeadStats | null>(initialLeadStats)
@@ -405,14 +422,19 @@ export default function AdminClient({
                   <TableHead>Email</TableHead>
                   <TableHead>Role</TableHead>
                   <TableHead>Twilio Phone</TableHead>
-                  <TableHead className="text-right">Avg Daily Hours</TableHead>
+                  <TableHead className="text-right">
+                    Missed / Rejected / Accepted
+                  </TableHead>
+                  <TableHead className="text-right">
+                    Average Workday Hours
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {initialUsers.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={6}
+                      colSpan={7}
                       className="text-center text-muted-foreground"
                     >
                       No users found
@@ -455,14 +477,31 @@ export default function AdminClient({
                           disabled={isPending}
                         />
                       </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {(() => {
+                          const totals = callAttemptTotalsByUser[user.id] ?? {
+                            missed: 0,
+                            rejected: 0,
+                            accepted: 0,
+                          }
+                          return (
+                            <span className="font-medium">
+                              {totals.missed} / {totals.rejected} /{' '}
+                              {totals.accepted}
+                            </span>
+                          )
+                        })()}
+                      </TableCell>
                       <TableCell className="text-right">
                         {availabilityLoading ? (
                           <Loader2 className="h-3 w-3 animate-spin ml-auto" />
                         ) : workerAvailability[user.id] ? (
                           <span className="font-medium">
-                            {workerAvailability[user.id].avgDailyHours.toFixed(
-                              1,
-                            )}
+                            {(
+                              workerAvailability[user.id].avgWorkdayHours ??
+                              workerAvailability[user.id].avgDailyHours ??
+                              0
+                            ).toFixed(1)}
                             h
                           </span>
                         ) : (
