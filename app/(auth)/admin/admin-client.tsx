@@ -141,7 +141,7 @@ export default function AdminClient({
   const [selectedUsers, setSelectedUsers] = useState<string[]>([])
   const [isPending, startTransition] = useTransition()
   const [phoneEdits, setPhoneEdits] = useState<Record<string, string>>({})
-  const [signupOpen, setSignupOpen] = useState(true)
+  const [signupOpen, setSignupOpen] = useState(false)
   const router = useRouter()
 
   // OpenAI usage state
@@ -382,7 +382,9 @@ export default function AdminClient({
       <Collapsible
         open={signupOpen}
         onOpenChange={setSignupOpen}
-        className="flex flex-col gap-4 p-6 md:p-10 w-full lg:w-1/2"
+        className={`flex flex-col gap-4 p-6 md:p-10 w-full transition-all ${
+          signupOpen ? 'lg:w-1/2' : 'lg:w-auto'
+        }`}
       >
         <div className="flex justify-start">
           <CollapsibleTrigger asChild>
@@ -403,7 +405,7 @@ export default function AdminClient({
           </div>
         </CollapsibleContent>
       </Collapsible>
-      <div className="flex flex-col justify-center items-center p-6 md:p-10 w-full lg:w-1/2 gap-5 bg-primary-foreground">
+      <div className="flex flex-col justify-center items-center p-6 md:p-10 w-full lg:flex-1 gap-5 bg-primary-foreground">
         <div className="w-full flex items-center justify-between mb-4">
           <Button size="sm" onClick={handleBackToDashboard}>
             back to Dashboard
