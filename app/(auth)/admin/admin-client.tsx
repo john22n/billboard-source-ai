@@ -13,10 +13,23 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
-import { Trash2, Loader2, FileText, RefreshCw, DollarSign } from 'lucide-react'
+import {
+  Trash2,
+  Loader2,
+  FileText,
+  RefreshCw,
+  DollarSign,
+  UserPlus,
+  ChevronDown,
+} from 'lucide-react'
 import { deleteUsers, updateTwilioPhone } from '@/actions/user-actions'
 import { useRouter } from 'next/navigation'
 import type { User, NutshellLead } from '@/db/schema'
@@ -128,6 +141,7 @@ export default function AdminClient({
   const [selectedUsers, setSelectedUsers] = useState<string[]>([])
   const [isPending, startTransition] = useTransition()
   const [phoneEdits, setPhoneEdits] = useState<Record<string, string>>({})
+  const [signupOpen, setSignupOpen] = useState(true)
   const router = useRouter()
 
   // OpenAI usage state
@@ -365,13 +379,30 @@ export default function AdminClient({
 
   return (
     <div className="flex flex-col lg:flex-row min-h-svh">
-      <div className="flex flex-col gap-4 p-6 md:p-10 w-full lg:w-1/2">
-        <div className="flex flex-1 items-center justify-center">
+      <Collapsible
+        open={signupOpen}
+        onOpenChange={setSignupOpen}
+        className="flex flex-col gap-4 p-6 md:p-10 w-full lg:w-1/2"
+      >
+        <div className="flex justify-start">
+          <CollapsibleTrigger asChild>
+            <Button variant="outline" size="sm">
+              <UserPlus className="mr-2 h-4 w-4" />
+              {signupOpen ? 'Hide Employee Sign Up' : 'Add Employee'}
+              <ChevronDown
+                className={`ml-2 h-4 w-4 transition-transform ${
+                  signupOpen ? 'rotate-180' : ''
+                }`}
+              />
+            </Button>
+          </CollapsibleTrigger>
+        </div>
+        <CollapsibleContent className="flex flex-1 items-center justify-center">
           <div className="w-full max-w-xs">
             <SignupForm onSuccess={handleSignupSuccess} />
           </div>
-        </div>
-      </div>
+        </CollapsibleContent>
+      </Collapsible>
       <div className="flex flex-col justify-center items-center p-6 md:p-10 w-full lg:w-1/2 gap-5 bg-primary-foreground">
         <div className="w-full flex items-center justify-between mb-4">
           <Button size="sm" onClick={handleBackToDashboard}>
