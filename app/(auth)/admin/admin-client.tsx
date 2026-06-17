@@ -13,10 +13,25 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
-import { Trash2, Loader2, FileText, RefreshCw, DollarSign } from 'lucide-react'
+import {
+  Trash2,
+  Loader2,
+  FileText,
+  RefreshCw,
+  DollarSign,
+  UserPlus,
+} from 'lucide-react'
 import { deleteUsers, updateTwilioPhone } from '@/actions/user-actions'
 import { useRouter } from 'next/navigation'
 import type { User, NutshellLead } from '@/db/schema'
@@ -128,6 +143,7 @@ export default function AdminClient({
   const [selectedUsers, setSelectedUsers] = useState<string[]>([])
   const [isPending, startTransition] = useTransition()
   const [phoneEdits, setPhoneEdits] = useState<Record<string, string>>({})
+  const [signupOpen, setSignupOpen] = useState(false)
   const router = useRouter()
 
   // OpenAI usage state
@@ -145,9 +161,13 @@ export default function AdminClient({
   const [voicemailsLoading, setVoicemailsLoading] = useState(true)
   const [voicemailsError, setVoicemailsError] = useState<string | null>(null)
 
-  // Worker availability state
+  // Worker availability state (Average Workday Hours — Mon–Fri, Central Time)
   interface WorkerAvailability {
-    [userId: string]: { avgDailyHours: number; totalHours: number }
+    [userId: string]: {
+      avgWorkdayHours?: number
+      totalWorkdayHours?: number
+      avgDailyHours?: number
+    }
   }
   const [workerAvailability, setWorkerAvailability] =
     useState<WorkerAvailability>({})
@@ -356,24 +376,44 @@ export default function AdminClient({
   }
 
   const handleSignupSuccess = useCallback(() => {
+    setSignupOpen(false)
     router.refresh()
   }, [router])
 
   return (
-    <div className="flex flex-col lg:flex-row min-h-svh">
-      <div className="flex flex-col gap-4 p-6 md:p-10 w-full lg:w-1/2">
-        <div className="flex flex-1 items-center justify-center">
-          <div className="w-full max-w-xs">
-            <SignupForm onSuccess={handleSignupSuccess} />
-          </div>
-        </div>
-      </div>
-      <div className="flex flex-col justify-center items-center p-6 md:p-10 w-full lg:w-1/2 gap-5 bg-primary-foreground">
-        <div className="w-full flex items-center justify-between mb-4">
+    <div className="flex flex-col min-h-svh w-full p-4 md:p-8 gap-5 bg-primary-foreground">
+      <div className="w-full flex items-center gap-3 mb-4">
+        <div className="flex flex-1 items-center gap-2">
           <Button size="sm" onClick={handleBackToDashboard}>
             back to Dashboard
           </Button>
-          <h2 className="text-2xl font-semibold">Admin Panel</h2>
+          <Sheet open={signupOpen} onOpenChange={setSignupOpen}>
+            <SheetTrigger asChild>
+              <Button variant="outline" size="sm">
+                <UserPlus className="mr-2 h-4 w-4" />
+                Add Employee
+              </Button>
+            </SheetTrigger>
+            <SheetContent
+              side="left"
+              className="w-full sm:max-w-md overflow-y-auto"
+            >
+              <SheetHeader>
+                <SheetTitle>Add Employee</SheetTitle>
+                <SheetDescription>
+                  Create a new employee account.
+                </SheetDescription>
+              </SheetHeader>
+              <div className="px-4 pb-6">
+                <SignupForm onSuccess={handleSignupSuccess} />
+              </div>
+            </SheetContent>
+          </Sheet>
+        </div>
+        <h2 className="flex-1 text-center text-2xl font-semibold">
+          Admin Panel
+        </h2>
+        <div className="flex flex-1 justify-end">
           <Button
             variant="destructive"
             size="sm"
@@ -384,402 +424,409 @@ export default function AdminClient({
             {isPending ? 'Deleting...' : 'Delete Selected'}
           </Button>
         </div>
-        <Tabs defaultValue="users" className="w-full">
-          <TabsList
-            className={`grid w-full mb-6 ${showLeadsTab ? 'grid-cols-5' : 'grid-cols-4'}`}
-          >
-            <TabsTrigger value="users">User Accounts</TabsTrigger>
-            <TabsTrigger value="costs">User Costs</TabsTrigger>
-            <TabsTrigger value="voicemails">Voicemails</TabsTrigger>
-            <TabsTrigger value="billboard">Billboard Data</TabsTrigger>
-            {showLeadsTab && <TabsTrigger value="leads">CRM Leads</TabsTrigger>}
-          </TabsList>
+      </div>
+      <Tabs defaultValue="users" className="w-full">
+        <TabsList
+          className={`grid w-full mb-6 ${showLeadsTab ? 'grid-cols-5' : 'grid-cols-4'}`}
+        >
+          <TabsTrigger value="users">User Accounts</TabsTrigger>
+          <TabsTrigger value="costs">User Costs</TabsTrigger>
+          <TabsTrigger value="voicemails">Voicemails</TabsTrigger>
+          <TabsTrigger value="billboard">Billboard Data</TabsTrigger>
+          {showLeadsTab && <TabsTrigger value="leads">CRM Leads</TabsTrigger>}
+        </TabsList>
 
-          <TabsContent value="users">
-            <Table>
-              <TableCaption>Manage registered users.</TableCaption>
-              <TableHeader>
+        <TabsContent value="users">
+          <Table>
+            <TableCaption>Manage registered users.</TableCaption>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[50px] text-center">Select</TableHead>
+                <TableHead>ID</TableHead>
+                <TableHead>Email</TableHead>
+                <TableHead>Role</TableHead>
+                <TableHead>Twilio Phone</TableHead>
+                <TableHead className="text-right">
+                  Missed / Rejected / Accepted
+                </TableHead>
+                <TableHead className="text-right">
+                  Average Workday Hours
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {initialUsers.length === 0 ? (
                 <TableRow>
-                  <TableHead className="w-[50px] text-center">Select</TableHead>
-                  <TableHead>ID</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Twilio Phone</TableHead>
-                  <TableHead className="text-right">Avg Daily Hours</TableHead>
+                  <TableCell
+                    colSpan={7}
+                    className="text-center text-muted-foreground"
+                  >
+                    No users found
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {initialUsers.length === 0 ? (
-                  <TableRow>
-                    <TableCell
-                      colSpan={6}
-                      className="text-center text-muted-foreground"
-                    >
-                      No users found
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  initialUsers.map((user, index) => (
-                    <TableRow key={user.id}>
-                      <TableCell className="text-center">
-                        <Checkbox
-                          checked={selectedUsers.includes(user.id)}
-                          onCheckedChange={() => toggleSelect(user.id)}
-                          disabled={isPending}
-                        />
-                      </TableCell>
-                      <TableCell>{index + 1}</TableCell>
-                      <TableCell>{user.email}</TableCell>
-                      <TableCell>{user.role ?? 'User'}</TableCell>
-                      <TableCell>
-                        <Input
-                          type="tel"
-                          className="h-8 w-32"
-                          placeholder="+1234567890"
-                          value={
-                            phoneEdits[user.id] ?? user.twilioPhoneNumber ?? ''
-                          }
-                          onChange={(e) =>
-                            setPhoneEdits((prev) => ({
-                              ...prev,
-                              [user.id]: e.target.value,
-                            }))
-                          }
-                          onBlur={() =>
-                            handlePhoneUpdate(user.id, user.twilioPhoneNumber)
-                          }
-                          onKeyDown={(e) =>
-                            e.key === 'Enter' &&
-                            handlePhoneUpdate(user.id, user.twilioPhoneNumber)
-                          }
-                          disabled={isPending}
-                        />
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {availabilityLoading ? (
-                          <Loader2 className="h-3 w-3 animate-spin ml-auto" />
-                        ) : workerAvailability[user.id] ? (
-                          <span className="font-medium">
-                            {workerAvailability[user.id].avgDailyHours.toFixed(
-                              1,
-                            )}
-                            h
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </TabsContent>
-
-          <TabsContent value="costs">
-            <Table>
-              <TableCaption>OpenAI usage cost per user.</TableCaption>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>ID</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead className="text-right">Cost</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {initialCosts.length === 0 ? (
-                  <TableRow>
-                    <TableCell
-                      colSpan={3}
-                      className="text-center text-muted-foreground"
-                    >
-                      No cost data available
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  initialCosts.map((cost, index) => (
-                    <TableRow key={cost.id}>
-                      <TableCell>{index + 1}</TableCell>
-                      <TableCell className="font-medium">
-                        {cost.email}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        ${costToNumber(cost.cost).toFixed(6)}
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-              <TableFooter>
-                <TableRow>
-                  <TableCell colSpan={2}>Total Cost</TableCell>
-                  <TableCell className="text-right">${totalCost}</TableCell>
-                </TableRow>
-              </TableFooter>
-            </Table>
-
-            {/* OpenAI API Usage (Last 30 Days) */}
-            <div className="mt-6 p-4 bg-muted rounded-lg border">
-              <h3 className="text-sm font-semibold mb-2">
-                OpenAI API Usage (Last 30 Days)
-              </h3>
-              {usageLoading ? (
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Loading usage data...</span>
-                </div>
-              ) : usageError ? (
-                <p className="text-sm text-red-500">{usageError}</p>
-              ) : openaiUsage ? (
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-muted-foreground">
-                      Total API Cost
-                    </span>
-                    <span className="text-xl font-bold">
-                      {openaiUsage.totalCostFormatted}
-                    </span>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    {openaiUsage.startDate} to {openaiUsage.endDate}
-                  </p>
-                </div>
-              ) : null}
-            </div>
-
-            {/* Twilio Usage (Current & Last Month) */}
-            <div className="mt-4 p-4 bg-muted rounded-lg border">
-              <h3 className="text-sm font-semibold mb-2">Twilio Usage</h3>
-              {twilioLoading ? (
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Loading Twilio data...</span>
-                </div>
-              ) : twilioError ? (
-                <p className="text-sm text-red-500">{twilioError}</p>
-              ) : twilioUsage ? (
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-muted-foreground">
-                      {twilioUsage.currentMonth.name} (Current)
-                    </span>
-                    <span className="text-lg font-semibold">
-                      {twilioUsage.currentMonth.costFormatted}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-muted-foreground">
-                      {twilioUsage.lastMonth.name} (Last)
-                    </span>
-                    <span className="text-lg font-semibold">
-                      {twilioUsage.lastMonth.costFormatted}
-                    </span>
-                  </div>
-                  <div className="pt-2 border-t flex justify-between items-center">
-                    <span className="text-sm font-medium">Total</span>
-                    <span className="text-xl font-bold">
-                      {twilioUsage.totalCostFormatted}
-                    </span>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          </TabsContent>
-
-          {/* Voicemails Tab */}
-          <TabsContent value="voicemails">
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold">
-                  Voicemails (Last 7 Days)
-                </h3>
-                <span className="text-sm text-muted-foreground">
-                  {voicemails.length} recording
-                  {voicemails.length !== 1 ? 's' : ''}
-                </span>
-              </div>
-
-              {voicemailsLoading ? (
-                <div className="flex items-center gap-2 text-muted-foreground py-8 justify-center">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Loading voicemails...</span>
-                </div>
-              ) : voicemailsError ? (
-                <p className="text-sm text-red-500 py-4">{voicemailsError}</p>
-              ) : voicemails.length === 0 ? (
-                <p className="text-sm text-muted-foreground py-8 text-center">
-                  No voicemails in the last 7 days
-                </p>
               ) : (
-                <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-2">
-                  {voicemails.map((vm) => (
-                    <div
-                      key={vm.sid}
-                      className="p-4 bg-muted rounded-lg border space-y-2"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <span className="font-medium">
-                            {formatPhoneNumber(vm.from)}
-                          </span>
-                          <span className="text-sm text-muted-foreground">
-                            {vm.duration}s
-                          </span>
-                        </div>
-                        <span className="text-xs text-muted-foreground">
-                          {new Date(vm.dateCreated).toLocaleDateString()}{' '}
-                          {new Date(vm.dateCreated).toLocaleTimeString([], {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
+                initialUsers.map((user, index) => (
+                  <TableRow key={user.id}>
+                    <TableCell className="text-center">
+                      <Checkbox
+                        checked={selectedUsers.includes(user.id)}
+                        onCheckedChange={() => toggleSelect(user.id)}
+                        disabled={isPending}
+                      />
+                    </TableCell>
+                    <TableCell>{index + 1}</TableCell>
+                    <TableCell>{user.email}</TableCell>
+                    <TableCell>{user.role ?? 'User'}</TableCell>
+                    <TableCell>
+                      <Input
+                        type="tel"
+                        className="h-8 w-32"
+                        placeholder="+1234567890"
+                        value={
+                          phoneEdits[user.id] ?? user.twilioPhoneNumber ?? ''
+                        }
+                        onChange={(e) =>
+                          setPhoneEdits((prev) => ({
+                            ...prev,
+                            [user.id]: e.target.value,
+                          }))
+                        }
+                        onBlur={() =>
+                          handlePhoneUpdate(user.id, user.twilioPhoneNumber)
+                        }
+                        onKeyDown={(e) =>
+                          e.key === 'Enter' &&
+                          handlePhoneUpdate(user.id, user.twilioPhoneNumber)
+                        }
+                        disabled={isPending}
+                      />
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      <span className="font-medium">
+                        {user.callsMissed ?? 0} / {user.callsRejected ?? 0} /{' '}
+                        {user.callsAccepted ?? 0}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {availabilityLoading ? (
+                        <Loader2 className="h-3 w-3 animate-spin ml-auto" />
+                      ) : workerAvailability[user.id] ? (
+                        <span className="font-medium">
+                          {(
+                            workerAvailability[user.id].avgWorkdayHours ??
+                            workerAvailability[user.id].avgDailyHours ??
+                            0
+                          ).toFixed(1)}
+                          h
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </TabsContent>
+
+        <TabsContent value="costs">
+          <Table>
+            <TableCaption>OpenAI usage cost per user.</TableCaption>
+            <TableHeader>
+              <TableRow>
+                <TableHead>ID</TableHead>
+                <TableHead>Email</TableHead>
+                <TableHead className="text-right">Cost</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {initialCosts.length === 0 ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={3}
+                    className="text-center text-muted-foreground"
+                  >
+                    No cost data available
+                  </TableCell>
+                </TableRow>
+              ) : (
+                initialCosts.map((cost, index) => (
+                  <TableRow key={cost.id}>
+                    <TableCell>{index + 1}</TableCell>
+                    <TableCell className="font-medium">{cost.email}</TableCell>
+                    <TableCell className="text-right">
+                      ${costToNumber(cost.cost).toFixed(6)}
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+            <TableFooter>
+              <TableRow>
+                <TableCell colSpan={2}>Total Cost</TableCell>
+                <TableCell className="text-right">${totalCost}</TableCell>
+              </TableRow>
+            </TableFooter>
+          </Table>
+
+          {/* OpenAI API Usage (Last 30 Days) */}
+          <div className="mt-6 p-4 bg-muted rounded-lg border">
+            <h3 className="text-sm font-semibold mb-2">
+              OpenAI API Usage (Last 30 Days)
+            </h3>
+            {usageLoading ? (
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Loading usage data...</span>
+              </div>
+            ) : usageError ? (
+              <p className="text-sm text-red-500">{usageError}</p>
+            ) : openaiUsage ? (
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">
+                    Total API Cost
+                  </span>
+                  <span className="text-xl font-bold">
+                    {openaiUsage.totalCostFormatted}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {openaiUsage.startDate} to {openaiUsage.endDate}
+                </p>
+              </div>
+            ) : null}
+          </div>
+
+          {/* Twilio Usage (Current & Last Month) */}
+          <div className="mt-4 p-4 bg-muted rounded-lg border">
+            <h3 className="text-sm font-semibold mb-2">Twilio Usage</h3>
+            {twilioLoading ? (
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Loading Twilio data...</span>
+              </div>
+            ) : twilioError ? (
+              <p className="text-sm text-red-500">{twilioError}</p>
+            ) : twilioUsage ? (
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">
+                    {twilioUsage.currentMonth.name} (Current)
+                  </span>
+                  <span className="text-lg font-semibold">
+                    {twilioUsage.currentMonth.costFormatted}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">
+                    {twilioUsage.lastMonth.name} (Last)
+                  </span>
+                  <span className="text-lg font-semibold">
+                    {twilioUsage.lastMonth.costFormatted}
+                  </span>
+                </div>
+                <div className="pt-2 border-t flex justify-between items-center">
+                  <span className="text-sm font-medium">Total</span>
+                  <span className="text-xl font-bold">
+                    {twilioUsage.totalCostFormatted}
+                  </span>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </TabsContent>
+
+        {/* Voicemails Tab */}
+        <TabsContent value="voicemails">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold">
+                Voicemails (Last 7 Days)
+              </h3>
+              <span className="text-sm text-muted-foreground">
+                {voicemails.length} recording
+                {voicemails.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+
+            {voicemailsLoading ? (
+              <div className="flex items-center gap-2 text-muted-foreground py-8 justify-center">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Loading voicemails...</span>
+              </div>
+            ) : voicemailsError ? (
+              <p className="text-sm text-red-500 py-4">{voicemailsError}</p>
+            ) : voicemails.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-8 text-center">
+                No voicemails in the last 7 days
+              </p>
+            ) : (
+              <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-2">
+                {voicemails.map((vm) => (
+                  <div
+                    key={vm.sid}
+                    className="p-4 bg-muted rounded-lg border space-y-2"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <span className="font-medium">
+                          {formatPhoneNumber(vm.from)}
+                        </span>
+                        <span className="text-sm text-muted-foreground">
+                          {vm.duration}s
                         </span>
                       </div>
-
-                      {vm.transcription ? (
-                        <div className="flex items-start gap-2 pt-2 border-t">
-                          <FileText className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
-                          <p className="text-sm">{vm.transcription}</p>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-2 pt-2 border-t text-muted-foreground">
-                          <FileText className="h-4 w-4" />
-                          <span className="text-sm italic">
-                            {vm.transcriptionStatus === 'in-progress'
-                              ? 'Transcription in progress...'
-                              : 'No transcription available'}
-                          </span>
-                        </div>
-                      )}
+                      <span className="text-xs text-muted-foreground">
+                        {new Date(vm.dateCreated).toLocaleDateString()}{' '}
+                        {new Date(vm.dateCreated).toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </span>
                     </div>
-                  ))}
+
+                    {vm.transcription ? (
+                      <div className="flex items-start gap-2 pt-2 border-t">
+                        <FileText className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                        <p className="text-sm">{vm.transcription}</p>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 pt-2 border-t text-muted-foreground">
+                        <FileText className="h-4 w-4" />
+                        <span className="text-sm italic">
+                          {vm.transcriptionStatus === 'in-progress'
+                            ? 'Transcription in progress...'
+                            : 'No transcription available'}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </TabsContent>
+
+        {/* Billboard Data Tab */}
+        <TabsContent value="billboard" className="w-full">
+          <BillboardDataUploader />
+        </TabsContent>
+
+        {/* Nutshell CRM Leads Tab - tech@ only */}
+        {showLeadsTab && (
+          <TabsContent value="leads">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold">Nutshell CRM Leads</h3>
+                <Button
+                  size="sm"
+                  onClick={handleSyncLeads}
+                  disabled={syncingLeads}
+                >
+                  {syncingLeads ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Syncing...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                      Sync from Nutshell
+                    </>
+                  )}
+                </Button>
+              </div>
+
+              {/* Sync progress bar */}
+              {syncingLeads && syncProgress && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-sm text-muted-foreground">
+                    <span>
+                      {syncProgress.message ||
+                        `Syncing ${syncProgress.synced} / ${syncProgress.total} leads...`}
+                    </span>
+                    {syncProgress.total > 0 && (
+                      <span>
+                        {Math.round(
+                          ((syncProgress.synced + syncProgress.errors) /
+                            syncProgress.total) *
+                            100,
+                        )}
+                        %
+                      </span>
+                    )}
+                  </div>
+                  {syncProgress.total > 0 && (
+                    <div className="h-2 bg-muted rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-primary rounded-full transition-all duration-300"
+                        style={{
+                          width: `${((syncProgress.synced + syncProgress.errors) / syncProgress.total) * 100}%`,
+                        }}
+                      />
+                    </div>
+                  )}
+                  {syncProgress.errors > 0 && (
+                    <p className="text-xs text-red-500">
+                      {syncProgress.errors} error
+                      {syncProgress.errors !== 1 ? 's' : ''}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Stats cards */}
+              {leadStats && (
+                <div className="grid grid-cols-4 gap-3">
+                  <div className="p-3 bg-muted rounded-lg border text-center">
+                    <p className="text-2xl font-bold">{leadStats.totalLeads}</p>
+                    <p className="text-xs text-muted-foreground">Total Leads</p>
+                  </div>
+                  <div className="p-3 bg-green-50 rounded-lg border border-green-200 text-center">
+                    <p className="text-2xl font-bold text-green-700">
+                      {leadStats.wonCount}
+                    </p>
+                    <p className="text-xs text-green-600">Won</p>
+                  </div>
+                  <div className="p-3 bg-blue-50 rounded-lg border border-blue-200 text-center">
+                    <p className="text-2xl font-bold text-blue-700">
+                      {leadStats.openCount}
+                    </p>
+                    <p className="text-xs text-blue-600">Open</p>
+                  </div>
+                  <div className="p-3 bg-red-50 rounded-lg border border-red-200 text-center">
+                    <p className="text-2xl font-bold text-red-700">
+                      {leadStats.lostCount}
+                    </p>
+                    <p className="text-xs text-red-600">Lost</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Won revenue */}
+              {leadStats && leadStats.wonCount > 0 && (
+                <div className="p-4 bg-green-50 rounded-lg border border-green-200">
+                  <div className="flex items-center gap-2 mb-1">
+                    <DollarSign className="h-5 w-5 text-green-600" />
+                    <h4 className="font-semibold text-green-800">
+                      Total Won Revenue
+                    </h4>
+                  </div>
+                  <p className="text-3xl font-bold text-green-700">
+                    $
+                    {leadStats.totalWonValue.toLocaleString('en-US', {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </p>
                 </div>
               )}
             </div>
           </TabsContent>
-
-          {/* Billboard Data Tab */}
-          <TabsContent value="billboard" className="w-full">
-            <BillboardDataUploader />
-          </TabsContent>
-
-          {/* Nutshell CRM Leads Tab - tech@ only */}
-          {showLeadsTab && (
-            <TabsContent value="leads">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold">Nutshell CRM Leads</h3>
-                  <Button
-                    size="sm"
-                    onClick={handleSyncLeads}
-                    disabled={syncingLeads}
-                  >
-                    {syncingLeads ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Syncing...
-                      </>
-                    ) : (
-                      <>
-                        <RefreshCw className="mr-2 h-4 w-4" />
-                        Sync from Nutshell
-                      </>
-                    )}
-                  </Button>
-                </div>
-
-                {/* Sync progress bar */}
-                {syncingLeads && syncProgress && (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-sm text-muted-foreground">
-                      <span>
-                        {syncProgress.message ||
-                          `Syncing ${syncProgress.synced} / ${syncProgress.total} leads...`}
-                      </span>
-                      {syncProgress.total > 0 && (
-                        <span>
-                          {Math.round(
-                            ((syncProgress.synced + syncProgress.errors) /
-                              syncProgress.total) *
-                              100,
-                          )}
-                          %
-                        </span>
-                      )}
-                    </div>
-                    {syncProgress.total > 0 && (
-                      <div className="h-2 bg-muted rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-primary rounded-full transition-all duration-300"
-                          style={{
-                            width: `${((syncProgress.synced + syncProgress.errors) / syncProgress.total) * 100}%`,
-                          }}
-                        />
-                      </div>
-                    )}
-                    {syncProgress.errors > 0 && (
-                      <p className="text-xs text-red-500">
-                        {syncProgress.errors} error
-                        {syncProgress.errors !== 1 ? 's' : ''}
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                {/* Stats cards */}
-                {leadStats && (
-                  <div className="grid grid-cols-4 gap-3">
-                    <div className="p-3 bg-muted rounded-lg border text-center">
-                      <p className="text-2xl font-bold">
-                        {leadStats.totalLeads}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        Total Leads
-                      </p>
-                    </div>
-                    <div className="p-3 bg-green-50 rounded-lg border border-green-200 text-center">
-                      <p className="text-2xl font-bold text-green-700">
-                        {leadStats.wonCount}
-                      </p>
-                      <p className="text-xs text-green-600">Won</p>
-                    </div>
-                    <div className="p-3 bg-blue-50 rounded-lg border border-blue-200 text-center">
-                      <p className="text-2xl font-bold text-blue-700">
-                        {leadStats.openCount}
-                      </p>
-                      <p className="text-xs text-blue-600">Open</p>
-                    </div>
-                    <div className="p-3 bg-red-50 rounded-lg border border-red-200 text-center">
-                      <p className="text-2xl font-bold text-red-700">
-                        {leadStats.lostCount}
-                      </p>
-                      <p className="text-xs text-red-600">Lost</p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Won revenue */}
-                {leadStats && leadStats.wonCount > 0 && (
-                  <div className="p-4 bg-green-50 rounded-lg border border-green-200">
-                    <div className="flex items-center gap-2 mb-1">
-                      <DollarSign className="h-5 w-5 text-green-600" />
-                      <h4 className="font-semibold text-green-800">
-                        Total Won Revenue
-                      </h4>
-                    </div>
-                    <p className="text-3xl font-bold text-green-700">
-                      $
-                      {leadStats.totalWonValue.toLocaleString('en-US', {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
-                    </p>
-                  </div>
-                )}
-              </div>
-            </TabsContent>
-          )}
-        </Tabs>
-      </div>
+        )}
+      </Tabs>
     </div>
   )
 }

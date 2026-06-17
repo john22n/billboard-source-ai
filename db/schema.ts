@@ -13,15 +13,38 @@ import {
 } from 'drizzle-orm/pg-core'
 
 // Your existing tables
-export const user = pgTable('User', {
-  id: varchar('id', { length: 21 }).primaryKey().notNull(),
-  email: varchar('email', { length: 64 }).notNull(),
-  password: varchar('password', { length: 64 }),
-  role: varchar('role', { length: 20 }).default('user'),
-  twilioPhoneNumber: varchar('twilio_phone_number', { length: 20 }),
-  taskRouterWorkerSid: varchar('taskrouter_worker_sid', { length: 34 }),
-  workerActivity: varchar('worker_activity', { length: 20 }).default('offline'),
-})
+export const user = pgTable(
+  'User',
+  {
+    id: varchar('id', { length: 21 }).primaryKey().notNull(),
+    email: varchar('email', { length: 64 }).notNull(),
+    password: varchar('password', { length: 64 }),
+    role: varchar('role', { length: 20 }).default('user'),
+    twilioPhoneNumber: varchar('twilio_phone_number', { length: 20 }),
+    taskRouterWorkerSid: varchar('taskrouter_worker_sid', { length: 34 }),
+    workerActivity: varchar('worker_activity', { length: 20 }).default(
+      'offline',
+    ),
+    // Call Attempt Totals (Feature 2). Counters live on the user row instead of
+    // a per-attempt table to stay within the Neon free tier (fixed storage, one
+    // UPDATE per outcome, no unbounded row growth).
+    callsAccepted: integer('calls_accepted').notNull().default(0),
+    callsRejected: integer('calls_rejected').notNull().default(0),
+    callsMissed: integer('calls_missed').notNull().default(0),
+    // Idempotency guards: last finalized Twilio reservation (or `overflow:<sid>`)
+    // dedupes duplicate callbacks; last browser-reject time suppresses the
+    // immediately-following ambiguous Twilio "missed" for the same attempt.
+    lastAttemptSid: varchar('last_attempt_sid', { length: 48 }),
+    lastRejectAt: timestamp('last_reject_at'),
+  },
+  (table) => ({
+    // A Sales Rep Number belongs to exactly one Sales Rep. Enforced so the
+    // terminal Overflow Number can be unambiguously attributed (Feature 2).
+    twilioPhoneUnique: unique('user_twilio_phone_number_unique').on(
+      table.twilioPhoneNumber,
+    ),
+  }),
+)
 
 export type User = InferSelectModel<typeof user>
 

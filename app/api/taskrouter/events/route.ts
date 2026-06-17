@@ -9,23 +9,36 @@ import twilio from 'twilio'
 import { db } from '@/db'
 import { user } from '@/db/schema'
 import { eq } from 'drizzle-orm'
+import {
+  recordAcceptedAttempt,
+  recordMissedAttempt,
+} from '@/lib/call-attempt-outcomes'
 
-const TWILIO_AUTH_TOKEN      = process.env.TWILIO_AUTH_TOKEN
-const ACCOUNT_SID            = process.env.TWILIO_ACCOUNT_SID!
-const AUTH_TOKEN             = process.env.TWILIO_AUTH_TOKEN!
-const WORKSPACE_SID          = process.env.TASKROUTER_WORKSPACE_SID!
-const BUSY_ACTIVITY_SID      = process.env.TASKROUTER_ACTIVITY_BUSY_SID!
+const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN
+const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!
+const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!
+const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!
+const BUSY_ACTIVITY_SID = process.env.TASKROUTER_ACTIVITY_BUSY_SID!
 const AVAILABLE_ACTIVITY_SID = process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID!
 
-const ACTIVITY_MAP: Record<string, 'available' | 'unavailable' | 'offline' | 'busy'> = {
-  [process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID   || '']: 'available',
+const ACTIVITY_MAP: Record<
+  string,
+  'available' | 'unavailable' | 'offline' | 'busy'
+> = {
+  [process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID || '']: 'available',
   [process.env.TASKROUTER_ACTIVITY_UNAVAILABLE_SID || '']: 'unavailable',
-  [process.env.TASKROUTER_ACTIVITY_OFFLINE_SID     || '']: 'offline',
-  [process.env.TASKROUTER_ACTIVITY_BUSY_SID        || '']: 'busy',
+  [process.env.TASKROUTER_ACTIVITY_OFFLINE_SID || '']: 'offline',
+  [process.env.TASKROUTER_ACTIVITY_BUSY_SID || '']: 'busy',
 }
 
 async function resetWorkerToBack(workerSid: string, label: string) {
-  if (!workerSid || !WORKSPACE_SID || !BUSY_ACTIVITY_SID || !AVAILABLE_ACTIVITY_SID) return
+  if (
+    !workerSid ||
+    !WORKSPACE_SID ||
+    !BUSY_ACTIVITY_SID ||
+    !AVAILABLE_ACTIVITY_SID
+  )
+    return
   try {
     const client = twilio(ACCOUNT_SID, AUTH_TOKEN)
     await client.taskrouter.v1
@@ -73,10 +86,10 @@ export async function POST(req: Request) {
       }
     }
 
-    const eventType     = formData.get('EventType')     as string
-    const taskSid       = formData.get('TaskSid')       as string
+    const eventType = formData.get('EventType') as string
     const taskQueueName = formData.get('TaskQueueName') as string
-    const workerSid     = formData.get('WorkerSid')     as string
+    const workerSid = formData.get('WorkerSid') as string
+    const reservationSid = formData.get('ReservationSid') as string
 
     switch (eventType) {
       case 'task.created':
@@ -96,7 +109,7 @@ export async function POST(req: Request) {
         console.log(`🔔 Reservation created for worker: ${workerSid}`)
         break
 
-      case 'reservation.accepted':
+      case 'reservation.accepted': {
         console.log(`✅ Reservation accepted by worker: ${workerSid}`)
         if (workerSid && WORKSPACE_SID && BUSY_ACTIVITY_SID) {
           // Skip Busy switch for voicemail worker
@@ -105,6 +118,13 @@ export async function POST(req: Request) {
           if (workerAttrs.email === 'voicemail@system') {
             console.log('⏭️ Skipping Busy switch for voicemail worker')
             break
+          }
+          // Accepted for the normal conference path. Simultaneous-ring workers
+          // accept the reservation early (accept:true on redirect) before the
+          // rep actually answers, so their Accepted is recorded authoritatively
+          // in simultaneous-dial-complete instead.
+          if (!workerAttrs.simultaneous_ring) {
+            await recordAcceptedAttempt({ reservationSid, workerSid })
           }
           try {
             const client = twilio(ACCOUNT_SID, AUTH_TOKEN)
@@ -118,19 +138,27 @@ export async function POST(req: Request) {
           }
         }
         break
+      }
 
       case 'reservation.canceled':
         console.log(`❌ Reservation canceled for worker: ${workerSid}`)
+        // Missed (suppressed if the rep just explicitly rejected this attempt).
+        await recordMissedAttempt({ reservationSid, workerSid })
         await resetWorkerToBack(workerSid, 'cancellation')
         break
 
       case 'reservation.rejected':
         console.log(`🚫 Reservation rejected by worker: ${workerSid}`)
+        // The explicit browser Reject is recorded by the browser endpoint and
+        // stamps last_reject_at, so recordMissedAttempt is suppressed within the
+        // window and the attempt is not double-counted.
+        await recordMissedAttempt({ reservationSid, workerSid })
         await resetWorkerToBack(workerSid, 'rejection')
         break
 
       case 'reservation.timeout':
         console.log(`⏰ Reservation timeout for worker: ${workerSid}`)
+        await recordMissedAttempt({ reservationSid, workerSid })
         await resetWorkerToBack(workerSid, 'timeout')
         break
 

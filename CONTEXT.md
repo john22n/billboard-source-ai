@@ -80,6 +80,50 @@ _Avoid_: Lead, payload
 The person on the phone during a sales call. The Caller may be the decision maker, a helper gathering information, or someone only probing for pricing.
 _Avoid_: Customer, Contact
 
+**Sales Rep**:
+A Billboard Source employee who receives inbound sales calls and works Leads in Billboard Source AI. A Sales Rep may also have admin access.
+_Avoid_: Worker, agent, user
+
+**Company Routing Number**:
+The central Billboard Source phone number callers use to reach the sales team. The Company Routing Number routes calls to Sales Reps and is not itself a Sales Rep number.
+_Avoid_: Main number
+
+**Sales Rep Number**:
+A phone number associated with exactly one Sales Rep. A Sales Rep Number can receive direct inbound calls, but it still participates in the team's fallback routing rules.
+_Avoid_: Direct number, rep number
+
+**Overflow Number**:
+The terminal phone number an inbound call is sent to after the allowed Sales Rep Call Attempts do not result in an Accepted Call Attempt. When the Overflow Number is also a Sales Rep Number, the terminal attempt belongs to that Sales Rep.
+_Avoid_: Specific number, fallback number
+
+**Call Attempt**:
+One offer of an inbound sales call to a Sales Rep. A single inbound call may create multiple Call Attempts during routing.
+_Avoid_: Reservation, assignment, ring
+
+**Call Attempt Outcome**:
+The result of a Call Attempt for a Sales Rep: Accepted, Rejected, or Missed.
+_Avoid_: Call status, disposition
+
+**Call Attempt Totals**:
+The total counts of Call Attempt Outcomes for a Sales Rep.
+_Avoid_: Call attempt averages
+
+**Average Workday Hours**:
+The average amount of time a Sales Rep is available during Monday-Friday workdays in Central Time, excluding weekend availability.
+_Avoid_: Avg Daily Hours, seven-day average
+
+**Accepted Call Attempt**:
+A Call Attempt where the Sales Rep actually connects with and takes the Caller.
+_Avoid_: Answered call
+
+**Rejected Call Attempt**:
+A Call Attempt where the Sales Rep explicitly declines the offered call in Billboard Source AI.
+_Avoid_: Dismissed call, cell-screening failure
+
+**Missed Call Attempt**:
+A Call Attempt that ends without the Sales Rep taking or explicitly rejecting the call, including when the Caller hangs up while that Sales Rep is being tried or cell screening does not confirm acceptance.
+_Avoid_: No-answer, timeout
+
 **Contact**:
 A person recorded on a Lead for follow-up. A Contact may be the Caller, the decision maker, or another person the Caller identifies.
 _Avoid_: Caller, customer
