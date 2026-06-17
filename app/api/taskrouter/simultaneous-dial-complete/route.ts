@@ -25,11 +25,15 @@ import {
   recordAcceptedAttempt,
   recordMissedAttempt,
 } from '@/lib/call-attempt-outcomes'
+import {
+  buildOverflowRedirectTwiml,
+  buildRequeueTwiml,
+  computeMissedAttemptRouting,
+} from '@/lib/taskrouter-retry-routing'
 
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!
 const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!
 const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!
-const WORKFLOW_SID = process.env.TASKROUTER_WORKFLOW_SID!
 const BUSY_ACTIVITY_SID = process.env.TASKROUTER_ACTIVITY_BUSY_SID!
 const AVAILABLE_ACTIVITY_SID = process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID!
 
@@ -112,30 +116,6 @@ export async function POST(req: Request) {
       } catch (err) {
         console.error('❌ Failed to switch worker back to Available:', err)
       }
-    }
-
-    // ── Helper: build overflow redirect TwiML (terminal, external) ───────────
-    const buildOverflowTwiml = (
-      callSid?: string | null,
-      callerFrom?: string | null,
-    ) => {
-      const overflowUrl = new URL(`${appUrl}/api/taskrouter/overflow`)
-      if (taskSid) overflowUrl.searchParams.set('taskSid', taskSid)
-      if (workspaceSid)
-        overflowUrl.searchParams.set('workspaceSid', workspaceSid)
-      if (callSid) overflowUrl.searchParams.set('callSid', callSid)
-      if (callerFrom) overflowUrl.searchParams.set('callerFrom', callerFrom)
-      if (process.env.VERCEL_BYPASS_TOKEN) {
-        overflowUrl.searchParams.set(
-          'x-vercel-protection-bypass',
-          process.env.VERCEL_BYPASS_TOKEN,
-        )
-      }
-      const escapedOverflowUrl = overflowUrl.toString().replace(/&/g, '&amp;')
-      return `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Redirect method="POST">${escapedOverflowUrl}</Redirect>
-</Response>`
     }
 
     // ── completed → only trust it if duration confirms a real answer ─────────
@@ -245,97 +225,53 @@ export async function POST(req: Request) {
     const callSid = (taskAttributes.call_sid as string | undefined) ?? null
     const callerFrom = (taskAttributes.from as string | undefined) ?? null
 
-    const previouslyExcluded = Array.isArray(taskAttributes.excluded_workers)
-      ? (taskAttributes.excluded_workers as string[])
-      : []
-    const excludedWorkers = workerSid
-      ? [...new Set([...previouslyExcluded, workerSid])]
-      : previouslyExcluded
-
-    const attemptCount = excludedWorkers.length
-    const directFallbackOffered =
-      taskAttributes.direct_fallback_offered === true
-
-    // Overflow when two distinct Sales Reps have been tried, OR when the single
-    // allowed non-owner fallback for a direct (Sales Rep Number) call has been
-    // tried. The Overflow Number is terminal — no voicemail afterwards.
-    const shouldOverflow = attemptCount >= 2 || directFallbackOffered
+    // Same two-distinct-reps-then-overflow decision used by the conference path.
+    const routing = computeMissedAttemptRouting(taskAttributes, workerSid)
 
     // ── canceled or no-answer → reset worker, then re-enqueue or overflow ─────
     if (dialCallStatus === 'canceled' || dialCallStatus === 'no-answer') {
       // Reset worker to back of queue since they missed the call
       await resetWorkerToBack()
 
-      if (shouldOverflow) {
+      if (routing.shouldOverflow) {
         console.log(
-          `📤 Sales Rep attempts exhausted (count=${attemptCount}, directFallback=${directFallbackOffered}) — routing to overflow`,
+          `📤 Sales Rep attempts exhausted (count=${routing.attemptCount}, directFallback=${routing.directFallbackOffered}) — routing to overflow`,
         )
-        return new Response(buildOverflowTwiml(callSid, callerFrom), {
-          status: 200,
-          headers: { 'Content-Type': 'text/xml' },
-        })
+        return new Response(
+          buildOverflowRedirectTwiml(appUrl, {
+            taskSid,
+            workspaceSid,
+            callSid,
+            callerFrom,
+          }),
+          { status: 200, headers: { 'Content-Type': 'text/xml' } },
+        )
       }
 
       console.log(
         '🔄 No answer — re-enqueueing for a distinct Sales Rep, excluded workers:',
-        excludedWorkers,
+        routing.excludedWorkers,
       )
 
-      const waitUrlObj = new URL(`${appUrl}/api/taskrouter/wait`)
-      waitUrlObj.searchParams.set('retry', 'true')
-      if (process.env.VERCEL_BYPASS_TOKEN) {
-        waitUrlObj.searchParams.set(
-          'x-vercel-protection-bypass',
-          process.env.VERCEL_BYPASS_TOKEN,
-        )
-      }
-
-      const enqueueActionUrlObj = new URL(
-        `${appUrl}/api/taskrouter/enqueue-complete`,
+      return new Response(
+        buildRequeueTwiml(appUrl, routing.nextTaskAttributes),
+        { status: 200, headers: { 'Content-Type': 'text/xml' } },
       )
-      if (process.env.VERCEL_BYPASS_TOKEN) {
-        enqueueActionUrlObj.searchParams.set(
-          'x-vercel-protection-bypass',
-          process.env.VERCEL_BYPASS_TOKEN,
-        )
-      }
-
-      const newTaskAttributes = JSON.stringify({
-        ...taskAttributes,
-        excluded_workers: excludedWorkers,
-        attempt_count: attemptCount,
-      })
-
-      const escapedWaitUrl = waitUrlObj.toString().replace(/&/g, '&amp;')
-      const escapedEnqueueActionUrl = enqueueActionUrlObj
-        .toString()
-        .replace(/&/g, '&amp;')
-
-      const requeueTwiml = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Enqueue workflowSid="${WORKFLOW_SID}"
-           action="${escapedEnqueueActionUrl}"
-           method="POST"
-           waitUrl="${escapedWaitUrl}"
-           waitUrlMethod="POST">
-    <Task>${newTaskAttributes}</Task>
-  </Enqueue>
-</Response>`
-
-      return new Response(requeueTwiml, {
-        status: 200,
-        headers: { 'Content-Type': 'text/xml' },
-      })
     }
 
     // ── busy / failed → terminal overflow ────────────────────────────────────
     console.log(
       `📤 DialCallStatus="${dialCallStatus}" — redirecting to overflow`,
     )
-    return new Response(buildOverflowTwiml(callSid, callerFrom), {
-      status: 200,
-      headers: { 'Content-Type': 'text/xml' },
-    })
+    return new Response(
+      buildOverflowRedirectTwiml(appUrl, {
+        taskSid,
+        workspaceSid,
+        callSid,
+        callerFrom,
+      }),
+      { status: 200, headers: { 'Content-Type': 'text/xml' } },
+    )
   } catch (error) {
     console.error('❌ Simultaneous dial complete handler error:', error)
     return new Response(HANGUP_TWIML, {

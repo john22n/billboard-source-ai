@@ -9,18 +9,27 @@
  * Domain rules (see docs/adr/0001-store-call-attempt-outcomes-in-db.md):
  *  - Only PRODUCTION traffic is counted. Local/preview/staging/simulated
  *    traffic is never recorded in admin totals.
- *  - One outcome per Call Attempt; duplicate callbacks are idempotent.
+ *  - One outcome per Call Attempt; near-simultaneous duplicate callbacks for
+ *    the in-flight attempt are deduped (see the bound below).
  *  - Accepted: the Sales Rep actually connects with the Caller.
  *  - Rejected: the Sales Rep explicitly clicks Reject in the browser.
  *  - Missed: the Call Attempt ends without acceptance or explicit rejection.
  *
- * Idempotency without a per-attempt table:
- *  - `last_attempt_sid` stores the most recently counted Twilio ReservationSid
- *    (or `overflow:<callSid>`). Every Twilio-side increment is a conditional
- *    UPDATE guarded by `last_attempt_sid IS DISTINCT FROM <sid>`, so duplicate
- *    callbacks — and the multiple "missed" sources that share one ReservationSid
- *    (reservation.timeout + conference-end + simultaneous-dial-complete) — only
- *    count once.
+ * Idempotency without a per-attempt table (and its bound):
+ *  - `last_attempt_sid` stores ONLY the most recently counted Twilio
+ *    ReservationSid (or `overflow:<callSid>`). Every Twilio-side increment is a
+ *    conditional UPDATE guarded by `last_attempt_sid IS DISTINCT FROM <sid>`,
+ *    so the multiple "missed" sources that share one ReservationSid
+ *    (reservation.timeout + conference-end + simultaneous-dial-complete) — and
+ *    rapid duplicate deliveries of the same callback — only count once.
+ *  - Because only the single most-recent SID is remembered, this is NOT a full
+ *    per-attempt dedupe: if attempt A is counted, a later attempt B for the
+ *    same rep overwrites `last_attempt_sid`, and a straggler duplicate of A
+ *    arriving afterward would be counted again. In practice a reservation's
+ *    callbacks all fire within seconds, so a straggler interleaving with a
+ *    distinct later attempt for the same rep is vanishingly rare. We accept
+ *    these admin totals as approximate — that is the deliberate tradeoff for
+ *    avoiding per-attempt storage on the Neon free tier.
  *  - A browser Reject sets `last_reject_at`; the immediately-following ambiguous
  *    Twilio "missed" for that same attempt is suppressed within a short window,
  *    so an explicit Reject is not also double-counted as Missed. A Sales Rep is

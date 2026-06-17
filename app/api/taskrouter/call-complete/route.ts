@@ -8,6 +8,7 @@
  */
 import twilio from 'twilio'
 import { recordMissedAttempt } from '@/lib/call-attempt-outcomes'
+import { computeMissedAttemptRouting } from '@/lib/taskrouter-retry-routing'
 
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!
 const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!
@@ -57,25 +58,17 @@ export async function POST(req: Request) {
         const taskAttributes = JSON.parse(task.attributes || '{}')
         const callerCallSid = taskAttributes.call_sid as string | undefined
 
-        // Complete the task if still active
-        if (
+        // Idempotency guard: Twilio can re-deliver conference-end. Only the
+        // first delivery (task still active) performs side effects; later ones
+        // see a completed task and no-op so we never double redirect/re-enqueue.
+        const taskWasActive =
           task.assignmentStatus === 'assigned' ||
           task.assignmentStatus === 'wrapping'
-        ) {
-          await client.taskrouter.v1
-            .workspaces(workspaceSid)
-            .tasks(taskSid)
-            .update({
-              assignmentStatus: 'completed',
-              reason: 'Conference ended',
-            })
+        if (!taskWasActive) {
           console.log(
-            `✅ Task ${taskSid} completed (was ${task.assignmentStatus})`,
+            `ℹ️ Task is ${task.assignmentStatus}, skipping conference-end side effects`,
           )
-        } else {
-          console.log(
-            `ℹ️ Task is ${task.assignmentStatus}, skipping completion`,
-          )
+          return new Response('OK', { status: 200 })
         }
 
         const participants = await client
@@ -86,63 +79,92 @@ export async function POST(req: Request) {
         const wasAnswered = participants.length >= 2
         console.log(`📊 wasAnswered: ${wasAnswered}`)
 
-        if (!wasAnswered && callerCallSid) {
-          console.log(
-            '📤 Conference ended unanswered — checking if caller is still on the line',
-          )
-          // Note: worker reset is handled by reservation.canceled in events/route.ts
+        if (wasAnswered) {
+          // Answered → just complete the task; no retry/overflow.
+          await client.taskrouter.v1
+            .workspaces(workspaceSid)
+            .tasks(taskSid)
+            .update({
+              assignmentStatus: 'completed',
+              reason: 'Conference ended',
+            })
+          console.log('✅ Conference was answered — task completed, no retry')
+          return new Response('OK', { status: 200 })
+        }
 
-          // Record this Sales Rep's Call Attempt as Missed (idempotent;
-          // suppressed if the rep just explicitly rejected this attempt).
-          if (workerSid) {
-            await recordMissedAttempt({ reservationSid, workerSid })
-          }
+        console.log(
+          '📤 Conference ended unanswered — advancing to next Sales Rep or overflow',
+        )
+        // Note: worker reset is handled by reservation.canceled in events/route.ts
 
-          // Terminal handoff to the external Overflow Number (no voicemail).
-          const overflowUrl = new URL(`${appUrl}/api/taskrouter/overflow`)
-          overflowUrl.searchParams.set('taskSid', taskSid)
-          overflowUrl.searchParams.set('workspaceSid', workspaceSid)
-          if (callerCallSid)
-            overflowUrl.searchParams.set('callSid', callerCallSid)
-          if (taskAttributes.from) {
-            overflowUrl.searchParams.set(
-              'callerFrom',
-              taskAttributes.from as string,
-            )
-          }
-          if (process.env.VERCEL_BYPASS_TOKEN) {
-            overflowUrl.searchParams.set(
-              'x-vercel-protection-bypass',
-              process.env.VERCEL_BYPASS_TOKEN,
-            )
-          }
+        // Record this Sales Rep's Call Attempt as Missed (idempotent;
+        // suppressed if the rep just explicitly rejected this attempt).
+        if (workerSid) {
+          await recordMissedAttempt({ reservationSid, workerSid })
+        }
 
-          try {
-            const callerCall = await client.calls(callerCallSid).fetch()
-            if (callerCall.status === 'in-progress') {
-              await client.calls(callerCallSid).update({
-                url: overflowUrl.toString(),
-                method: 'POST',
-              })
-              console.log(`✅ Caller ${callerCallSid} redirected to overflow`)
-            } else {
-              console.log(
-                `ℹ️ Caller already hung up (status: ${callerCall.status}) — skipping overflow redirect`,
-              )
-            }
-          } catch (redirectErr) {
-            console.error(
-              '❌ Failed to redirect caller to overflow:',
-              redirectErr,
-            )
-          }
-        } else if (wasAnswered) {
-          console.log(
-            '✅ Conference was answered — no overflow redirect needed',
-          )
-        } else {
+        // The conference instruction ACCEPTED the reservation, so TaskRouter
+        // will not advance to the workflow's next target on its own. Complete
+        // this accepted task (persisting the offered-worker state) and redirect
+        // the caller's live leg to retry-or-overflow, which re-enqueues for a
+        // distinct Sales Rep or hands off to overflow — matching the
+        // simultaneous-ring path's two-attempt-then-overflow behavior.
+        const routing = computeMissedAttemptRouting(taskAttributes, workerSid)
+        await client.taskrouter.v1
+          .workspaces(workspaceSid)
+          .tasks(taskSid)
+          .update({
+            attributes: JSON.stringify(routing.nextTaskAttributes),
+            assignmentStatus: 'completed',
+            reason: routing.shouldOverflow
+              ? 'Conference ended unanswered — overflow'
+              : 'Conference ended unanswered — retrying distinct rep',
+          })
+        console.log(
+          `✅ Task ${taskSid} completed (attempt ${routing.attemptCount}, shouldOverflow=${routing.shouldOverflow})`,
+        )
+
+        if (!callerCallSid) {
           console.log(
             '⚠️ Conference ended unanswered but no callerCallSid available',
+          )
+          return new Response('OK', { status: 200 })
+        }
+
+        const retryUrl = new URL(`${appUrl}/api/taskrouter/retry-or-overflow`)
+        retryUrl.searchParams.set('taskSid', taskSid)
+        retryUrl.searchParams.set('workspaceSid', workspaceSid)
+        if (workerSid) retryUrl.searchParams.set('workerSid', workerSid)
+        retryUrl.searchParams.set('callSid', callerCallSid)
+        if (taskAttributes.from) {
+          retryUrl.searchParams.set('callerFrom', taskAttributes.from as string)
+        }
+        if (process.env.VERCEL_BYPASS_TOKEN) {
+          retryUrl.searchParams.set(
+            'x-vercel-protection-bypass',
+            process.env.VERCEL_BYPASS_TOKEN,
+          )
+        }
+
+        try {
+          const callerCall = await client.calls(callerCallSid).fetch()
+          if (callerCall.status === 'in-progress') {
+            await client.calls(callerCallSid).update({
+              url: retryUrl.toString(),
+              method: 'POST',
+            })
+            console.log(
+              `✅ Caller ${callerCallSid} redirected to retry-or-overflow`,
+            )
+          } else {
+            console.log(
+              `ℹ️ Caller already hung up (status: ${callerCall.status}) — skipping redirect`,
+            )
+          }
+        } catch (redirectErr) {
+          console.error(
+            '❌ Failed to redirect caller to retry-or-overflow:',
+            redirectErr,
           )
         }
       } catch (error) {
