@@ -21,7 +21,10 @@
  */
 
 import twilio from 'twilio'
-import { finalizeCallAttempt } from '@/lib/call-attempt-outcomes'
+import {
+  recordAcceptedAttempt,
+  recordMissedAttempt,
+} from '@/lib/call-attempt-outcomes'
 
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!
 const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!
@@ -148,13 +151,7 @@ export async function POST(req: Request) {
 
         // Record the Accepted Call Attempt (simultaneous ring is authoritative
         // here, not reservation.accepted which fires early on redirect).
-        await finalizeCallAttempt({
-          reservationSid,
-          outcome: 'accepted',
-          source: 'simultaneous-dial-complete.genuine-answer',
-          workerSid,
-          taskSid,
-        })
+        await recordAcceptedAttempt({ reservationSid, workerSid })
 
         if (taskSid && workspaceSid) {
           try {
@@ -241,15 +238,8 @@ export async function POST(req: Request) {
     }
 
     // This Sales Rep's Call Attempt did not result in a genuine answer →
-    // record it as Missed (idempotent; a browser Reject would have won already).
-    await finalizeCallAttempt({
-      reservationSid,
-      outcome: 'missed',
-      source: `simultaneous-dial-complete.${dialCallStatus ?? 'unknown'}`,
-      workerSid,
-      taskSid,
-      callSid: (taskAttributes.call_sid as string | undefined) ?? null,
-    })
+    // record it as Missed (idempotent; suppressed if the rep just rejected).
+    await recordMissedAttempt({ reservationSid, workerSid })
 
     // ── Routing state: have we exhausted the allowed Sales Rep attempts? ──────
     const callSid = (taskAttributes.call_sid as string | undefined) ?? null

@@ -112,18 +112,10 @@ interface LeadStats {
   totalWonValue: number
 }
 
-interface CallAttemptTotalsRow {
-  userId: string
-  missed: number
-  rejected: number
-  accepted: number
-}
-
 interface AdminClientProps {
   initialUsers: User[]
   initialCosts: UserCost[]
   initialLeadStats: LeadStats | null
-  initialCallAttemptTotals?: CallAttemptTotalsRow[]
   sessionEmail: string
 }
 
@@ -131,7 +123,6 @@ export default function AdminClient({
   initialUsers = [],
   initialCosts = [],
   initialLeadStats = null,
-  initialCallAttemptTotals = [],
   sessionEmail = '',
 }: AdminClientProps) {
   const [selectedUsers, setSelectedUsers] = useState<string[]>([])
@@ -165,10 +156,6 @@ export default function AdminClient({
   const [workerAvailability, setWorkerAvailability] =
     useState<WorkerAvailability>({})
   const [availabilityLoading, setAvailabilityLoading] = useState(true)
-
-  // Call Attempt Totals (Missed / Rejected / Accepted) keyed by user id
-  const callAttemptTotalsByUser: Record<string, CallAttemptTotalsRow> =
-    Object.fromEntries(initialCallAttemptTotals.map((t) => [t.userId, t]))
 
   // Nutshell leads state
   const [leadStats, setLeadStats] = useState<LeadStats | null>(initialLeadStats)
@@ -478,19 +465,10 @@ export default function AdminClient({
                         />
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
-                        {(() => {
-                          const totals = callAttemptTotalsByUser[user.id] ?? {
-                            missed: 0,
-                            rejected: 0,
-                            accepted: 0,
-                          }
-                          return (
-                            <span className="font-medium">
-                              {totals.missed} / {totals.rejected} /{' '}
-                              {totals.accepted}
-                            </span>
-                          )
-                        })()}
+                        <span className="font-medium">
+                          {user.callsMissed ?? 0} / {user.callsRejected ?? 0} /{' '}
+                          {user.callsAccepted ?? 0}
+                        </span>
                       </TableCell>
                       <TableCell className="text-right">
                         {availabilityLoading ? (

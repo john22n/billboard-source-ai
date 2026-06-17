@@ -6,7 +6,6 @@
  */
 
 import twilio from 'twilio'
-import { ensurePendingCallAttempt } from '@/lib/call-attempt-outcomes'
 
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN
 
@@ -130,19 +129,10 @@ export async function POST(req: Request) {
       return Response.json(instruction)
     }
 
-    // ── RECORD ATTEMPT + MARK SALES REP AS OFFERED ───────────────────────────
-    // For a real Sales Rep offer: create the pending Call Attempt (Feature 2)
-    // and append this worker to excluded_workers so the next routing target
+    // ── MARK SALES REP AS OFFERED ────────────────────────────────────────────
+    // Append this worker to excluded_workers so the next routing target
     // (Feature 3) tries a DISTINCT Sales Rep and never re-rings the same one.
     {
-      // Record the offered/pending Call Attempt (production-only, idempotent).
-      await ensurePendingCallAttempt({
-        reservationSid,
-        taskSid,
-        callSid: taskAttrs.call_sid ?? null,
-        workerSid,
-      })
-
       const attemptedWorkers = Array.isArray(taskAttrs.excluded_workers)
         ? taskAttrs.excluded_workers
         : []

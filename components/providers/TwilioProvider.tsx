@@ -422,11 +422,8 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
 
       // Record the explicit browser Reject as a Call Attempt Outcome.
       // Fire-and-forget; the server gates non-production traffic.
-      const workerCallSid = incomingCall.parameters?.CallSid
       fetch('/api/call-attempts/reject', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workerCallSid }),
         keepalive: true,
       }).catch((err) => {
         console.error('Failed to record rejected call attempt:', err)

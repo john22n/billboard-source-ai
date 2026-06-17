@@ -2,12 +2,7 @@ import { db } from '@/db'
 import { getSession } from './auth'
 import { and, eq, inArray, lt, sql } from 'drizzle-orm'
 import { cache } from 'react'
-import {
-  openaiLogs,
-  user,
-  nutshellLeads,
-  callAttemptOutcomes,
-} from '@/db/schema'
+import { openaiLogs, user, nutshellLeads } from '@/db/schema'
 
 export const getCurrentUser = cache(async () => {
   const session = await getSession()
@@ -138,39 +133,6 @@ export async function promoteToAdmin(email: string) {
 
   return result[0] || null
 }
-// ===================== Call Attempt Totals =====================
-
-/**
- * Per-user Call Attempt Totals (Missed / Rejected / Accepted), counting only
- * finalized attempts. Pending attempts are excluded. Returns one row per user
- * that has at least one finalized attempt.
- */
-export async function getCallAttemptTotals() {
-  return await db
-    .select({
-      userId: callAttemptOutcomes.userId,
-      missed:
-        sql<number>`COALESCE(SUM(CASE WHEN ${callAttemptOutcomes.outcome} = 'missed' THEN 1 ELSE 0 END), 0)`.mapWith(
-          Number,
-        ),
-      rejected:
-        sql<number>`COALESCE(SUM(CASE WHEN ${callAttemptOutcomes.outcome} = 'rejected' THEN 1 ELSE 0 END), 0)`.mapWith(
-          Number,
-        ),
-      accepted:
-        sql<number>`COALESCE(SUM(CASE WHEN ${callAttemptOutcomes.outcome} = 'accepted' THEN 1 ELSE 0 END), 0)`.mapWith(
-          Number,
-        ),
-    })
-    .from(callAttemptOutcomes)
-    .where(sql`${callAttemptOutcomes.outcome} <> 'pending'`)
-    .groupBy(callAttemptOutcomes.userId)
-}
-
-export type CallAttemptTotals = Awaited<
-  ReturnType<typeof getCallAttemptTotals>
->[number]
-
 // ===================== Nutshell Lead Tracking =====================
 
 export async function upsertNutshellLead(lead: {

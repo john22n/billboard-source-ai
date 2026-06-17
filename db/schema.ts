@@ -25,6 +25,17 @@ export const user = pgTable(
     workerActivity: varchar('worker_activity', { length: 20 }).default(
       'offline',
     ),
+    // Call Attempt Totals (Feature 2). Counters live on the user row instead of
+    // a per-attempt table to stay within the Neon free tier (fixed storage, one
+    // UPDATE per outcome, no unbounded row growth).
+    callsAccepted: integer('calls_accepted').notNull().default(0),
+    callsRejected: integer('calls_rejected').notNull().default(0),
+    callsMissed: integer('calls_missed').notNull().default(0),
+    // Idempotency guards: last finalized Twilio reservation (or `overflow:<sid>`)
+    // dedupes duplicate callbacks; last browser-reject time suppresses the
+    // immediately-following ambiguous Twilio "missed" for the same attempt.
+    lastAttemptSid: varchar('last_attempt_sid', { length: 48 }),
+    lastRejectAt: timestamp('last_reject_at'),
   },
   (table) => ({
     // A Sales Rep Number belongs to exactly one Sales Rep. Enforced so the
@@ -133,52 +144,3 @@ export const nutshellLeads = pgTable('nutshell_leads', {
 
 export type NutshellLead = InferSelectModel<typeof nutshellLeads>
 export type NewNutshellLead = typeof nutshellLeads.$inferInsert
-
-// Call Attempt Outcomes — one row per Call Attempt (a single offer of an
-// inbound sales call to a Sales Rep). Production-only; finalized once.
-// See docs/adr/0001-store-call-attempt-outcomes-in-db.md
-export const callAttemptOutcomes = pgTable(
-  'call_attempt_outcomes',
-  {
-    // Idempotency key. ReservationSid for TaskRouter attempts;
-    // `overflow:${callSid}` for the terminal overflow attempt.
-    id: varchar('id', { length: 96 }).primaryKey().notNull(),
-
-    userId: varchar('user_id', { length: 21 })
-      .notNull()
-      .references(() => user.id, { onDelete: 'cascade' }),
-
-    reservationSid: varchar('reservation_sid', { length: 34 }),
-    taskSid: varchar('task_sid', { length: 34 }),
-    callSid: varchar('call_sid', { length: 34 }),
-    workerSid: varchar('worker_sid', { length: 34 }),
-    // The browser/worker call leg SID, used to match a browser Reject click.
-    workerCallSid: varchar('worker_call_sid', { length: 34 }),
-
-    attemptType: varchar('attempt_type', { length: 20 })
-      .notNull()
-      .default('taskrouter'), // 'taskrouter' | 'overflow'
-
-    outcome: varchar('outcome', { length: 20 }).notNull().default('pending'), // 'pending' | 'accepted' | 'rejected' | 'missed'
-
-    finalSource: varchar('final_source', { length: 80 }),
-
-    offeredAt: timestamp('offered_at').defaultNow().notNull(),
-    finalizedAt: timestamp('finalized_at'),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at').defaultNow().notNull(),
-  },
-  (table) => ({
-    userOutcomeIdx: index('call_attempt_user_outcome_idx').on(
-      table.userId,
-      table.outcome,
-    ),
-    callSidIdx: index('call_attempt_call_sid_idx').on(table.callSid),
-    workerCallSidIdx: index('call_attempt_worker_call_sid_idx').on(
-      table.workerCallSid,
-    ),
-  }),
-)
-
-export type CallAttemptOutcome = InferSelectModel<typeof callAttemptOutcomes>
-export type NewCallAttemptOutcome = typeof callAttemptOutcomes.$inferInsert

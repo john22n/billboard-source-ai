@@ -7,7 +7,7 @@
  * Worker reset is handled by reservation.canceled in events/route.ts.
  */
 import twilio from 'twilio'
-import { finalizeCallAttempt } from '@/lib/call-attempt-outcomes'
+import { recordMissedAttempt } from '@/lib/call-attempt-outcomes'
 
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!
 const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!
@@ -92,16 +92,11 @@ export async function POST(req: Request) {
           )
           // Note: worker reset is handled by reservation.canceled in events/route.ts
 
-          // Record this Sales Rep's Call Attempt as Missed (idempotent; never
-          // overwrites a browser Reject).
-          await finalizeCallAttempt({
-            reservationSid,
-            outcome: 'missed',
-            source: 'call-complete.conference-end-unanswered',
-            workerSid,
-            taskSid,
-            callSid: callerCallSid,
-          })
+          // Record this Sales Rep's Call Attempt as Missed (idempotent;
+          // suppressed if the rep just explicitly rejected this attempt).
+          if (workerSid) {
+            await recordMissedAttempt({ reservationSid, workerSid })
+          }
 
           // Terminal handoff to the external Overflow Number (no voicemail).
           const overflowUrl = new URL(`${appUrl}/api/taskrouter/overflow`)

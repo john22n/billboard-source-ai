@@ -1,0 +1,7 @@
+# Store call attempt outcomes in the application database
+
+Billboard Source AI will store production Call Attempt Outcomes in its own database rather than treating Twilio reporting as the source of truth for Sales Rep totals. This gives admins durable Call Attempt Totals beyond Twilio reporting windows and lets the product define Missed, Rejected, and Accepted in its own domain terms, with the trade-off that historical totals begin when production application tracking is deployed and will not be backfilled from Twilio.
+
+Explicit in-app rejection is counted from the browser action because it is the Sales Rep's direct intent in Billboard Source AI. Accepted and Missed outcomes still depend on routing/call state so that a mere offer or ambiguous call end does not inflate totals.
+
+Call Attempt Totals are stored as running counters (`calls_accepted`, `calls_rejected`, `calls_missed`) directly on the `user` table rather than as one row per attempt in a dedicated table. The Neon free tier limits storage and connections, so a per-attempt history would grow unbounded and add load for a feature that only needs aggregate totals per Sales Rep. Idempotency is preserved without per-attempt rows by stamping `last_attempt_sid` (dedupes duplicate Twilio callbacks for the same ReservationSid) and `last_reject_at` (debounces rapid browser rejects and suppresses the Twilio "missed" that follows an explicit reject). The trade-off is that individual attempt history is not retained — only the per-rep totals.
