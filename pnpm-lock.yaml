@@ -91,9 +91,6 @@ importers:
       '@tabler/icons-react':
         specifier: ^3.34.0
         version: 3.38.0(react@19.2.4)
-      '@tailwindcss/container-queries':
-        specifier: ^0.1.1
-        version: 0.1.1(tailwindcss@4.2.1)
       '@tanstack/react-table':
         specifier: ^8.21.3
         version: 8.21.3(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -2793,14 +2790,6 @@ packages:
       {
         integrity: sha512-FdETQSpQ3lN7BEjEUzjKhsfTDCamrvMDops4HEMphTm3DmkIFpThoODn8XXZ8Q9MhjshIvphIYVHHB7zpq167w==,
       }
-
-  '@tailwindcss/container-queries@0.1.1':
-    resolution:
-      {
-        integrity: sha512-p18dswChx6WnTSaJCSGx6lTmrGzNNvm2FtXmiO6AuA1V4U5REyoqwmT6kgAsIMdjo07QdAfYXHJ4hnMtfHzWgA==,
-      }
-    peerDependencies:
-      tailwindcss: '>=3.2.0'
 
   '@tailwindcss/node@4.2.1':
     resolution:
@@ -9167,10 +9156,6 @@ snapshots:
       react: 19.2.4
 
   '@tabler/icons@3.38.0': {}
-
-  '@tailwindcss/container-queries@0.1.1(tailwindcss@4.2.1)':
-    dependencies:
-      tailwindcss: 4.2.1
 
   '@tailwindcss/node@4.2.1':
     dependencies:
