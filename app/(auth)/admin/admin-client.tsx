@@ -382,8 +382,8 @@ export default function AdminClient({
 
   return (
     <div className="flex flex-col min-h-svh w-full p-4 md:p-8 gap-5 bg-primary-foreground">
-      <div className="w-full flex flex-wrap items-center justify-between gap-3 mb-4">
-        <div className="flex items-center gap-2">
+      <div className="w-full flex items-center gap-3 mb-4">
+        <div className="flex flex-1 items-center gap-2">
           <Button size="sm" onClick={handleBackToDashboard}>
             back to Dashboard
           </Button>
@@ -410,16 +410,20 @@ export default function AdminClient({
             </SheetContent>
           </Sheet>
         </div>
-        <h2 className="text-2xl font-semibold">Admin Panel</h2>
-        <Button
-          variant="destructive"
-          size="sm"
-          disabled={selectedUsers.length === 0 || isPending}
-          onClick={handleDelete}
-        >
-          <Trash2 className="mr-2 h-4 w-4" />
-          {isPending ? 'Deleting...' : 'Delete Selected'}
-        </Button>
+        <h2 className="flex-1 text-center text-2xl font-semibold">
+          Admin Panel
+        </h2>
+        <div className="flex flex-1 justify-end">
+          <Button
+            variant="destructive"
+            size="sm"
+            disabled={selectedUsers.length === 0 || isPending}
+            onClick={handleDelete}
+          >
+            <Trash2 className="mr-2 h-4 w-4" />
+            {isPending ? 'Deleting...' : 'Delete Selected'}
+          </Button>
+        </div>
       </div>
       <Tabs defaultValue="users" className="w-full">
         <TabsList
