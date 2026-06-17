@@ -1,4 +1,4 @@
-import type { Config } from 'tailwindcss';
+import type { Config } from 'tailwindcss'
 
 const config: Config = {
   content: [
@@ -14,10 +14,10 @@ const config: Config = {
       },
       screens: {
         // Explicitly include defaults + your custom one
-        'sm': '640px',
-        'md': '768px',
-        'lg': '1024px',
-        'xl': '1280px',
+        sm: '640px',
+        md: '768px',
+        lg: '1024px',
+        xl: '1280px',
         '2xl': '1536px',
         'toast-mobile': '600px',
       },
@@ -80,10 +80,11 @@ const config: Config = {
       },
     },
   },
-  plugins: [
-    require('tw-animate-css'),
-    require('@tailwindcss/container-queries'),
-  ],
-};
+  // Tailwind v4: plugins/imports are handled in app/globals.css
+  //   @import "tailwindcss";
+  //   @import "tw-animate-css";
+  // Container queries are built into v4 core, so no JS plugins are needed here.
+  plugins: [],
+}
 
-export default config;
+export default config
