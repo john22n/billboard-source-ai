@@ -144,3 +144,13 @@ export const nutshellLeads = pgTable('nutshell_leads', {
 
 export type NutshellLead = InferSelectModel<typeof nutshellLeads>
 export type NewNutshellLead = typeof nutshellLeads.$inferInsert
+
+// App-wide singleton metrics (Feature 2). One fixed row (id = 1), no unbounded
+// growth, so it stays within the Neon free tier. Currently tracks total inbound
+// calls to the Main Routing Number shown in the Admin Panel header.
+export const appMetrics = pgTable('app_metrics', {
+  id: integer('id').primaryKey().default(1),
+  mainCallsTotal: integer('main_calls_total').notNull().default(0),
+})
+
+export type AppMetrics = InferSelectModel<typeof appMetrics>

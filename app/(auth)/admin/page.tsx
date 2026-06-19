@@ -1,4 +1,9 @@
-import { getAllUsers, getUserCosts, getNutshellLeadStats } from '@/lib/dal'
+import {
+  getAllUsers,
+  getUserCosts,
+  getNutshellLeadStats,
+  getMainCallsTotal,
+} from '@/lib/dal'
 import { getSession } from '@/lib/auth'
 import { redirect } from 'next/navigation'
 import AdminClient from './admin-client'
@@ -16,10 +21,11 @@ export default async function AdminPage() {
   }
 
   try {
-    const [users, userCosts, leadStats] = await Promise.all([
+    const [users, userCosts, leadStats, mainCallsTotal] = await Promise.all([
       getAllUsers(),
       getUserCosts(),
       getNutshellLeadStats().catch(() => null),
+      getMainCallsTotal().catch(() => 0),
     ])
 
     return (
@@ -27,6 +33,7 @@ export default async function AdminPage() {
         initialUsers={users || []}
         initialCosts={userCosts || []}
         initialLeadStats={leadStats}
+        mainCallsTotal={mainCallsTotal}
         sessionEmail={session.email}
       />
     )
@@ -38,6 +45,7 @@ export default async function AdminPage() {
         initialUsers={[]}
         initialCosts={[]}
         initialLeadStats={null}
+        mainCallsTotal={0}
         sessionEmail={session.email}
       />
     )

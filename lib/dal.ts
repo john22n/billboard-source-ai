@@ -2,7 +2,7 @@ import { db } from '@/db'
 import { getSession } from './auth'
 import { and, eq, inArray, lt, sql } from 'drizzle-orm'
 import { cache } from 'react'
-import { openaiLogs, user, nutshellLeads } from '@/db/schema'
+import { openaiLogs, user, nutshellLeads, appMetrics } from '@/db/schema'
 
 export const getCurrentUser = cache(async () => {
   const session = await getSession()
@@ -62,6 +62,48 @@ export async function getAllUsers() {
 
 export async function deleteUsersByIds(ids: string[]) {
   return await db.delete(user).where(inArray(user.id, ids))
+}
+
+const APP_METRICS_ID = 1
+
+// Total inbound calls to the Main Routing Number (Admin Panel header).
+export async function getMainCallsTotal(): Promise<number> {
+  const rows = await db
+    .select({ total: appMetrics.mainCallsTotal })
+    .from(appMetrics)
+    .where(eq(appMetrics.id, APP_METRICS_ID))
+    .limit(1)
+  return rows[0]?.total ?? 0
+}
+
+// Increment the Main-Number total by one (atomic upsert on the singleton row).
+export async function incrementMainCallsTotal(): Promise<void> {
+  await db
+    .insert(appMetrics)
+    .values({ id: APP_METRICS_ID, mainCallsTotal: 1 })
+    .onConflictDoUpdate({
+      target: appMetrics.id,
+      set: { mainCallsTotal: sql`${appMetrics.mainCallsTotal} + 1` },
+    })
+}
+
+// Reset every Sales Rep's Call Attempt Totals (Missed/Rejected/Accepted) to
+// 0/0/0, clear idempotency guards, and zero the Main-Number total.
+export async function resetAllCallCounts(): Promise<void> {
+  await db.update(user).set({
+    callsAccepted: 0,
+    callsRejected: 0,
+    callsMissed: 0,
+    lastAttemptSid: null,
+    lastRejectAt: null,
+  })
+  await db
+    .insert(appMetrics)
+    .values({ id: APP_METRICS_ID, mainCallsTotal: 0 })
+    .onConflictDoUpdate({
+      target: appMetrics.id,
+      set: { mainCallsTotal: 0 },
+    })
 }
 
 export async function updateUserTwilioPhone(

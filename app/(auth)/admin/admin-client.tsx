@@ -32,7 +32,11 @@ import {
   DollarSign,
   UserPlus,
 } from 'lucide-react'
-import { deleteUsers, updateTwilioPhone } from '@/actions/user-actions'
+import {
+  deleteUsers,
+  updateTwilioPhone,
+  resetCallCounts,
+} from '@/actions/user-actions'
 import { useRouter } from 'next/navigation'
 import type { User, NutshellLead } from '@/db/schema'
 import { BillboardDataUploader } from '@/components/BillboardDataUploader'
@@ -131,6 +135,7 @@ interface AdminClientProps {
   initialUsers: User[]
   initialCosts: UserCost[]
   initialLeadStats: LeadStats | null
+  mainCallsTotal: number
   sessionEmail: string
 }
 
@@ -138,6 +143,7 @@ export default function AdminClient({
   initialUsers = [],
   initialCosts = [],
   initialLeadStats = null,
+  mainCallsTotal = 0,
   sessionEmail = '',
 }: AdminClientProps) {
   const [selectedUsers, setSelectedUsers] = useState<string[]>([])
@@ -281,6 +287,25 @@ export default function AdminClient({
     })
   }
 
+  const handleResetCounts = () => {
+    if (
+      !window.confirm(
+        "Reset every user's call counts (Missed/Rejected/Accepted) and the Main-Number total to 0? This cannot be undone.",
+      )
+    ) {
+      return
+    }
+    startTransition(async () => {
+      const result = await resetCallCounts()
+      if (result.success) {
+        showSuccessToast('Call counts reset')
+        router.refresh()
+      } else {
+        showErrorToast(result.message || 'Failed to reset call counts')
+      }
+    })
+  }
+
   const handleBackToDashboard = () => {
     router.push('/dashboard')
   }
@@ -410,10 +435,22 @@ export default function AdminClient({
             </SheetContent>
           </Sheet>
         </div>
-        <h2 className="flex-1 text-center text-2xl font-semibold">
-          Admin Panel
-        </h2>
-        <div className="flex flex-1 justify-end">
+        <div className="flex flex-1 flex-col items-center">
+          <h2 className="text-center text-2xl font-semibold">Admin Panel</h2>
+          <span className="text-sm font-medium text-muted-foreground tabular-nums">
+            total={mainCallsTotal.toLocaleString('en-US')}
+          </span>
+        </div>
+        <div className="flex flex-1 justify-end gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={isPending}
+            onClick={handleResetCounts}
+          >
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Reset Counts
+          </Button>
           <Button
             variant="destructive"
             size="sm"

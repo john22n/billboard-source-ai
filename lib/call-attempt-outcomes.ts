@@ -55,6 +55,29 @@ export function shouldRecordCallAttempts(): boolean {
   return process.env.VERCEL_ENV === 'production'
 }
 
+// Business hours for counting Call Attempt outcomes: 08:00–18:00 Central Time.
+const BUSINESS_HOURS_TIME_ZONE = 'America/Chicago' // DST-aware
+const BUSINESS_HOURS_START = 8 // 8:00am CT (inclusive)
+const BUSINESS_HOURS_END = 18 // 6:00pm CT (exclusive)
+
+/**
+ * Accepted / Rejected / Missed outcomes are only counted during business hours
+ * (8:00am–6:00pm Central Time, DST-aware). Outside that window the outcome is
+ * ignored. The Main-Number total is NOT gated by this — it counts all hours.
+ */
+export function isWithinBusinessHours(now: Date = new Date()): boolean {
+  const hour = Number(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: BUSINESS_HOURS_TIME_ZONE,
+      hour12: false,
+      hour: '2-digit',
+    }).format(now),
+  )
+  // Intl can emit "24" for midnight under hour12:false; normalize to 0.
+  const normalized = hour === 24 ? 0 : hour
+  return normalized >= BUSINESS_HOURS_START && normalized < BUSINESS_HOURS_END
+}
+
 /**
  * Count an Accepted Call Attempt for the Sales Rep who owns `workerSid`.
  * Idempotent per ReservationSid.
@@ -64,6 +87,7 @@ export async function recordAcceptedAttempt(input: {
   workerSid: string
 }): Promise<void> {
   if (!shouldRecordCallAttempts()) return
+  if (!isWithinBusinessHours()) return
   if (!input.workerSid || !input.reservationSid) return
 
   try {
@@ -94,6 +118,7 @@ export async function recordMissedAttempt(input: {
   workerSid: string
 }): Promise<void> {
   if (!shouldRecordCallAttempts()) return
+  if (!isWithinBusinessHours()) return
   if (!input.workerSid || !input.reservationSid) return
 
   try {
@@ -127,6 +152,7 @@ export async function recordRejectedAttempt(input: {
   userId: string
 }): Promise<void> {
   if (!shouldRecordCallAttempts()) return
+  if (!isWithinBusinessHours()) return
   if (!input.userId) return
 
   try {
@@ -162,6 +188,7 @@ export async function recordOverflowAttempt(input: {
   taskSid?: string | null
 }): Promise<void> {
   if (!shouldRecordCallAttempts()) return
+  if (!isWithinBusinessHours()) return
 
   const overflowNumber = process.env.TWILIO_OVERFLOW_NUMBER
   if (!overflowNumber) return
