@@ -480,7 +480,7 @@ export default function AdminClient({
                       onClick={handleResetCounts}
                     >
                       <RefreshCw className="mr-2 h-4 w-4" />
-                      Reset Counts
+                      Reset
                     </Button>
                     <span>
                       Missed / Rejected / Accepted: total=
