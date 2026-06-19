@@ -435,12 +435,9 @@ export default function AdminClient({
             </SheetContent>
           </Sheet>
         </div>
-        <div className="flex flex-1 flex-col items-center">
-          <h2 className="text-center text-2xl font-semibold">Admin Panel</h2>
-          <span className="text-sm font-medium text-muted-foreground tabular-nums">
-            total={mainCallsTotal.toLocaleString('en-US')}
-          </span>
-        </div>
+        <h2 className="flex-1 text-center text-2xl font-semibold">
+          Admin Panel
+        </h2>
         <div className="flex flex-1 justify-end gap-2">
           <Button
             variant="outline"
@@ -484,7 +481,8 @@ export default function AdminClient({
                 <TableHead>Role</TableHead>
                 <TableHead>Twilio Phone</TableHead>
                 <TableHead className="text-right">
-                  Missed / Rejected / Accepted
+                  Missed / Rejected / Accepted: total=
+                  {mainCallsTotal.toLocaleString('en-US')}
                 </TableHead>
                 <TableHead className="text-right">
                   Average Workday Hours
