@@ -440,15 +440,6 @@ export default function AdminClient({
         </h2>
         <div className="flex flex-1 justify-end gap-2">
           <Button
-            variant="outline"
-            size="sm"
-            disabled={isPending}
-            onClick={handleResetCounts}
-          >
-            <RefreshCw className="mr-2 h-4 w-4" />
-            Reset Counts
-          </Button>
-          <Button
             variant="destructive"
             size="sm"
             disabled={selectedUsers.length === 0 || isPending}
@@ -481,8 +472,21 @@ export default function AdminClient({
                 <TableHead>Role</TableHead>
                 <TableHead>Twilio Phone</TableHead>
                 <TableHead className="text-right">
-                  Missed / Rejected / Accepted: total=
-                  {mainCallsTotal.toLocaleString('en-US')}
+                  <div className="flex items-center justify-end gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={isPending}
+                      onClick={handleResetCounts}
+                    >
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                      Reset Counts
+                    </Button>
+                    <span>
+                      Missed / Rejected / Accepted: total=
+                      {mainCallsTotal.toLocaleString('en-US')}
+                    </span>
+                  </div>
                 </TableHead>
                 <TableHead className="text-right">
                   Average Workday Hours
