@@ -6,8 +6,7 @@
  */
 
 import twilio from 'twilio'
-
-const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN
+import { serverConfig } from '@/lib/config'
 
 export async function POST(req: Request) {
   try {
@@ -15,7 +14,8 @@ export async function POST(req: Request) {
     const bodyText = await clonedReq.text()
     const formData = await req.formData()
 
-    if (TWILIO_AUTH_TOKEN) {
+    const twilioAuthToken = serverConfig.twilio.authToken
+    if (twilioAuthToken) {
       const twilioSignature = req.headers.get('X-Twilio-Signature') || ''
       const url = new URL(req.url)
       const webhookUrl = url.toString()
@@ -27,7 +27,7 @@ export async function POST(req: Request) {
       })
 
       const isValid = twilio.validateRequest(
-        TWILIO_AUTH_TOKEN,
+        twilioAuthToken,
         twilioSignature,
         webhookUrl,
         params,
@@ -80,11 +80,10 @@ export async function POST(req: Request) {
     console.log('Call from:', taskAttrs.from)
     console.log('═══════════════════════════════════════════')
 
-    const appUrl = (
-      process.env.NEXT_PUBLIC_APP_URL ??
-      `${new URL(req.url).protocol}//${new URL(req.url).host}`
-    ).replace(/\/$/, '')
+    const appUrl = serverConfig.app.baseUrlFromRequest(req.url)
     const workspaceSid = formData.get('WorkspaceSid') as string
+    const availableActivitySid =
+      serverConfig.taskRouter.requireActivitySid('available')
 
     // ── OVERFLOW (TERMINAL) WORKER ───────────────────────────────────────────
     // The "voicemail@system" worker is the workflow's terminal target reached
@@ -101,12 +100,7 @@ export async function POST(req: Request) {
         overflowUrl.searchParams.set('callSid', taskAttrs.call_sid)
       if (taskAttrs.from)
         overflowUrl.searchParams.set('callerFrom', taskAttrs.from)
-      if (process.env.VERCEL_BYPASS_TOKEN) {
-        overflowUrl.searchParams.set(
-          'x-vercel-protection-bypass',
-          process.env.VERCEL_BYPASS_TOKEN,
-        )
-      }
+      serverConfig.app.addVercelBypassToken(overflowUrl)
 
       const callSid = taskAttrs.call_sid
       if (!callSid) {
@@ -119,7 +113,7 @@ export async function POST(req: Request) {
         call_sid: callSid,
         url: overflowUrl.toString(),
         accept: true,
-        post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
+        post_work_activity_sid: availableActivitySid,
       }
 
       console.log('📞 Redirect instruction:', instruction)
@@ -158,10 +152,9 @@ export async function POST(req: Request) {
 
       try {
         const { default: twilioModule } = await import('twilio')
-        const client = twilioModule(
-          process.env.TWILIO_ACCOUNT_SID!,
-          process.env.TWILIO_AUTH_TOKEN!,
-        )
+        const { accountSid, authToken } =
+          serverConfig.twilio.requireAccountCredentials()
+        const client = twilioModule(accountSid, authToken)
         await client.taskrouter.v1
           .workspaces(workspaceSid)
           .tasks(taskSid)
@@ -199,19 +192,14 @@ export async function POST(req: Request) {
         simDialUrl.searchParams.set('callerFrom', taskAttrs.from ?? '')
         simDialUrl.searchParams.set('workerSid', workerSid)
         simDialUrl.searchParams.set('reservationSid', reservationSid)
-        if (process.env.VERCEL_BYPASS_TOKEN) {
-          simDialUrl.searchParams.set(
-            'x-vercel-protection-bypass',
-            process.env.VERCEL_BYPASS_TOKEN,
-          )
-        }
+        serverConfig.app.addVercelBypassToken(simDialUrl)
 
         const simRingInstruction = {
           instruction: 'redirect',
           call_sid: callSid,
           url: simDialUrl.toString(),
           accept: true,
-          post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
+          post_work_activity_sid: availableActivitySid,
         }
 
         console.log('📞 Simultaneous ring redirect instruction:', {
@@ -232,18 +220,13 @@ export async function POST(req: Request) {
     callCompleteUrl.searchParams.set('workspaceSid', workspaceSid)
     callCompleteUrl.searchParams.set('workerSid', workerSid)
     callCompleteUrl.searchParams.set('reservationSid', reservationSid)
-    if (process.env.VERCEL_BYPASS_TOKEN) {
-      callCompleteUrl.searchParams.set(
-        'x-vercel-protection-bypass',
-        process.env.VERCEL_BYPASS_TOKEN,
-      )
-    }
+    serverConfig.app.addVercelBypassToken(callCompleteUrl)
 
     const instruction = {
       instruction: 'conference',
       to: workerAttrs.contact_uri || `client:${workerAttrs.email}`,
-      from: taskAttrs.from || process.env.TWILIO_MAIN_NUMBER || '+18338547126',
-      post_work_activity_sid: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID,
+      from: taskAttrs.from || serverConfig.twilio.mainNumber || '+18338547126',
+      post_work_activity_sid: availableActivitySid,
       timeout: 15,
       record: 'record-from-answer',
       recording_status_callback: `${appUrl}/api/recordings/call`,

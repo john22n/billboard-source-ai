@@ -18,6 +18,8 @@
  *   workerSid      — TaskRouter Worker SID (passed through to dial-complete)
  */
 
+import { serverConfig } from '@/lib/config'
+
 export async function POST(req: Request) {
   try {
     const url = new URL(req.url)
@@ -47,10 +49,8 @@ export async function POST(req: Request) {
       )
     }
 
-    const appUrl = (
-      process.env.NEXT_PUBLIC_APP_URL ?? `${url.protocol}//${url.host}`
-    ).replace(/\/$/, '')
-    const businessNumber = process.env.TWILIO_MAIN_NUMBER ?? '+18338547126'
+    const appUrl = serverConfig.app.baseUrlFromRequest(req.url)
+    const businessNumber = serverConfig.twilio.mainNumber ?? '+18338547126'
 
     const callerId = callerFrom || businessNumber
 
@@ -62,42 +62,22 @@ export async function POST(req: Request) {
     dialCompleteUrl.searchParams.set('workspaceSid', workspaceSid)
     dialCompleteUrl.searchParams.set('workerSid', workerSid)
     dialCompleteUrl.searchParams.set('reservationSid', reservationSid)
-    if (process.env.VERCEL_BYPASS_TOKEN) {
-      dialCompleteUrl.searchParams.set(
-        'x-vercel-protection-bypass',
-        process.env.VERCEL_BYPASS_TOKEN,
-      )
-    }
+    serverConfig.app.addVercelBypassToken(dialCompleteUrl)
 
     // ── browser client status callback ───────────────────────────────────────
     const clientStatusUrl = new URL(`${appUrl}/api/taskrouter/client-status`)
     clientStatusUrl.searchParams.set('cellPhone', cellPhone)
     clientStatusUrl.searchParams.set('taskSid', taskSid)
-    if (process.env.VERCEL_BYPASS_TOKEN) {
-      clientStatusUrl.searchParams.set(
-        'x-vercel-protection-bypass',
-        process.env.VERCEL_BYPASS_TOKEN,
-      )
-    }
+    serverConfig.app.addVercelBypassToken(clientStatusUrl)
 
     // ── cell screening URL ────────────────────────────────────────────────────
     const cellScreenUrl = new URL(`${appUrl}/api/taskrouter/cell-screen`)
     cellScreenUrl.searchParams.set('taskSid', taskSid)
-    if (process.env.VERCEL_BYPASS_TOKEN) {
-      cellScreenUrl.searchParams.set(
-        'x-vercel-protection-bypass',
-        process.env.VERCEL_BYPASS_TOKEN,
-      )
-    }
+    serverConfig.app.addVercelBypassToken(cellScreenUrl)
 
     // ── recording status callback — tagged as a call recording ───────────────
     const recordingCallbackUrl = new URL(`${appUrl}/api/recordings/call`)
-    if (process.env.VERCEL_BYPASS_TOKEN) {
-      recordingCallbackUrl.searchParams.set(
-        'x-vercel-protection-bypass',
-        process.env.VERCEL_BYPASS_TOKEN,
-      )
-    }
+    serverConfig.app.addVercelBypassToken(recordingCallbackUrl)
 
     const escapeXml = (s: string): string =>
       s

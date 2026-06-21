@@ -22,15 +22,10 @@ import twilio from 'twilio'
 import { db } from '@/db'
 import { user } from '@/db/schema'
 import { getSession } from '@/lib/auth'
-
-const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!
-const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!
-const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!
+import { isConfigError, serverConfig } from '@/lib/config'
 
 const PERIOD_DAYS = 28 // Twilio retains 30 days max; use 28 to stay safely within limits
 const TIME_ZONE = 'America/Chicago' // Central Time, DST-aware
-
-const client = twilio(ACCOUNT_SID, AUTH_TOKEN)
 
 // In-memory cache: store result + timestamp, refresh once per day
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
@@ -141,6 +136,11 @@ function buildWorkdayWindows() {
 }
 
 async function fetchAvailability() {
+  const { accountSid, authToken } =
+    serverConfig.twilio.requireAccountCredentials()
+  const workspaceSid = serverConfig.taskRouter.requireWorkspaceSid()
+  const client = twilio(accountSid, authToken)
+
   // Get all DB users to map emails → user IDs
   const dbUsers = await db.select({ id: user.id, email: user.email }).from(user)
 
@@ -151,7 +151,7 @@ async function fetchAvailability() {
 
   // List all workers directly from TaskRouter (source of truth)
   const twilioWorkers = await client.taskrouter.v1
-    .workspaces(WORKSPACE_SID)
+    .workspaces(workspaceSid)
     .workers.list()
 
   console.log(`📊 Found ${twilioWorkers.length} TaskRouter workers`)
@@ -167,7 +167,7 @@ async function fetchAvailability() {
       const perDaySeconds = await Promise.all(
         weekdayWindows.map(async (win) => {
           const stats = await client.taskrouter.v1
-            .workspaces(WORKSPACE_SID)
+            .workspaces(workspaceSid)
             .workers(worker.sid)
             .statistics()
             .fetch({ startDate: win.start, endDate: win.end })
@@ -284,6 +284,15 @@ export async function GET() {
 
     return Response.json(data)
   } catch (error) {
+    if (isConfigError(error)) {
+      return Response.json(
+        {
+          error: 'TaskRouter integration not configured',
+          details: error.message,
+        },
+        { status: 500 },
+      )
+    }
     console.error('❌ Worker availability error:', error)
     return Response.json({ error: 'Internal error' }, { status: 500 })
   }

@@ -5,6 +5,7 @@ import { db } from '@/db'
 import { user } from '@/db/schema'
 import * as jose from 'jose'
 import { cache } from 'react'
+import { serverConfig } from '@/lib/config'
 
 //JWT types
 interface JWTPayload {
@@ -12,10 +13,7 @@ interface JWTPayload {
   [key: string]: string | number | boolean | null | undefined
 }
 
-// secret key for JWT signing ( in a real app, use env variables)
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || 'your-secret-key-min-32-chars-long'
-)
+const JWT_SECRET = new TextEncoder().encode(serverConfig.auth.jwtSecret)
 
 // JWT experation
 const JWT_EXPIRATION = '2d' // 1 day
@@ -46,7 +44,7 @@ export async function createUser(email: string, password: string) {
     })
     return { id, email }
   } catch (error) {
-    console.error("error createing user:", error)
+    console.error('error createing user:', error)
     return null
   }
 }
@@ -101,10 +99,10 @@ export async function createSession(userId: string) {
       name: 'auth_token',
       value: token,
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: serverConfig.auth.secureCookies,
       maxAge: 60 * 60 * 24 * 2, // 2 days
       path: '/',
-      sameSite: 'lax'
+      sameSite: 'lax',
     })
     return true
   } catch (error) {
@@ -127,7 +125,9 @@ export const getSession = cache(async () => {
       error instanceof Error &&
       error.message.includes('During prerendering, `cookies()` rejects')
     ) {
-      console.log('Cookies not available during prerendering, returning null session')
+      console.log(
+        'Cookies not available during prerendering, returning null session',
+      )
       return null
     }
   }

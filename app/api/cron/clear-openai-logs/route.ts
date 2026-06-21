@@ -1,9 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { configErrorMessage, isMissingConfig, serverConfig } from '@/lib/config'
 import { clearMonthlyOpenAILogs } from '@/lib/dal'
 
 export async function GET(request: NextRequest) {
+  let cronSecret: string
+  try {
+    cronSecret = serverConfig.cron.requireSecret()
+  } catch (error) {
+    if (isMissingConfig(error)) {
+      return NextResponse.json(
+        { error: 'Configuration error', details: configErrorMessage(error) },
+        { status: 500 },
+      )
+    }
+    throw error
+  }
+
   const authHeader = request.headers.get('authorization')
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

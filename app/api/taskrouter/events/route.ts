@@ -13,42 +13,40 @@ import {
   recordAcceptedAttempt,
   recordMissedAttempt,
 } from '@/lib/call-attempt-outcomes'
+import { serverConfig } from '@/lib/config'
 
-const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN
-const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!
-const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!
-const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!
-const BUSY_ACTIVITY_SID = process.env.TASKROUTER_ACTIVITY_BUSY_SID!
-const AVAILABLE_ACTIVITY_SID = process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID!
-
-const ACTIVITY_MAP: Record<
+function getActivityMap(): Record<
   string,
   'available' | 'unavailable' | 'offline' | 'busy'
-> = {
-  [process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID || '']: 'available',
-  [process.env.TASKROUTER_ACTIVITY_UNAVAILABLE_SID || '']: 'unavailable',
-  [process.env.TASKROUTER_ACTIVITY_OFFLINE_SID || '']: 'offline',
-  [process.env.TASKROUTER_ACTIVITY_BUSY_SID || '']: 'busy',
+> {
+  const activitySids = serverConfig.taskRouter.activitySids
+  return {
+    [activitySids.available || '']: 'available',
+    [activitySids.unavailable || '']: 'unavailable',
+    [activitySids.offline || '']: 'offline',
+    [activitySids.busy || '']: 'busy',
+  }
 }
 
 async function resetWorkerToBack(workerSid: string, label: string) {
-  if (
-    !workerSid ||
-    !WORKSPACE_SID ||
-    !BUSY_ACTIVITY_SID ||
-    !AVAILABLE_ACTIVITY_SID
-  )
-    return
+  if (!workerSid) return
   try {
-    const client = twilio(ACCOUNT_SID, AUTH_TOKEN)
+    const { accountSid, authToken } =
+      serverConfig.twilio.requireAccountCredentials()
+    const workspaceSid = serverConfig.taskRouter.requireWorkspaceSid()
+    const activitySids = serverConfig.taskRouter.requireActivitySids([
+      'busy',
+      'available',
+    ] as const)
+    const client = twilio(accountSid, authToken)
     await client.taskrouter.v1
-      .workspaces(WORKSPACE_SID)
+      .workspaces(workspaceSid)
       .workers(workerSid)
-      .update({ activitySid: BUSY_ACTIVITY_SID })
+      .update({ activitySid: activitySids.busy })
     await client.taskrouter.v1
-      .workspaces(WORKSPACE_SID)
+      .workspaces(workspaceSid)
       .workers(workerSid)
-      .update({ activitySid: AVAILABLE_ACTIVITY_SID })
+      .update({ activitySid: activitySids.available })
     console.log(`✅ Worker ${workerSid} reset to back of queue after ${label}`)
   } catch (err) {
     console.error(`❌ Failed to reset worker after ${label}:`, err)
@@ -62,9 +60,10 @@ export async function POST(req: Request) {
     const formData = await req.formData()
 
     // Validate Twilio signature — skip on preview deployments
-    const isProduction = process.env.VERCEL_ENV === 'production'
+    const isProduction = serverConfig.runtime.isProductionDeployment
+    const twilioAuthToken = serverConfig.twilio.authToken
 
-    if (TWILIO_AUTH_TOKEN && isProduction) {
+    if (twilioAuthToken && isProduction) {
       const twilioSignature = req.headers.get('X-Twilio-Signature') || ''
       const url = new URL(req.url)
 
@@ -74,7 +73,7 @@ export async function POST(req: Request) {
       })
 
       const isValid = twilio.validateRequest(
-        TWILIO_AUTH_TOKEN,
+        twilioAuthToken,
         twilioSignature,
         url.toString(),
         params,
@@ -111,7 +110,7 @@ export async function POST(req: Request) {
 
       case 'reservation.accepted': {
         console.log(`✅ Reservation accepted by worker: ${workerSid}`)
-        if (workerSid && WORKSPACE_SID && BUSY_ACTIVITY_SID) {
+        if (workerSid) {
           // Skip Busy switch for voicemail worker
           const workerAttrsRaw = formData.get('WorkerAttributes') as string
           const workerAttrs = JSON.parse(workerAttrsRaw || '{}')
@@ -127,11 +126,16 @@ export async function POST(req: Request) {
             await recordAcceptedAttempt({ reservationSid, workerSid })
           }
           try {
-            const client = twilio(ACCOUNT_SID, AUTH_TOKEN)
+            const { accountSid, authToken } =
+              serverConfig.twilio.requireAccountCredentials()
+            const workspaceSid = serverConfig.taskRouter.requireWorkspaceSid()
+            const busyActivitySid =
+              serverConfig.taskRouter.requireActivitySid('busy')
+            const client = twilio(accountSid, authToken)
             await client.taskrouter.v1
-              .workspaces(WORKSPACE_SID)
+              .workspaces(workspaceSid)
               .workers(workerSid)
-              .update({ activitySid: BUSY_ACTIVITY_SID })
+              .update({ activitySid: busyActivitySid })
             console.log(`✅ Worker ${workerSid} switched to Busy`)
           } catch (err) {
             console.error('❌ Failed to switch worker to Busy:', err)
@@ -176,7 +180,7 @@ export async function POST(req: Request) {
         const activitySid = formData.get('WorkerActivitySid') as string
 
         if (activitySid && workerSid) {
-          const newStatus = ACTIVITY_MAP[activitySid] || 'offline'
+          const newStatus = getActivityMap()[activitySid] || 'offline'
           console.log(`   Status: ${newStatus}`)
 
           // Skip DB update for Busy — it's transient and set automatically

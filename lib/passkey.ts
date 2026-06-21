@@ -17,20 +17,15 @@ import type {
 import { db } from '@/db'
 import { passkey, user } from '@/db/schema'
 import { eq } from 'drizzle-orm'
+import { serverConfig } from '@/lib/config'
 
 // ============================================
 // Configuration
 // ============================================
 
-// Relying Party (RP) configuration
-// In production, these should come from environment variables
-const rpName = 'Billboard Source'
-const rpID = process.env.PASSKEY_RP_ID || 'localhost'
-const origin = process.env.PASSKEY_ORIGIN || `http://${rpID}:3000`
-
-// For production, you'd set:
-// PASSKEY_RP_ID=yourdomain.com
-// PASSKEY_ORIGIN=https://yourdomain.com
+const rpName = serverConfig.passkey.rpName
+const rpID = serverConfig.passkey.rpId
+const origin = serverConfig.passkey.origin
 
 // ============================================
 // Types
@@ -55,7 +50,9 @@ export interface StoredPasskey {
 /**
  * Get all passkeys for a user
  */
-export async function getPasskeysByUserId(userId: string): Promise<StoredPasskey[]> {
+export async function getPasskeysByUserId(
+  userId: string,
+): Promise<StoredPasskey[]> {
   const passkeys = await db
     .select()
     .from(passkey)
@@ -77,7 +74,9 @@ export async function getPasskeysByUserId(userId: string): Promise<StoredPasskey
 /**
  * Get a passkey by credential ID
  */
-export async function getPasskeyByCredentialId(credentialId: string): Promise<StoredPasskey | null> {
+export async function getPasskeyByCredentialId(
+  credentialId: string,
+): Promise<StoredPasskey | null> {
   const [p] = await db
     .select()
     .from(passkey)
@@ -103,11 +102,7 @@ export async function getPasskeyByCredentialId(credentialId: string): Promise<St
  * Get user by email (for passkey authentication)
  */
 export async function getUserByEmail(email: string) {
-  const [u] = await db
-    .select()
-    .from(user)
-    .where(eq(user.email, email))
-    .limit(1)
+  const [u] = await db.select().from(user).where(eq(user.email, email)).limit(1)
   return u || null
 }
 
@@ -139,7 +134,10 @@ export async function savePasskey(data: {
 /**
  * Update passkey counter after successful authentication
  */
-export async function updatePasskeyCounter(credentialId: string, newCounter: number) {
+export async function updatePasskeyCounter(
+  credentialId: string,
+  newCounter: number,
+) {
   await db
     .update(passkey)
     .set({ counter: newCounter })
@@ -150,9 +148,7 @@ export async function updatePasskeyCounter(credentialId: string, newCounter: num
  * Delete a passkey
  */
 export async function deletePasskey(passkeyId: string) {
-  await db
-    .delete(passkey)
-    .where(eq(passkey.id, passkeyId))
+  await db.delete(passkey).where(eq(passkey.id, passkeyId))
 }
 
 // ============================================
@@ -164,7 +160,7 @@ export async function deletePasskey(passkeyId: string) {
  */
 export async function generatePasskeyRegistrationOptions(
   userId: string,
-  userEmail: string
+  userEmail: string,
 ): Promise<PublicKeyCredentialCreationOptionsJSON> {
   // Get existing passkeys to exclude them
   const existingPasskeys = await getPasskeysByUserId(userId)
@@ -199,7 +195,7 @@ export async function verifyPasskeyRegistration(
   userId: string,
   response: RegistrationResponseJSON,
   expectedChallenge: string,
-  passkeyName?: string
+  passkeyName?: string,
 ): Promise<VerifiedRegistrationResponse> {
   const verification = await verifyRegistrationResponse({
     response,
@@ -240,9 +236,11 @@ export async function verifyPasskeyRegistration(
  * Otherwise, allow any discoverable passkey (usernameless login)
  */
 export async function generatePasskeyAuthenticationOptions(
-  email?: string
+  email?: string,
 ): Promise<PublicKeyCredentialRequestOptionsJSON> {
-  let allowCredentials: { id: string; transports?: AuthenticatorTransportFuture[] }[] | undefined
+  let allowCredentials:
+    | { id: string; transports?: AuthenticatorTransportFuture[] }[]
+    | undefined
 
   if (email) {
     const u = await getUserByEmail(email)
@@ -271,8 +269,11 @@ export async function generatePasskeyAuthenticationOptions(
  */
 export async function verifyPasskeyAuthentication(
   response: AuthenticationResponseJSON,
-  expectedChallenge: string
-): Promise<{ verification: VerifiedAuthenticationResponse; userId: string } | null> {
+  expectedChallenge: string,
+): Promise<{
+  verification: VerifiedAuthenticationResponse
+  userId: string
+} | null> {
   // Find the passkey by credential ID
   const storedPasskey = await getPasskeyByCredentialId(response.id)
 
@@ -297,7 +298,7 @@ export async function verifyPasskeyAuthentication(
     // Update counter to prevent replay attacks
     await updatePasskeyCounter(
       storedPasskey.credentialId,
-      verification.authenticationInfo.newCounter
+      verification.authenticationInfo.newCounter,
     )
   }
 

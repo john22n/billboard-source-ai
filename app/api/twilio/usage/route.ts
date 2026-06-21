@@ -1,86 +1,113 @@
 // app/api/twilio/usage/route.ts
 // Fetches Twilio usage/costs for current month and last month
 
-import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/auth';
+import { NextResponse } from 'next/server'
+import { getSession } from '@/lib/auth'
+import { isConfigError, serverConfig } from '@/lib/config'
 
 export async function GET() {
-  const session = await getSession();
+  const session = await getSession()
   if (!session?.userId) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const authToken = process.env.TWILIO_AUTH_TOKEN;
-
-  if (!accountSid || !authToken) {
+  let credentials: ReturnType<
+    typeof serverConfig.twilio.requireAccountCredentials
+  >
+  try {
+    credentials = serverConfig.twilio.requireAccountCredentials()
+  } catch (error) {
+    if (!isConfigError(error)) throw error
     return NextResponse.json(
-      { error: 'TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN required' },
-      { status: 500 }
-    );
+      {
+        error: 'TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN required',
+        details: error.message,
+      },
+      { status: 500 },
+    )
   }
 
   try {
-    const now = new Date();
+    const now = new Date()
 
     // Current month: 1st of current month to today
-    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const currentMonthEnd = now;
+    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+    const currentMonthEnd = now
 
     // Last month: 1st of last month to last day of last month
-    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+    const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0)
 
-    const formatDate = (date: Date) => date.toISOString().split('T')[0];
-    const credentials = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
+    const formatDate = (date: Date) => date.toISOString().split('T')[0]
+    const authHeader = Buffer.from(
+      `${credentials.accountSid}:${credentials.authToken}`,
+    ).toString('base64')
 
     // Fetch current month usage
     const currentMonthResponse = await fetch(
-      `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Usage/Records.json?StartDate=${formatDate(currentMonthStart)}&EndDate=${formatDate(currentMonthEnd)}`,
+      `https://api.twilio.com/2010-04-01/Accounts/${credentials.accountSid}/Usage/Records.json?StartDate=${formatDate(currentMonthStart)}&EndDate=${formatDate(currentMonthEnd)}`,
       {
         headers: {
-          'Authorization': `Basic ${credentials}`,
+          Authorization: `Basic ${authHeader}`,
         },
-      }
-    );
+      },
+    )
 
     // Fetch last month usage
     const lastMonthResponse = await fetch(
-      `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Usage/Records.json?StartDate=${formatDate(lastMonthStart)}&EndDate=${formatDate(lastMonthEnd)}`,
+      `https://api.twilio.com/2010-04-01/Accounts/${credentials.accountSid}/Usage/Records.json?StartDate=${formatDate(lastMonthStart)}&EndDate=${formatDate(lastMonthEnd)}`,
       {
         headers: {
-          'Authorization': `Basic ${credentials}`,
+          Authorization: `Basic ${authHeader}`,
         },
-      }
-    );
+      },
+    )
 
     if (!currentMonthResponse.ok || !lastMonthResponse.ok) {
       const error = !currentMonthResponse.ok
         ? await currentMonthResponse.text()
-        : await lastMonthResponse.text();
-      console.error('Twilio Usage API error:', error);
+        : await lastMonthResponse.text()
+      console.error('Twilio Usage API error:', error)
       return NextResponse.json(
         { error: 'Failed to fetch Twilio usage data' },
-        { status: 500 }
-      );
+        { status: 500 },
+      )
     }
 
-    const currentMonthData = await currentMonthResponse.json();
-    const lastMonthData = await lastMonthResponse.json();
+    const currentMonthData = await currentMonthResponse.json()
+    const lastMonthData = await lastMonthResponse.json()
 
     // Calculate costs for each month
     const calculateTotal = (records: { price: string }[]) => {
-      return records.reduce((sum, record) => sum + (parseFloat(record.price) || 0), 0);
-    };
+      return records.reduce(
+        (sum, record) => sum + (parseFloat(record.price) || 0),
+        0,
+      )
+    }
 
-    const currentMonthCost = calculateTotal(currentMonthData.usage_records || []);
-    const lastMonthCost = calculateTotal(lastMonthData.usage_records || []);
+    const currentMonthCost = calculateTotal(
+      currentMonthData.usage_records || [],
+    )
+    const lastMonthCost = calculateTotal(lastMonthData.usage_records || [])
 
     // Get month names
-    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
-                        'July', 'August', 'September', 'October', 'November', 'December'];
-    const currentMonthName = monthNames[now.getMonth()];
-    const lastMonthName = monthNames[now.getMonth() === 0 ? 11 : now.getMonth() - 1];
+    const monthNames = [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ]
+    const currentMonthName = monthNames[now.getMonth()]
+    const lastMonthName =
+      monthNames[now.getMonth() === 0 ? 11 : now.getMonth() - 1]
 
     return NextResponse.json({
       currentMonth: {
@@ -95,12 +122,12 @@ export async function GET() {
       },
       totalCost: currentMonthCost + lastMonthCost,
       totalCostFormatted: `$${(currentMonthCost + lastMonthCost).toFixed(2)}`,
-    });
+    })
   } catch (error) {
-    console.error('Error fetching Twilio usage:', error);
+    console.error('Error fetching Twilio usage:', error)
     return NextResponse.json(
       { error: 'Failed to fetch usage data' },
-      { status: 500 }
-    );
+      { status: 500 },
+    )
   }
 }

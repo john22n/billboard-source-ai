@@ -1,7 +1,8 @@
-"use client";
+'use client'
 
-import { useEffect, useRef, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useRef, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
+import { publicConfig } from '@/lib/public-config'
 
 /**
  * Auto-logout hook that logs users out at 8pm local time.
@@ -15,7 +16,7 @@ import { useRouter } from "next/navigation";
  *   existing auto-logout behavior without modification.
  */
 
-const LOGOUT_HOUR = 20; // 8pm in 24-hour format
+const LOGOUT_HOUR = 20 // 8pm in 24-hour format
 
 /**
  * Comma-separated list of worker email addresses that should NOT be
@@ -32,29 +33,25 @@ const LOGOUT_HOUR = 20; // 8pm in 24-hour format
  * internal co-worker email addresses — not secrets.
  */
 const EXCLUDED_EMAILS: Set<string> = new Set(
-  (process.env.NEXT_PUBLIC_AUTO_LOGOUT_EXCLUDED_EMAILS ?? "")
-    .split(",")
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean)
-);
+  publicConfig.autoLogout.excludedEmails,
+)
 
 export function useAutoLogout(currentUserEmail?: string) {
   // Derive exclusion status from the env-var set and the caller's email.
   // This is a plain boolean, NOT a hook — computed before any hook calls so
   // it's stable across renders and safe to reference in dependency arrays.
   const isExcluded = Boolean(
-    currentUserEmail &&
-      EXCLUDED_EMAILS.has(currentUserEmail.toLowerCase())
-  );
+    currentUserEmail && EXCLUDED_EMAILS.has(currentUserEmail.toLowerCase()),
+  )
 
   // ── All hooks are called unconditionally (React Rules of Hooks) ───────────
   // The exclusion guard is placed INSIDE each hook's callback / effect body,
   // never as a conditional that skips the hook call itself.
-  const router              = useRouter();
-  const hasLoggedOutRef     = useRef(false);
-  const checkIntervalRef    = useRef<NodeJS.Timeout | null>(null);
-  const loginTimestampRef   = useRef<Date | null>(null);
-  const nextLogoutTimeRef   = useRef<Date | null>(null);
+  const router = useRouter()
+  const hasLoggedOutRef = useRef(false)
+  const checkIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const loginTimestampRef = useRef<Date | null>(null)
+  const nextLogoutTimeRef = useRef<Date | null>(null)
 
   // ── Schedule the next 8pm logout time ────────────────────────────────────
   useEffect(() => {
@@ -63,61 +60,61 @@ export function useAutoLogout(currentUserEmail?: string) {
     // entirely.  No logout time is calculated; no interval is started below.
     if (isExcluded) {
       console.log(
-        `⏭️ Auto-logout suppressed for excluded worker: ${currentUserEmail}`
-      );
-      return;
+        `⏭️ Auto-logout suppressed for excluded worker: ${currentUserEmail}`,
+      )
+      return
     }
 
-    const now = new Date();
-    loginTimestampRef.current = now;
+    const now = new Date()
+    loginTimestampRef.current = now
 
     // Calculate next 8pm
-    const next8pm = new Date(now);
-    next8pm.setHours(LOGOUT_HOUR, 0, 0, 0);
+    const next8pm = new Date(now)
+    next8pm.setHours(LOGOUT_HOUR, 0, 0, 0)
 
     // If it's already past 8pm today, next logout is tomorrow at 8pm
     if (now.getHours() >= LOGOUT_HOUR) {
-      next8pm.setDate(next8pm.getDate() + 1);
+      next8pm.setDate(next8pm.getDate() + 1)
     }
 
-    nextLogoutTimeRef.current = next8pm;
-    console.log(`🕐 Session started: ${now.toLocaleString()}`);
-    console.log(`🕗 Next auto-logout scheduled: ${next8pm.toLocaleString()}`);
-  }, [isExcluded, currentUserEmail]);
+    nextLogoutTimeRef.current = next8pm
+    console.log(`🕐 Session started: ${now.toLocaleString()}`)
+    console.log(`🕗 Next auto-logout scheduled: ${next8pm.toLocaleString()}`)
+  }, [isExcluded, currentUserEmail])
 
   const performLogout = useCallback(async () => {
     // ── McDONALD / EXCLUDED WORKERS ─────────────────────────────────────────
     // Guard inside the callback so the hook is still called unconditionally.
-    if (hasLoggedOutRef.current || isExcluded) return;
-    hasLoggedOutRef.current = true;
+    if (hasLoggedOutRef.current || isExcluded) return
+    hasLoggedOutRef.current = true
 
-    console.log("🕗 8pm auto-logout triggered");
+    console.log('🕗 8pm auto-logout triggered')
 
     try {
       // First, set worker status to offline
-      await fetch("/api/taskrouter/worker-status", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "offline" }),
-      });
-      console.log("✅ Worker set to offline");
+      await fetch('/api/taskrouter/worker-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'offline' }),
+      })
+      console.log('✅ Worker set to offline')
     } catch (error) {
-      console.error("Failed to set worker offline:", error);
+      console.error('Failed to set worker offline:', error)
     }
 
     try {
       // Then call logout API endpoint
-      await fetch("/api/auth/logout", { method: "POST" });
+      await fetch('/api/auth/logout', { method: 'POST' })
     } catch (error) {
-      console.error("Logout API call failed:", error);
+      console.error('Logout API call failed:', error)
     }
 
     // Redirect to login page
-    router.push("/login?reason=auto-logout");
-  }, [router, isExcluded]);
+    router.push('/login?reason=auto-logout')
+  }, [router, isExcluded])
 
   const checkTime = useCallback(() => {
-    const now = new Date();
+    const now = new Date()
 
     // Check if we've reached the scheduled logout time
     if (
@@ -125,36 +122,36 @@ export function useAutoLogout(currentUserEmail?: string) {
       now >= nextLogoutTimeRef.current &&
       !hasLoggedOutRef.current
     ) {
-      performLogout();
+      performLogout()
     }
-  }, [performLogout]);
+  }, [performLogout])
 
   useEffect(() => {
     // ── McDONALD / EXCLUDED WORKERS ─────────────────────────────────────────
     // Skip interval and visibility-change wiring for excluded workers.
     // The effect still runs (hook is called unconditionally) but returns early.
-    if (isExcluded) return;
+    if (isExcluded) return
 
     // Wait for nextLogoutTimeRef to be set, then start checking
     const startChecking = setTimeout(() => {
-      checkTime();
-      checkIntervalRef.current = setInterval(checkTime, 60 * 1000); // Check every minute
-    }, 1000);
+      checkTime()
+      checkIntervalRef.current = setInterval(checkTime, 60 * 1000) // Check every minute
+    }, 1000)
 
     // Also check when tab becomes visible (in case user was away)
     const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        checkTime();
+      if (document.visibilityState === 'visible') {
+        checkTime()
       }
-    };
-    document.addEventListener("visibilitychange", handleVisibilityChange);
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
 
     return () => {
-      clearTimeout(startChecking);
+      clearTimeout(startChecking)
       if (checkIntervalRef.current) {
-        clearInterval(checkIntervalRef.current);
+        clearInterval(checkIntervalRef.current)
       }
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [checkTime, isExcluded]);
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [checkTime, isExcluded])
 }

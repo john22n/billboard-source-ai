@@ -5,10 +5,7 @@ import { db } from '@/db'
 import { user } from '@/db/schema'
 import { eq } from 'drizzle-orm'
 import { incrementMainCallsTotal } from '@/lib/dal'
-
-const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN
-const WORKFLOW_SID = process.env.TASKROUTER_WORKFLOW_SID
-const MAIN_ROUTING_NUMBER = '+18338547126'
+import { serverConfig } from '@/lib/config'
 
 export async function POST(req: Request) {
   try {
@@ -17,9 +14,10 @@ export async function POST(req: Request) {
     const formData = await req.formData()
 
     // Validate Twilio signature — skip on preview deployments
-    const isProduction = process.env.VERCEL_ENV === 'production'
+    const isProduction = serverConfig.runtime.isProductionDeployment
+    const twilioAuthToken = serverConfig.twilio.authToken
 
-    if (TWILIO_AUTH_TOKEN && isProduction) {
+    if (twilioAuthToken && isProduction) {
       const twilioSignature = req.headers.get('X-Twilio-Signature') || ''
       const url = new URL(req.url)
       const params: Record<string, string> = {}
@@ -29,7 +27,7 @@ export async function POST(req: Request) {
       })
 
       const isValid = twilio.validateRequest(
-        TWILIO_AUTH_TOKEN,
+        twilioAuthToken,
         twilioSignature,
         url.toString(),
         params,
@@ -43,8 +41,11 @@ export async function POST(req: Request) {
     const CallSid = formData.get('CallSid')
     const From = formData.get('From')
     const To = formData.get('To') as string
+    const workflowSid = serverConfig.taskRouter.workflowSid
+    const companyRoutingNumber =
+      serverConfig.twilio.mainNumber ?? '+18338547126'
 
-    if (!WORKFLOW_SID) {
+    if (!workflowSid) {
       return new Response('Workflow not configured', { status: 500 })
     }
 
@@ -55,7 +56,7 @@ export async function POST(req: Request) {
     // ─────────────────────────────────────────────
     // MAIN NUMBER → RANDOM AGENTS
     // ─────────────────────────────────────────────
-    if (To === MAIN_ROUTING_NUMBER) {
+    if (To === companyRoutingNumber) {
       callType = 'main'
       // Count every inbound call to the Main Routing Number (Admin Panel
       // header total). Production only; not gated by business hours.
@@ -110,28 +111,15 @@ export async function POST(req: Request) {
       direct_fallback_offered: false,
     })
 
-    const appUrl = (
-      process.env.NEXT_PUBLIC_APP_URL ??
-      `${new URL(req.url).protocol}//${new URL(req.url).host}`
-    ).replace(/\/$/, '')
+    const appUrl = serverConfig.app.baseUrlFromRequest(req.url)
 
     const waitUrlObj = new URL(`${appUrl}/api/taskrouter/wait`)
-    if (process.env.VERCEL_BYPASS_TOKEN) {
-      waitUrlObj.searchParams.set(
-        'x-vercel-protection-bypass',
-        process.env.VERCEL_BYPASS_TOKEN,
-      )
-    }
+    serverConfig.app.addVercelBypassToken(waitUrlObj)
 
     const enqueueActionUrlObj = new URL(
       `${appUrl}/api/taskrouter/enqueue-complete`,
     )
-    if (process.env.VERCEL_BYPASS_TOKEN) {
-      enqueueActionUrlObj.searchParams.set(
-        'x-vercel-protection-bypass',
-        process.env.VERCEL_BYPASS_TOKEN,
-      )
-    }
+    serverConfig.app.addVercelBypassToken(enqueueActionUrlObj)
 
     const escapedWaitUrl = waitUrlObj.toString().replace(/&/g, '&amp;')
     const escapedEnqueueActionUrl = enqueueActionUrlObj
@@ -141,7 +129,7 @@ export async function POST(req: Request) {
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Say voice="Polly.Joanna">Please hold while we connect you with the next available representative.</Say>
-  <Enqueue workflowSid="${WORKFLOW_SID}"
+  <Enqueue workflowSid="${workflowSid}"
            action="${escapedEnqueueActionUrl}"
            method="POST"
            waitUrl="${escapedWaitUrl}"

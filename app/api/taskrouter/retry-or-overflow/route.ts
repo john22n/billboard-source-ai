@@ -17,24 +17,21 @@ import {
   buildRequeueTwiml,
   computeMissedAttemptRouting,
 } from '@/lib/taskrouter-retry-routing'
-
-const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!
-const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!
-const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!
+import { serverConfig } from '@/lib/config'
 
 const XML_HEADERS = { 'Content-Type': 'text/xml' }
 
 async function handle(req: Request): Promise<Response> {
   const url = new URL(req.url)
   const taskSid = url.searchParams.get('taskSid')
-  const workspaceSid = url.searchParams.get('workspaceSid') ?? WORKSPACE_SID
+  const workspaceSid =
+    url.searchParams.get('workspaceSid') ??
+    serverConfig.taskRouter.requireWorkspaceSid()
   const workerSid = url.searchParams.get('workerSid')
   const fallbackCallSid = url.searchParams.get('callSid')
   const fallbackCallerFrom = url.searchParams.get('callerFrom')
 
-  const appUrl = (
-    process.env.NEXT_PUBLIC_APP_URL ?? `${url.protocol}//${url.host}`
-  ).replace(/\/$/, '')
+  const appUrl = serverConfig.app.baseUrlFromRequest(req.url)
 
   console.log('═══════════════════════════════════════════')
   console.log('🔁 RETRY-OR-OVERFLOW')
@@ -58,7 +55,9 @@ async function handle(req: Request): Promise<Response> {
 
   let taskAttributes: Record<string, unknown> = {}
   try {
-    const client = twilio(ACCOUNT_SID, AUTH_TOKEN)
+    const { accountSid, authToken } =
+      serverConfig.twilio.requireAccountCredentials()
+    const client = twilio(accountSid, authToken)
     const task = await client.taskrouter.v1
       .workspaces(workspaceSid)
       .tasks(taskSid)

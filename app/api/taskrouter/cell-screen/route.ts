@@ -10,21 +10,18 @@
  * - Carrier voicemail answers → can't press 1 → times out → same no-answer path
  */
 
+import { serverConfig } from '@/lib/config'
+
 export async function POST(req: Request) {
   try {
-    const url    = new URL(req.url);
-    const appUrl = (
-      process.env.NEXT_PUBLIC_APP_URL ?? `${url.protocol}//${url.host}`
-    ).replace(/\/$/, '');
+    const appUrl = serverConfig.app.baseUrlFromRequest(req.url)
 
     // ── action URL for the gather ─────────────────────────────────────────────
-    const acceptUrl = new URL(`${appUrl}/api/taskrouter/cell-screen-accept`);
-    if (process.env.VERCEL_BYPASS_TOKEN) {
-      acceptUrl.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN);
-    }
+    const acceptUrl = new URL(`${appUrl}/api/taskrouter/cell-screen-accept`)
+    serverConfig.app.addVercelBypassToken(acceptUrl)
 
     const escapeXml = (s: string): string =>
-      s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+      s.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
 
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -32,19 +29,19 @@ export async function POST(req: Request) {
     <Say voice="Polly.Matthew">Incoming sales call. Press 1 to accept.</Say>
   </Gather>
   <Hangup/>
-</Response>`;
+</Response>`
 
-    console.log('📱 [CellScreen] Screening prompt played');
+    console.log('📱 [CellScreen] Screening prompt played')
 
     return new Response(twiml, {
       status: 200,
       headers: { 'Content-Type': 'text/xml' },
-    });
+    })
   } catch (error) {
-    console.error('❌ Cell screen error:', error);
+    console.error('❌ Cell screen error:', error)
     return new Response(
       '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>',
-      { status: 200, headers: { 'Content-Type': 'text/xml' } }
-    );
+      { status: 200, headers: { 'Content-Type': 'text/xml' } },
+    )
   }
 }

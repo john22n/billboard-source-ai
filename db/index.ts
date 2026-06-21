@@ -3,20 +3,19 @@ import { drizzle as drizzlePostgres } from 'drizzle-orm/node-postgres'
 import { neon } from '@neondatabase/serverless'
 import { Pool } from 'pg'
 import * as schema from './schema'
+import { serverConfig } from '@/lib/config'
 
-if (!process.env.DATABASE_URL) {
-  throw new Error('DATABASE_URL environment variable is not set')
-}
+const databaseUrl = serverConfig.database.url
 
-export const db = process.env.VERCEL
+export const db = serverConfig.database.useNeon
   ? drizzleNeon({
-      client: neon(process.env.DATABASE_URL!),
+      client: neon(databaseUrl),
       schema,
       casing: 'snake_case',
     })
   : drizzlePostgres({
       client: new Pool({
-        connectionString: process.env.DATABASE_URL,
+        connectionString: databaseUrl,
       }),
       schema,
       casing: 'snake_case',
