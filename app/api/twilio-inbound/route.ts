@@ -4,6 +4,7 @@ import twilio from 'twilio'
 import { db } from '@/db'
 import { user } from '@/db/schema'
 import { eq } from 'drizzle-orm'
+import { incrementMainCallsTotal } from '@/lib/dal'
 
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN
 const WORKFLOW_SID = process.env.TASKROUTER_WORKFLOW_SID
@@ -56,6 +57,15 @@ export async function POST(req: Request) {
     // ─────────────────────────────────────────────
     if (To === MAIN_ROUTING_NUMBER) {
       callType = 'main'
+      // Count every inbound call to the Main Routing Number (Admin Panel
+      // header total). Production only; not gated by business hours.
+      if (isProduction) {
+        try {
+          await incrementMainCallsTotal()
+        } catch (err) {
+          console.error('❌ incrementMainCallsTotal failed:', err)
+        }
+      }
     } else {
       // ─────────────────────────────────────────────
       // DIRECT NUMBER → SINGLE AGENT

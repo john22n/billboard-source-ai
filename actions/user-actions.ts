@@ -1,75 +1,103 @@
 'use server'
 
-import { deleteUsersByIds, updateUserTwilioPhone } from "@/lib/dal";
-import { getSession } from "@/lib/auth";
-import { revalidatePath } from "next/cache";
+import {
+  deleteUsersByIds,
+  updateUserTwilioPhone,
+  resetAllCallCounts,
+} from '@/lib/dal'
+import { getSession } from '@/lib/auth'
+import { revalidatePath } from 'next/cache'
 
 export async function deleteUsers(ids: string[]) {
   try {
     // Verify user is authenticated
-    const session = await getSession();
+    const session = await getSession()
     if (!session?.userId) {
       return {
         success: false,
-        message: "Unauthorized",
-      };
+        message: 'Unauthorized',
+      }
     }
 
     if (session.role !== 'admin') {
       return {
         success: false,
-        message: "Forbidden: Admin access required",
-      };
+        message: 'Forbidden: Admin access required',
+      }
     }
 
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
       return {
         success: false,
-        message: "No IDs provided",
-      };
+        message: 'No IDs provided',
+      }
     }
 
     // Prevent admin from deleting themselves
     if (ids.includes(session.userId)) {
       return {
         success: false,
-        message: "Cannot delete your own account",
-      };
+        message: 'Cannot delete your own account',
+      }
     }
 
-    await deleteUsersByIds(ids);
+    await deleteUsersByIds(ids)
 
     // Revalidate the admin page to refresh data
-    revalidatePath('/admin');
+    revalidatePath('/admin')
 
-    return { success: true };
+    return { success: true }
   } catch (err) {
-    console.error("Delete error:", err);
+    console.error('Delete error:', err)
     return {
       success: false,
-      message: "An error occurred while deleting users",
-    };
+      message: 'An error occurred while deleting users',
+    }
   }
 }
 
-export async function updateTwilioPhone(userId: string, twilioPhoneNumber: string) {
+export async function resetCallCounts() {
   try {
-    const session = await getSession();
+    const session = await getSession()
     if (!session?.userId) {
-      return { success: false, message: "Unauthorized" };
+      return { success: false, message: 'Unauthorized' }
     }
 
     if (session.role !== 'admin') {
-      return { success: false, message: "Admin access required" };
+      return { success: false, message: 'Forbidden: Admin access required' }
     }
 
-    const phone = twilioPhoneNumber.trim() || null;
-    await updateUserTwilioPhone(userId, phone);
+    await resetAllCallCounts()
 
-    revalidatePath('/admin');
-    return { success: true, message: "Phone number updated" };
+    revalidatePath('/admin')
+    return { success: true, message: 'Call counts reset' }
   } catch (err) {
-    console.error("Update phone error:", err);
-    return { success: false, message: "Failed to update phone number" };
+    console.error('Reset call counts error:', err)
+    return { success: false, message: 'Failed to reset call counts' }
+  }
+}
+
+export async function updateTwilioPhone(
+  userId: string,
+  twilioPhoneNumber: string,
+) {
+  try {
+    const session = await getSession()
+    if (!session?.userId) {
+      return { success: false, message: 'Unauthorized' }
+    }
+
+    if (session.role !== 'admin') {
+      return { success: false, message: 'Admin access required' }
+    }
+
+    const phone = twilioPhoneNumber.trim() || null
+    await updateUserTwilioPhone(userId, phone)
+
+    revalidatePath('/admin')
+    return { success: true, message: 'Phone number updated' }
+  } catch (err) {
+    console.error('Update phone error:', err)
+    return { success: false, message: 'Failed to update phone number' }
   }
 }
