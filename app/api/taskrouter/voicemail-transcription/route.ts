@@ -5,7 +5,11 @@
  * Sends email with full voicemail details including transcription.
  */
 
-import { configErrorMessage, isMissingConfig, serverConfig } from '@/lib/config'
+import {
+  configErrorResponseBody,
+  isMissingConfig,
+  serverConfig,
+} from '@/lib/config'
 
 async function sendVoicemailEmail(
   from: string,
@@ -105,11 +109,12 @@ export async function POST(req: Request) {
     return new Response('OK', { status: 200 })
   } catch (error) {
     if (isMissingConfig(error)) {
+      const responseBody = configErrorResponseBody(error)
       console.error(
         '❌ Voicemail transcription configuration error:',
-        configErrorMessage(error),
+        responseBody.details,
       )
-      return new Response(configErrorMessage(error), { status: 500 })
+      return Response.json(responseBody, { status: 500 })
     }
     console.error('❌ Transcription callback error:', error)
     return new Response('Error', { status: 500 })

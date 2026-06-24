@@ -18,6 +18,7 @@
     "db:studio:prod": "dotenv -e .env drizzle-kit studio",
     "db:generate": "drizzle-kit generate",
     "test": "vitest",
+    "format:ts": "prettier --write \"**/*.{ts,tsx}\"",
     "make-admin:dev": "dotenv -e .env.dev -- tsx scripts/make-admin.ts",
     "make-admin:prod": "dotenv -e .env -- tsx scripts/make-admin.ts",
     "make-admin": "tsx scripts/make-admin.ts",

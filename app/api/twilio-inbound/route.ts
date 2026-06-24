@@ -5,7 +5,11 @@ import { db } from '@/db'
 import { user } from '@/db/schema'
 import { eq } from 'drizzle-orm'
 import { incrementMainCallsTotal } from '@/lib/dal'
-import { serverConfig } from '@/lib/config'
+import {
+  configErrorResponseBody,
+  isMissingConfig,
+  serverConfig,
+} from '@/lib/config'
 
 export async function POST(req: Request) {
   try {
@@ -41,13 +45,9 @@ export async function POST(req: Request) {
     const CallSid = formData.get('CallSid')
     const From = formData.get('From')
     const To = formData.get('To') as string
-    const workflowSid = serverConfig.taskRouter.workflowSid
+    const workflowSid = serverConfig.taskRouter.requireWorkflowSid()
     const companyRoutingNumber =
       serverConfig.twilio.mainNumber ?? '+18338547126'
-
-    if (!workflowSid) {
-      return new Response('Workflow not configured', { status: 500 })
-    }
 
     let callType: 'main' | 'direct'
     let phoneNumber: string | null = null
@@ -143,6 +143,9 @@ export async function POST(req: Request) {
       headers: { 'Content-Type': 'text/xml' },
     })
   } catch (err) {
+    if (isMissingConfig(err)) {
+      return Response.json(configErrorResponseBody(err), { status: 500 })
+    }
     console.error('Inbound error:', err)
     return new Response('Error', { status: 500 })
   }

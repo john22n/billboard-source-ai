@@ -72,14 +72,18 @@ describe('server config', () => {
     expect(config.nutshell.requireApiKey()).toBe('nutshell-key')
   })
 
-  it('uses safe local passkey defaults but requires production passkey config', () => {
-    const local = createServerConfig({ NODE_ENV: 'development' })
-    expect(local.passkey.rpId).toBe('localhost')
-    expect(local.passkey.origin).toBe('http://localhost:3000')
+  it('requires passkey config in every environment', () => {
+    const missing = createServerConfig({ NODE_ENV: 'development' })
+    expect(() => missing.passkey.rpId).toThrow('PASSKEY_RP_ID')
+    expect(() => missing.passkey.origin).toThrow('PASSKEY_ORIGIN')
 
-    const production = createServerConfig({ NODE_ENV: 'production' })
-    expect(() => production.passkey.rpId).toThrow('PASSKEY_RP_ID')
-    expect(() => production.passkey.origin).toThrow('PASSKEY_ORIGIN')
+    const configured = createServerConfig({
+      NODE_ENV: 'development',
+      PASSKEY_RP_ID: 'localhost',
+      PASSKEY_ORIGIN: 'http://localhost:3000',
+    })
+    expect(configured.passkey.rpId).toBe('localhost')
+    expect(configured.passkey.origin).toBe('http://localhost:3000')
   })
 
   it('normalizes app URLs and applies the Vercel bypass token at one seam', () => {

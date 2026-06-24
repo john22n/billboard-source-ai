@@ -6,7 +6,11 @@ import { generateText } from 'ai'
 import { createOpenAI } from '@ai-sdk/openai'
 import { getSession } from '@/lib/auth'
 import OpenAI from 'openai'
-import { serverConfig } from '@/lib/config'
+import {
+  configErrorResponseBody,
+  isMissingConfig,
+  serverConfig,
+} from '@/lib/config'
 
 export const dynamic = 'force-dynamic'
 
@@ -133,6 +137,9 @@ Transcript: ${transcript}`,
       extractedLocation,
     })
   } catch (error) {
+    if (isMissingConfig(error)) {
+      return NextResponse.json(configErrorResponseBody(error), { status: 500 })
+    }
     console.error('❌ Billboard pricing error:', error)
     return NextResponse.json(
       {

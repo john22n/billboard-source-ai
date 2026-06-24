@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { configErrorMessage, isMissingConfig, serverConfig } from '@/lib/config'
+import {
+  configErrorResponseBody,
+  isMissingConfig,
+  serverConfig,
+} from '@/lib/config'
 import { clearMonthlyOpenAILogs } from '@/lib/dal'
 
 export async function GET(request: NextRequest) {
@@ -8,10 +12,7 @@ export async function GET(request: NextRequest) {
     cronSecret = serverConfig.cron.requireSecret()
   } catch (error) {
     if (isMissingConfig(error)) {
-      return NextResponse.json(
-        { error: 'Configuration error', details: configErrorMessage(error) },
-        { status: 500 },
-      )
+      return NextResponse.json(configErrorResponseBody(error), { status: 500 })
     }
     throw error
   }

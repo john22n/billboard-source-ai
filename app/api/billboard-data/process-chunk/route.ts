@@ -8,7 +8,11 @@ import { db } from '@/db'
 import { billboardLocations } from '@/db/schema'
 import { getSession } from '@/lib/auth'
 import { sql } from 'drizzle-orm'
-import { serverConfig } from '@/lib/config'
+import {
+  configErrorResponseBody,
+  isMissingConfig,
+  serverConfig,
+} from '@/lib/config'
 
 export const maxDuration = 300
 export const dynamic = 'force-dynamic'
@@ -275,6 +279,9 @@ export async function POST(req: NextRequest) {
       recordsSkipped: skipped,
     })
   } catch (error) {
+    if (isMissingConfig(error)) {
+      return NextResponse.json(configErrorResponseBody(error), { status: 500 })
+    }
     console.error('Error:', error)
     return NextResponse.json(
       {

@@ -416,24 +416,14 @@ export function createServerConfig(env: EnvSource): ServerConfig {
   const passkey = {
     rpName: 'Billboard Source',
     get rpId() {
-      const configuredRpId = optionalString(env, 'PASSKEY_RP_ID')
-      if (configuredRpId) return configuredRpId
-      if (isProduction) {
-        return requiredString(env, 'PASSKEY_RP_ID', 'serverConfig.passkey.rpId')
-      }
-      return 'localhost'
+      return requiredString(env, 'PASSKEY_RP_ID', 'serverConfig.passkey.rpId')
     },
     get origin() {
-      const configuredOrigin = optionalString(env, 'PASSKEY_ORIGIN')
-      if (configuredOrigin) return configuredOrigin
-      if (isProduction) {
-        return requiredString(
-          env,
-          'PASSKEY_ORIGIN',
-          'serverConfig.passkey.origin',
-        )
-      }
-      return `http://${passkey.rpId}:3000`
+      return requiredString(
+        env,
+        'PASSKEY_ORIGIN',
+        'serverConfig.passkey.origin',
+      )
     },
   }
 

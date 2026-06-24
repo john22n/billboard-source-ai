@@ -22,7 +22,11 @@ import twilio from 'twilio'
 import { db } from '@/db'
 import { user } from '@/db/schema'
 import { getSession } from '@/lib/auth'
-import { isConfigError, serverConfig } from '@/lib/config'
+import {
+  configErrorResponseBody,
+  isMissingConfig,
+  serverConfig,
+} from '@/lib/config'
 
 const PERIOD_DAYS = 28 // Twilio retains 30 days max; use 28 to stay safely within limits
 const TIME_ZONE = 'America/Chicago' // Central Time, DST-aware
@@ -284,14 +288,8 @@ export async function GET() {
 
     return Response.json(data)
   } catch (error) {
-    if (isConfigError(error)) {
-      return Response.json(
-        {
-          error: 'TaskRouter integration not configured',
-          details: error.message,
-        },
-        { status: 500 },
-      )
+    if (isMissingConfig(error)) {
+      return Response.json(configErrorResponseBody(error), { status: 500 })
     }
     console.error('❌ Worker availability error:', error)
     return Response.json({ error: 'Internal error' }, { status: 500 })

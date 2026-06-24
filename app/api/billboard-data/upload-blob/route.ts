@@ -2,7 +2,11 @@
 import { handleUpload, type HandleUploadBody } from '@vercel/blob/client'
 import { NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
-import { isConfigError, serverConfig } from '@/lib/config'
+import {
+  configErrorResponseBody,
+  isMissingConfig,
+  serverConfig,
+} from '@/lib/config'
 
 export async function POST(request: Request): Promise<NextResponse> {
   console.log('📤 Upload-blob route hit')
@@ -23,12 +27,9 @@ export async function POST(request: Request): Promise<NextResponse> {
   try {
     serverConfig.blob.requireReadWriteToken()
   } catch (error) {
-    if (!isConfigError(error)) throw error
+    if (!isMissingConfig(error)) throw error
     console.error('❌ Blob storage config error:', error.message)
-    return NextResponse.json(
-      { error: 'Blob storage not configured', details: error.message },
-      { status: 500 },
-    )
+    return NextResponse.json(configErrorResponseBody(error), { status: 500 })
   }
 
   try {

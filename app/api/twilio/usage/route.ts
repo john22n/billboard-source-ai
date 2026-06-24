@@ -3,7 +3,11 @@
 
 import { NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
-import { isConfigError, serverConfig } from '@/lib/config'
+import {
+  configErrorResponseBody,
+  isMissingConfig,
+  serverConfig,
+} from '@/lib/config'
 
 export async function GET() {
   const session = await getSession()
@@ -17,14 +21,8 @@ export async function GET() {
   try {
     credentials = serverConfig.twilio.requireAccountCredentials()
   } catch (error) {
-    if (!isConfigError(error)) throw error
-    return NextResponse.json(
-      {
-        error: 'TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN required',
-        details: error.message,
-      },
-      { status: 500 },
-    )
+    if (!isMissingConfig(error)) throw error
+    return NextResponse.json(configErrorResponseBody(error), { status: 500 })
   }
 
   try {

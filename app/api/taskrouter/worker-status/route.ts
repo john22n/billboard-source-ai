@@ -10,7 +10,11 @@ import { db } from '@/db'
 import { user } from '@/db/schema'
 import { eq } from 'drizzle-orm'
 import { getSession } from '@/lib/auth'
-import { isConfigError, serverConfig } from '@/lib/config'
+import {
+  configErrorResponseBody,
+  isMissingConfig,
+  serverConfig,
+} from '@/lib/config'
 
 export async function GET() {
   try {
@@ -217,14 +221,8 @@ export async function POST(req: Request) {
       workerSid,
     })
   } catch (error) {
-    if (isConfigError(error)) {
-      return Response.json(
-        {
-          error: 'TaskRouter integration not configured',
-          details: error.message,
-        },
-        { status: 500 },
-      )
+    if (isMissingConfig(error)) {
+      return Response.json(configErrorResponseBody(error), { status: 500 })
     }
     console.error('❌ Worker status POST error:', error)
     return Response.json({ error: 'Internal error' }, { status: 500 })

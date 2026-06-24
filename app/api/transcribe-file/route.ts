@@ -5,7 +5,11 @@ import { generateObject } from 'ai'
 import { createOpenAI } from '@ai-sdk/openai'
 import { z } from 'zod'
 import { getSession } from '@/lib/auth'
-import { serverConfig } from '@/lib/config'
+import {
+  configErrorResponseBody,
+  isMissingConfig,
+  serverConfig,
+} from '@/lib/config'
 
 let openaiClient: OpenAI | null = null
 
@@ -126,6 +130,9 @@ Be thorough and only include information that was explicitly mentioned. Use null
       analysis,
     })
   } catch (error: unknown) {
+    if (isMissingConfig(error)) {
+      return NextResponse.json(configErrorResponseBody(error), { status: 500 })
+    }
     const errorMessage =
       error instanceof Error ? error.message : 'Unknown error'
     console.error('❌ Transcription error:', error)

@@ -3,7 +3,7 @@ import { db } from '@/db'
 import { user } from '@/db/schema'
 import { inArray } from 'drizzle-orm'
 import { getSessionWithoutRefresh } from '@/lib/auth'
-import { isConfigError, serverConfig } from '@/lib/config'
+import { isMissingConfig, serverConfig } from '@/lib/config'
 
 // Voicemail worker email to exclude from the list
 const VOICEMAIL_EMAIL = 'voicemail@system'
@@ -29,7 +29,7 @@ export async function GET() {
       credentials = serverConfig.twilio.requireAccountCredentials()
       workspaceSid = serverConfig.taskRouter.requireWorkspaceSid()
     } catch (error) {
-      if (!isConfigError(error)) throw error
+      if (!isMissingConfig(error)) throw error
       console.error(
         '❌ Missing required Twilio config for /api/workers/available:',
         error.message,
