@@ -137,6 +137,8 @@ interface AdminClientProps {
   initialLeadStats: LeadStats | null
   mainCallsTotal: number
   sessionEmail: string
+  userCostStartDate: string
+  userCostEndDate: string
 }
 
 export default function AdminClient({
@@ -145,6 +147,8 @@ export default function AdminClient({
   initialLeadStats = null,
   mainCallsTotal = 0,
   sessionEmail = '',
+  userCostStartDate,
+  userCostEndDate,
 }: AdminClientProps) {
   const [selectedUsers, setSelectedUsers] = useState<string[]>([])
   const [isPending, startTransition] = useTransition()
@@ -579,7 +583,11 @@ export default function AdminClient({
 
         <TabsContent value="costs">
           <Table>
-            <TableCaption>OpenAI usage cost per user.</TableCaption>
+            <TableCaption>
+              Estimated OpenAI usage cost per user for {userCostStartDate} to{' '}
+              {userCostEndDate}. The organization total below comes directly
+              from OpenAI.
+            </TableCaption>
             <TableHeader>
               <TableRow>
                 <TableHead>ID</TableHead>
@@ -620,7 +628,7 @@ export default function AdminClient({
           {/* OpenAI API Usage (Last 30 Days) */}
           <div className="mt-6 p-4 bg-muted rounded-lg border">
             <h3 className="text-sm font-semibold mb-2">
-              OpenAI API Usage (Last 30 Days)
+              OpenAI Organization Usage (Last 30 Days)
             </h3>
             {usageLoading ? (
               <div className="flex items-center gap-2 text-muted-foreground">
@@ -633,7 +641,7 @@ export default function AdminClient({
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
                   <span className="text-sm text-muted-foreground">
-                    Total API Cost
+                    Actual org API cost
                   </span>
                   <span className="text-xl font-bold">
                     {openaiUsage.totalCostFormatted}

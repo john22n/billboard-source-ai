@@ -11,6 +11,9 @@ export async function GET() {
   if (!session?.userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+  if (session.role !== 'admin') {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   const adminKey = process.env.OPENAI_ADMIN_KEY
   if (!adminKey) {

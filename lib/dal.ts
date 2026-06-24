@@ -1,8 +1,16 @@
 import { db } from '@/db'
 import { getSession } from './auth'
-import { and, eq, inArray, lt, sql } from 'drizzle-orm'
+import { and, eq, gte, inArray, lt, sql } from 'drizzle-orm'
 import { cache } from 'react'
 import { openaiLogs, user, nutshellLeads, appMetrics } from '@/db/schema'
+import {
+  calculateOpenAIDurationCost,
+  calculateOpenAIEmbeddingCost,
+  calculateOpenAITokenCost,
+  normalizeTokenUsage,
+  REALTIME_TRANSCRIPTION_MODEL,
+  type TokenUsageLike,
+} from '@/lib/openai-pricing'
 
 export const getCurrentUser = cache(async () => {
   const session = await getSession()
@@ -38,12 +46,16 @@ export const getUserByEmail = cache(async (email: string) => {
   }
 })
 
-export async function createPendingLog(userId: string, sessionId: string) {
+export async function createPendingLog(
+  userId: string,
+  sessionId: string,
+  model = REALTIME_TRANSCRIPTION_MODEL,
+) {
   const [logEntry] = await db
     .insert(openaiLogs)
     .values({
       userId,
-      model: 'gpt-4o-transcribe',
+      model,
       promptTokens: 0,
       completionTokens: 0,
       totalTokens: 0,
@@ -118,7 +130,16 @@ export async function updateUserTwilioPhone(
   return result[0] || null
 }
 
-export async function getUserCosts() {
+export function getCurrentOpenAICostRange(now = new Date()) {
+  return {
+    startDate: new Date(now.getFullYear(), now.getMonth(), 1),
+    endDate: now,
+  }
+}
+
+export async function getUserCosts(
+  range: { startDate: Date; endDate: Date } = getCurrentOpenAICostRange(),
+) {
   return await db
     .select({
       id: user.id,
@@ -128,22 +149,131 @@ export async function getUserCosts() {
       ),
     })
     .from(user)
-    .leftJoin(openaiLogs, eq(user.id, openaiLogs.userId))
+    .leftJoin(
+      openaiLogs,
+      and(
+        eq(user.id, openaiLogs.userId),
+        gte(openaiLogs.createdAt, range.startDate),
+        lt(openaiLogs.createdAt, range.endDate),
+      ),
+    )
     .groupBy(user.id, user.email)
     .orderBy(user.email)
+}
+
+export async function logOpenAITokenUsage({
+  userId,
+  model,
+  usage,
+  sessionId,
+}: {
+  userId: string
+  model: string
+  usage: TokenUsageLike | null | undefined
+  sessionId?: string
+}) {
+  const tokenUsage = normalizeTokenUsage(usage)
+  const cost = calculateOpenAITokenCost(model, tokenUsage)
+
+  return await createCompletedOpenAILog({
+    userId,
+    model,
+    ...tokenUsage,
+    cost,
+    sessionId,
+  })
+}
+
+export async function logOpenAIEmbeddingUsage({
+  userId,
+  model,
+  promptTokens,
+  sessionId,
+}: {
+  userId: string
+  model: string
+  promptTokens: number
+  sessionId?: string
+}) {
+  return await createCompletedOpenAILog({
+    userId,
+    model,
+    promptTokens,
+    completionTokens: 0,
+    totalTokens: promptTokens,
+    cost: calculateOpenAIEmbeddingCost(model, promptTokens),
+    sessionId,
+  })
+}
+
+export async function logOpenAIDurationUsage({
+  userId,
+  model,
+  durationSeconds,
+  sessionId,
+}: {
+  userId: string
+  model: string
+  durationSeconds: number
+  sessionId?: string
+}) {
+  return await createCompletedOpenAILog({
+    userId,
+    model,
+    promptTokens: 0,
+    completionTokens: 0,
+    totalTokens: Math.round(durationSeconds),
+    cost: calculateOpenAIDurationCost(model, durationSeconds),
+    sessionId,
+  })
+}
+
+async function createCompletedOpenAILog({
+  userId,
+  model,
+  promptTokens,
+  completionTokens,
+  totalTokens,
+  cost,
+  sessionId,
+}: {
+  userId: string
+  model: string
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  cost: number
+  sessionId?: string
+}) {
+  const [logEntry] = await db
+    .insert(openaiLogs)
+    .values({
+      userId,
+      model,
+      promptTokens,
+      completionTokens,
+      totalTokens,
+      cost: cost.toFixed(6),
+      sessionId,
+      status: 'completed',
+    })
+    .returning()
+
+  return logEntry
 }
 
 export async function updateLogCost(
   logId: number,
   userId: string,
   durationSeconds: number,
+  model = REALTIME_TRANSCRIPTION_MODEL,
 ) {
-  const durationMinutes = durationSeconds / 60
-  const actualCost = durationMinutes * 0.06
+  const actualCost = calculateOpenAIDurationCost(model, durationSeconds)
 
   const result = await db
     .update(openaiLogs)
     .set({
+      model,
       totalTokens: Math.round(durationSeconds),
       cost: actualCost.toFixed(6),
       status: 'completed',
