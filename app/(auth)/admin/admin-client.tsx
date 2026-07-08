@@ -201,7 +201,15 @@ export default function AdminClient({
       try {
         const response = await fetch('/api/openai/usage')
         if (!response.ok) {
-          throw new Error('Failed to fetch usage data')
+          const errorBody = (await response.json().catch(() => null)) as {
+            error?: string
+            details?: string
+          } | null
+          throw new Error(
+            errorBody?.details ||
+              errorBody?.error ||
+              'Failed to fetch usage data',
+          )
         }
         const data = await response.json()
         setOpenaiUsage(data)

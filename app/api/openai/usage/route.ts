@@ -3,11 +3,8 @@
 
 import { NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
-import {
-  configErrorResponseBody,
-  isMissingConfig,
-  serverConfig,
-} from '@/lib/config'
+
+const COST_LOOKBACK_DAYS = 30
 
 export async function GET() {
   const session = await getSession()
@@ -15,19 +12,19 @@ export async function GET() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  let adminKey: string
-  try {
-    adminKey = serverConfig.openai.requireAdminKey()
-  } catch (error) {
-    if (!isMissingConfig(error)) throw error
-    return NextResponse.json(configErrorResponseBody(error), { status: 500 })
+  const adminKey = process.env.OPENAI_ADMIN_KEY
+  if (!adminKey) {
+    return NextResponse.json(
+      { error: 'OPENAI_ADMIN_KEY not configured' },
+      { status: 500 },
+    )
   }
 
   try {
     // Calculate date range (last 30 days) as Unix timestamps
     const endDate = new Date()
     const startDate = new Date()
-    startDate.setDate(startDate.getDate() - 30)
+    startDate.setDate(startDate.getDate() - COST_LOOKBACK_DAYS)
 
     const startTime = Math.floor(startDate.getTime() / 1000)
     const endTime = Math.floor(endDate.getTime() / 1000)
@@ -43,6 +40,8 @@ export async function GET() {
       const url = new URL('https://api.openai.com/v1/organization/costs')
       url.searchParams.set('start_time', startTime.toString())
       url.searchParams.set('end_time', endTime.toString())
+      url.searchParams.set('bucket_width', '1d')
+      url.searchParams.set('limit', COST_LOOKBACK_DAYS.toString())
       if (pageToken) {
         url.searchParams.set('page', pageToken)
       }
@@ -91,6 +90,9 @@ export async function GET() {
       // Check for more pages
       hasMore = data.has_more === true
       pageToken = data.next_page
+      if (hasMore && !pageToken) {
+        throw new Error('OpenAI costs response is missing next_page cursor')
+      }
     }
 
     return NextResponse.json({
