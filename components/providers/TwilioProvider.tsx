@@ -11,6 +11,7 @@ import {
 } from 'react'
 import { Device, Call } from '@twilio/voice-sdk'
 import { useWorkerStatus, type WorkerActivity } from '@/hooks/useWorkerStatus'
+import { publicConfig } from '@/lib/public-config'
 
 interface TwilioContextType {
   status: string
@@ -106,7 +107,7 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
 
       console.log('═══════════════════════════════════════════')
       console.log('🚀 TWILIO INITIALIZATION STARTING (Provider)')
-      console.log('Environment:', process.env.NODE_ENV)
+      console.log('Environment:', publicConfig.runtime.nodeEnv)
       console.log('Timestamp:', new Date().toISOString())
       console.log('═══════════════════════════════════════════')
 
@@ -322,7 +323,7 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
 
   useEffect(() => {
     console.log('🎬 TwilioProvider mounted - initializing device')
-    console.log('Environment:', process.env.NODE_ENV)
+    console.log('Environment:', publicConfig.runtime.nodeEnv)
 
     isLoggedOut.current = false
     initTwilio()

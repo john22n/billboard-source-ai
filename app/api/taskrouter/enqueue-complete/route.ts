@@ -1,3 +1,5 @@
+import { serverConfig } from '@/lib/config'
+
 export async function POST(req: Request) {
   try {
     const formData = await req.formData()
@@ -55,20 +57,12 @@ export async function POST(req: Request) {
     // ─────────────────────────────────────────────
     console.log(`📤 QueueResult="${queueResult}" → overflow`)
 
-    const url = new URL(req.url)
-    const appUrl = (
-      process.env.NEXT_PUBLIC_APP_URL ?? `${url.protocol}//${url.host}`
-    ).replace(/\/$/, '')
+    const appUrl = serverConfig.app.baseUrlFromRequest(req.url)
 
     const overflowUrl = new URL(`${appUrl}/api/taskrouter/overflow`)
     if (callSid) overflowUrl.searchParams.set('callSid', callSid)
     if (from) overflowUrl.searchParams.set('callerFrom', from)
-    if (process.env.VERCEL_BYPASS_TOKEN) {
-      overflowUrl.searchParams.set(
-        'x-vercel-protection-bypass',
-        process.env.VERCEL_BYPASS_TOKEN,
-      )
-    }
+    serverConfig.app.addVercelBypassToken(overflowUrl)
     const escapedOverflowUrl = overflowUrl.toString().replace(/&/g, '&amp;')
 
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>

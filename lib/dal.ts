@@ -1,5 +1,6 @@
 import { db } from '@/db'
 import { getSession } from './auth'
+import { serverConfig } from './config'
 import { and, eq, inArray, lt, sql } from 'drizzle-orm'
 import { cache } from 'react'
 import { openaiLogs, user, nutshellLeads, appMetrics } from '@/db/schema'
@@ -12,7 +13,7 @@ export const getCurrentUser = cache(async () => {
   // hack until we have PPR http://nextjs.org/docs/app/buidling-your-application/rendering/parital-prerendering
   if (
     typeof window == 'undefined' &&
-    process.env.NEXT_PHASE === 'phase-production-build'
+    serverConfig.runtime.isProductionBuildPhase
   )
     return null
 

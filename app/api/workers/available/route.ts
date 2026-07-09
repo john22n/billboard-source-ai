@@ -3,10 +3,7 @@ import { db } from '@/db'
 import { user } from '@/db/schema'
 import { inArray } from 'drizzle-orm'
 import { getSessionWithoutRefresh } from '@/lib/auth'
-
-const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID
-const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN
-const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID
+import { isMissingConfig, serverConfig } from '@/lib/config'
 
 // Voicemail worker email to exclude from the list
 const VOICEMAIL_EMAIL = 'voicemail@system'
@@ -24,20 +21,35 @@ export async function GET() {
       return Response.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    if (!ACCOUNT_SID || !AUTH_TOKEN || !WORKSPACE_SID) {
-      console.error('❌ Missing required Twilio env vars for /api/workers/available')
+    let credentials: ReturnType<
+      typeof serverConfig.twilio.requireAccountCredentials
+    >
+    let workspaceSid: string
+    try {
+      credentials = serverConfig.twilio.requireAccountCredentials()
+      workspaceSid = serverConfig.taskRouter.requireWorkspaceSid()
+    } catch (error) {
+      if (!isMissingConfig(error)) throw error
+      console.error(
+        '❌ Missing required Twilio config for /api/workers/available:',
+        error.message,
+      )
       return Response.json(
         { workers: [] },
         { headers: { 'Cache-Control': 'no-store' } },
       )
     }
 
-    const client = twilio(ACCOUNT_SID as string, AUTH_TOKEN as string)
+    const client = twilio(credentials.accountSid, credentials.authToken)
 
     // Fetch Available and Busy workers in parallel
     const [availableWorkers, busyWorkers] = await Promise.all([
-      client.taskrouter.v1.workspaces(WORKSPACE_SID).workers.list({ activityName: 'Available' }),
-      client.taskrouter.v1.workspaces(WORKSPACE_SID).workers.list({ activityName: 'Busy' }),
+      client.taskrouter.v1
+        .workspaces(workspaceSid)
+        .workers.list({ activityName: 'Available' }),
+      client.taskrouter.v1
+        .workspaces(workspaceSid)
+        .workers.list({ activityName: 'Busy' }),
     ])
 
     // Busy workers are on an active call
@@ -74,8 +86,10 @@ export async function GET() {
     // Busy (on-call) workers appended at the end
     const sortedAvailable = availableWorkers
       .filter((w) => sidToUser.has(w.sid))
-      .sort((a, b) =>
-        new Date(a.dateStatusChanged).getTime() - new Date(b.dateStatusChanged).getTime()
+      .sort(
+        (a, b) =>
+          new Date(a.dateStatusChanged).getTime() -
+          new Date(b.dateStatusChanged).getTime(),
       )
 
     const sortedBusy = busyWorkers.filter((w) => sidToUser.has(w.sid))
@@ -84,7 +98,9 @@ export async function GET() {
 
     const workers = sorted.map((w) => ({
       name: firstNameFromEmail(sidToUser.get(w.sid)!.email),
-      status: onCallSids.has(w.sid) ? ('on_call' as const) : ('available' as const),
+      status: onCallSids.has(w.sid)
+        ? ('on_call' as const)
+        : ('available' as const),
     }))
 
     return Response.json(

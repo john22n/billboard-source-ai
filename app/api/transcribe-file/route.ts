@@ -2,13 +2,23 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
 import { generateObject } from 'ai'
-import { openai } from '@ai-sdk/openai'
+import { createOpenAI } from '@ai-sdk/openai'
 import { z } from 'zod'
 import { getSession } from '@/lib/auth'
+import {
+  configErrorResponseBody,
+  isMissingConfig,
+  serverConfig,
+} from '@/lib/config'
 
-const openaiClient = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-})
+let openaiClient: OpenAI | null = null
+
+function getOpenAIClient() {
+  openaiClient ??= new OpenAI({
+    apiKey: serverConfig.openai.requireApiKey(),
+  })
+  return openaiClient
+}
 
 // Combined analysis schema - single LLM call instead of 4 parallel calls
 const fullAnalysisSchema = z.object({
@@ -84,8 +94,12 @@ export async function POST(req: NextRequest) {
       `(${(file.size / 1024 / 1024).toFixed(2)} MB)`,
     )
 
+    const openaiProvider = createOpenAI({
+      apiKey: serverConfig.openai.requireApiKey(),
+    })
+
     // Step 1: Transcribe the audio file using OpenAI Whisper
-    const transcription = await openaiClient.audio.transcriptions.create({
+    const transcription = await getOpenAIClient().audio.transcriptions.create({
       file: file,
       model: 'whisper-1',
       language: 'en',
@@ -100,7 +114,7 @@ export async function POST(req: NextRequest) {
 
     // Step 2: Single LLM call for all analysis (4x more efficient than parallel calls)
     const { object: analysis } = await generateObject({
-      model: openai('gpt-4o-mini'),
+      model: openaiProvider('gpt-4o-mini'),
       schema: fullAnalysisSchema,
       system: `You are a sales call analyst. Analyze this sales call transcript and extract all relevant information.
 Be thorough and only include information that was explicitly mentioned. Use null for missing fields.`,
@@ -116,6 +130,9 @@ Be thorough and only include information that was explicitly mentioned. Use null
       analysis,
     })
   } catch (error: unknown) {
+    if (isMissingConfig(error)) {
+      return NextResponse.json(configErrorResponseBody(error), { status: 500 })
+    }
     const errorMessage =
       error instanceof Error ? error.message : 'Unknown error'
     console.error('❌ Transcription error:', error)
@@ -125,73 +142,3 @@ Be thorough and only include information that was explicitly mentioned. Use null
     )
   }
 }
-
-/*
-import { NextResponse } from "next/server";
-import OpenAI from "openai";
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
-
-export const runtime = "nodejs"; // ensure Node runtime for file uploads
-
-export async function POST(req: Request) {
-  const instructions = `
-You are transcribing a sales call. Please:
-- Transcribe all speech accurately
-- Identify different speakers (e.g., "Sales Rep:", "Customer:")
-- Include natural pauses and emphasis
-- Note any important background information mentioned
-- Label speakers clearly`.trim();
-  try {
-    const formData = await req.formData();
-    const file = formData.get("file") as File;
-
-    if (!file) {
-      return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
-    }
-
-    // Request speaker diarization with GPT-4o-transcribe
-    const transcription = await openai.audio.transcriptions.create({
-      file,
-      model: "gpt-4o-transcribe",
-      language: "en",
-      prompt: instructions,
-      response_format: "json", // gives structured timestamps & speaker data
-      speaker_diarization: true, // 👈 enables speaker separation
-    });
-
-    // The model returns structured segments like:
-    // {
-    //   text: "...",
-    //   diarization: [
-    //     { speaker: "spk_0", text: "Hello..." },
-    //     { speaker: "spk_1", text: "Hi..." }
-    //   ]
-    // }
-
-    // Format the output neatly for display
-    let formattedText = "";
-    if (transcription.diarization && Array.isArray(transcription.diarization)) {
-      formattedText = transcription.diarization
-        .map((seg, i) => {
-          const speakerNum = seg.speaker?.replace("spk_", "Speaker ") || `Speaker ${i + 1}`;
-          return `${speakerNum}: ${seg.text.trim()}`;
-        })
-        .join("\n\n");
-    } else {
-      formattedText = transcription.text || "";
-    }
-    console.log(formattedText, transcription.diarization)
-
-    return NextResponse.json({ text: formattedText });
-  } catch (error: any) {
-    console.error("Transcription error:", error);
-    return NextResponse.json(
-      { error: error.message || "Internal server error" },
-      { status: 500 }
-    );
-  }
-}
-*/

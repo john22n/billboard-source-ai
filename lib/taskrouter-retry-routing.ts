@@ -10,7 +10,7 @@
  * Nothing here performs Twilio REST side effects — callers own those.
  */
 
-const WORKFLOW_SID = process.env.TASKROUTER_WORKFLOW_SID!
+import { serverConfig } from '@/lib/config'
 
 export interface MissedAttemptRouting {
   /** Distinct Sales Reps offered this call so far (includes the one just missed). */
@@ -60,13 +60,7 @@ export function computeMissedAttemptRouting(
 }
 
 function appendBypass(u: URL): URL {
-  if (process.env.VERCEL_BYPASS_TOKEN) {
-    u.searchParams.set(
-      'x-vercel-protection-bypass',
-      process.env.VERCEL_BYPASS_TOKEN,
-    )
-  }
-  return u
+  return serverConfig.app.addVercelBypassToken(u)
 }
 
 /**
@@ -118,10 +112,11 @@ export function buildRequeueTwiml(
   const escapedEnqueueActionUrl = enqueueActionUrlObj
     .toString()
     .replace(/&/g, '&amp;')
+  const workflowSid = serverConfig.taskRouter.requireWorkflowSid()
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Enqueue workflowSid="${WORKFLOW_SID}"
+  <Enqueue workflowSid="${workflowSid}"
            action="${escapedEnqueueActionUrl}"
            method="POST"
            waitUrl="${escapedWaitUrl}"

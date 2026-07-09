@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { getSession } from '@/lib/auth'
+import { serverConfig } from '@/lib/config'
 import { generatePasskeyRegistrationOptions } from '@/lib/passkey'
 
 /**
@@ -14,16 +15,13 @@ export async function POST() {
     // Require authentication
     const session = await getSession()
     if (!session) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      )
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     // Generate registration options
     const options = await generatePasskeyRegistrationOptions(
       session.userId,
-      session.email
+      session.email,
     )
 
     // Store challenge in cookie for verification
@@ -33,7 +31,7 @@ export async function POST() {
       name: 'passkey_challenge',
       value: options.challenge,
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: serverConfig.auth.secureCookies,
       maxAge: 60 * 5, // 5 minutes
       path: '/',
       sameSite: 'strict',
@@ -44,7 +42,7 @@ export async function POST() {
     console.error('Error generating registration options:', error)
     return NextResponse.json(
       { error: 'Failed to generate registration options' },
-      { status: 500 }
+      { status: 500 },
     )
   }
 }

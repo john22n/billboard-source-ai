@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { upsertNutshellLead } from '@/lib/dal'
+import {
+  configErrorResponseBody,
+  isMissingConfig,
+  serverConfig,
+} from '@/lib/config'
 
 interface ContactInfo {
   name: string
@@ -159,12 +164,12 @@ export async function POST(req: NextRequest) {
       formData: data,
     })
 
-    const nutshellApiKey = process.env.NUTSHELL_API_KEY
-    if (!nutshellApiKey) {
-      return NextResponse.json(
-        { error: 'Nutshell integration not configured' },
-        { status: 500 },
-      )
+    let nutshellApiKey: string
+    try {
+      nutshellApiKey = serverConfig.nutshell.requireApiKey()
+    } catch (error) {
+      if (!isMissingConfig(error)) throw error
+      return NextResponse.json(configErrorResponseBody(error), { status: 500 })
     }
 
     const credentials = Buffer.from(`${userEmail}:${nutshellApiKey}`).toString(

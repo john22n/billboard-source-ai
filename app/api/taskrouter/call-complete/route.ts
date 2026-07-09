@@ -9,12 +9,7 @@
 import twilio from 'twilio'
 import { recordMissedAttempt } from '@/lib/call-attempt-outcomes'
 import { computeMissedAttemptRouting } from '@/lib/taskrouter-retry-routing'
-
-const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!
-const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!
-const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!
-
-const client = twilio(ACCOUNT_SID, AUTH_TOKEN)
+import { serverConfig } from '@/lib/config'
 
 export async function POST(req: Request) {
   try {
@@ -26,13 +21,16 @@ export async function POST(req: Request) {
 
     const url = new URL(req.url)
     const taskSid = url.searchParams.get('taskSid')
-    const workspaceSid = url.searchParams.get('workspaceSid') || WORKSPACE_SID
+    const workspaceSid =
+      url.searchParams.get('workspaceSid') ||
+      serverConfig.taskRouter.requireWorkspaceSid()
     const workerSid = url.searchParams.get('workerSid')
     const reservationSid = url.searchParams.get('reservationSid') ?? ''
+    const { accountSid, authToken } =
+      serverConfig.twilio.requireAccountCredentials()
+    const client = twilio(accountSid, authToken)
 
-    const appUrl = (
-      process.env.NEXT_PUBLIC_APP_URL ?? `${url.protocol}//${url.host}`
-    ).replace(/\/$/, '')
+    const appUrl = serverConfig.app.baseUrlFromRequest(req.url)
 
     console.log('═══════════════════════════════════════════')
     console.log('📞 CONFERENCE STATUS CALLBACK')
@@ -139,12 +137,7 @@ export async function POST(req: Request) {
         if (taskAttributes.from) {
           retryUrl.searchParams.set('callerFrom', taskAttributes.from as string)
         }
-        if (process.env.VERCEL_BYPASS_TOKEN) {
-          retryUrl.searchParams.set(
-            'x-vercel-protection-bypass',
-            process.env.VERCEL_BYPASS_TOKEN,
-          )
-        }
+        serverConfig.app.addVercelBypassToken(retryUrl)
 
         try {
           const callerCall = await client.calls(callerCallSid).fetch()

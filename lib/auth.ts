@@ -5,6 +5,7 @@ import { db } from '@/db'
 import { user } from '@/db/schema'
 import * as jose from 'jose'
 import { cache } from 'react'
+import { serverConfig } from '@/lib/config'
 
 //JWT types
 interface JWTPayload {
@@ -13,10 +14,7 @@ interface JWTPayload {
   [key: string]: string | number | boolean | null | undefined
 }
 
-// secret key for JWT signing (in a real app, use env variables)
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || 'your-secret-key-min-32-chars-long'
-)
+const JWT_SECRET = new TextEncoder().encode(serverConfig.auth.jwtSecret)
 
 // JWT expiration - 4 hours of inactivity will log user out
 const JWT_EXPIRATION = '4h'
@@ -40,7 +38,7 @@ export async function createUser(
   email: string,
   password: string,
   role: string = 'user',
-  twilioPhoneNumber?: string
+  twilioPhoneNumber?: string,
 ) {
   const hashedPassword = await hashPassword(password)
   const id = nanoid()
@@ -77,9 +75,15 @@ export async function verifyJWT(token: string): Promise<JWTPayload | null> {
     return payload as JWTPayload
   } catch (error: unknown) {
     // Check if it's an expired token error
-    if (error && typeof error === 'object' && 'code' in error && error.code === 'ERR_JWT_EXPIRED') {
+    if (
+      error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      error.code === 'ERR_JWT_EXPIRED'
+    ) {
       // Extract user email from the expired token's payload
-      const expiredPayload = 'payload' in error ? error.payload as JWTPayload : null
+      const expiredPayload =
+        'payload' in error ? (error.payload as JWTPayload) : null
       const userEmail = expiredPayload?.email || 'unknown'
       console.log(`🔒 Token expired for user: ${userEmail} - logging out`)
     } else {
@@ -114,7 +118,7 @@ async function setAuthCookie(token: string) {
     name: 'auth_token',
     value: token,
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: serverConfig.auth.secureCookies,
     // NO maxAge - this makes it a session cookie that's deleted when browser closes
     path: '/',
     sameSite: 'lax',
@@ -122,7 +126,11 @@ async function setAuthCookie(token: string) {
 }
 
 // create a session using jwt
-export async function createSession(userId: string, email: string, role: string = 'user') {
+export async function createSession(
+  userId: string,
+  email: string,
+  role: string = 'user',
+) {
   try {
     //create jwt with user data
     const token = await generateJWT({ userId, email, role })
@@ -151,13 +159,19 @@ export const getSessionWithoutRefresh = cache(async () => {
     const payload = await verifyJWT(token)
     if (!payload) return null
 
-    return { userId: payload.userId, email: payload.email as string, role: (payload.role as string) || 'user' }
+    return {
+      userId: payload.userId,
+      email: payload.email as string,
+      role: (payload.role as string) || 'user',
+    }
   } catch (error) {
     if (
       error instanceof Error &&
       error.message.includes('During prerendering, `cookies()` rejects')
     ) {
-      console.log('Cookies not available during prerendering, returning null session')
+      console.log(
+        'Cookies not available during prerendering, returning null session',
+      )
       return null
     }
     console.error('Error getting session:', error)
@@ -198,13 +212,19 @@ export const getSession = cache(async () => {
       console.error('Token refresh failed (non-fatal):', refreshError)
     }
 
-    return { userId: payload.userId, email: payload.email as string, role: (payload.role as string) || 'user' }
+    return {
+      userId: payload.userId,
+      email: payload.email as string,
+      role: (payload.role as string) || 'user',
+    }
   } catch (error) {
     if (
       error instanceof Error &&
       error.message.includes('During prerendering, `cookies()` rejects')
     ) {
-      console.log('Cookies not available during prerendering, returning null session')
+      console.log(
+        'Cookies not available during prerendering, returning null session',
+      )
       return null
     }
     console.error('Error getting session:', error)

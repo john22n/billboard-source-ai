@@ -30,12 +30,7 @@ import {
   buildRequeueTwiml,
   computeMissedAttemptRouting,
 } from '@/lib/taskrouter-retry-routing'
-
-const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!
-const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!
-const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!
-const BUSY_ACTIVITY_SID = process.env.TASKROUTER_ACTIVITY_BUSY_SID!
-const AVAILABLE_ACTIVITY_SID = process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID!
+import { serverConfig } from '@/lib/config'
 
 // Only trust "completed" as a genuine answer if the call lasted at least this long.
 // - null duration = rejected during call screening prompt → re-enqueue
@@ -50,7 +45,9 @@ export async function POST(req: Request) {
   try {
     const url = new URL(req.url)
     const taskSid = url.searchParams.get('taskSid')
-    const workspaceSid = url.searchParams.get('workspaceSid') ?? WORKSPACE_SID
+    const workspaceSid =
+      url.searchParams.get('workspaceSid') ??
+      serverConfig.taskRouter.requireWorkspaceSid()
     const workerSid = url.searchParams.get('workerSid') ?? ''
     const reservationSid = url.searchParams.get('reservationSid') ?? ''
 
@@ -73,24 +70,28 @@ export async function POST(req: Request) {
     console.log('WorkerSid:', workerSid)
     console.log('═══════════════════════════════════════════')
 
-    const appUrl = (
-      process.env.NEXT_PUBLIC_APP_URL ?? `${url.protocol}//${url.host}`
-    ).replace(/\/$/, '')
+    const appUrl = serverConfig.app.baseUrlFromRequest(req.url)
 
-    const client = twilio(ACCOUNT_SID, AUTH_TOKEN)
+    const { accountSid, authToken } =
+      serverConfig.twilio.requireAccountCredentials()
+    const client = twilio(accountSid, authToken)
+    const activitySids = serverConfig.taskRouter.requireActivitySids([
+      'busy',
+      'available',
+    ] as const)
 
     // ── Helper: reset worker to back of queue ────────────────────────────────
     const resetWorkerToBack = async () => {
-      if (!workerSid || !BUSY_ACTIVITY_SID || !AVAILABLE_ACTIVITY_SID) return
+      if (!workerSid) return
       try {
         await client.taskrouter.v1
           .workspaces(workspaceSid)
           .workers(workerSid)
-          .update({ activitySid: BUSY_ACTIVITY_SID })
+          .update({ activitySid: activitySids.busy })
         await client.taskrouter.v1
           .workspaces(workspaceSid)
           .workers(workerSid)
-          .update({ activitySid: AVAILABLE_ACTIVITY_SID })
+          .update({ activitySid: activitySids.available })
         console.log(
           `✅ Worker ${workerSid} reset to back of queue after missed simultaneous dial`,
         )
@@ -104,12 +105,12 @@ export async function POST(req: Request) {
 
     // ── Helper: switch worker back to Available after answered call ───────────
     const switchWorkerToAvailable = async () => {
-      if (!workerSid || !AVAILABLE_ACTIVITY_SID) return
+      if (!workerSid) return
       try {
         await client.taskrouter.v1
           .workspaces(workspaceSid)
           .workers(workerSid)
-          .update({ activitySid: AVAILABLE_ACTIVITY_SID })
+          .update({ activitySid: activitySids.available })
         console.log(
           `✅ Worker ${workerSid} switched back to Available after genuine answer`,
         )
