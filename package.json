@@ -27,7 +27,7 @@
     "taskrouter:setup-voicemail:prod": "dotenv -e .env -- tsx scripts/setup-voicemail-worker.ts",
     "typecheck": "tsc",
     "prepare": "husky",
-    "clean:slop": "npx fallow health"
+    "fallow:audit": "fallow audit"
   },
   "dependencies": {
     "@ai-sdk/openai": "^2.0.71",
@@ -99,6 +99,7 @@
     "drizzle-kit": "^0.31.6",
     "eslint": "^9.39.2",
     "eslint-config-next": "^15.3.4",
+    "fallow": "3.3.0",
     "husky": "^9.1.7",
     "lint-staged": "^16.3.1",
     "prettier": "^3.8.1",
