@@ -26,7 +26,8 @@
     "taskrouter:update-workflow:prod": "dotenv -e .env -- tsx scripts/update-workflow.ts",
     "taskrouter:setup-voicemail:prod": "dotenv -e .env -- tsx scripts/setup-voicemail-worker.ts",
     "typecheck": "tsc",
-    "prepare": "husky"
+    "prepare": "husky",
+    "clean:slop": "npx fallow health"
   },
   "dependencies": {
     "@ai-sdk/openai": "^2.0.71",
