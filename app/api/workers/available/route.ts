@@ -1,12 +1,6 @@
 import twilio from 'twilio'
-import { db } from '@/db'
-import { user } from '@/db/schema'
-import { inArray } from 'drizzle-orm'
 import { getSessionWithoutRefresh } from '@/lib/auth'
-
-const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID
-const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN
-const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID
+import { isMissingConfig, serverConfig } from '@/lib/config'
 
 // Voicemail worker email to exclude from the list
 const VOICEMAIL_EMAIL = 'voicemail@system'
@@ -24,20 +18,35 @@ export async function GET() {
       return Response.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    if (!ACCOUNT_SID || !AUTH_TOKEN || !WORKSPACE_SID) {
-      console.error('❌ Missing required Twilio env vars for /api/workers/available')
+    let credentials: ReturnType<
+      typeof serverConfig.twilio.requireAccountCredentials
+    >
+    let workspaceSid: string
+    try {
+      credentials = serverConfig.twilio.requireAccountCredentials()
+      workspaceSid = serverConfig.taskRouter.requireWorkspaceSid()
+    } catch (error) {
+      if (!isMissingConfig(error)) throw error
+      console.error(
+        '❌ Missing required Twilio config for /api/workers/available:',
+        error.message,
+      )
       return Response.json(
         { workers: [] },
         { headers: { 'Cache-Control': 'no-store' } },
       )
     }
 
-    const client = twilio(ACCOUNT_SID as string, AUTH_TOKEN as string)
+    const client = twilio(credentials.accountSid, credentials.authToken)
 
     // Fetch Available and Busy workers in parallel
     const [availableWorkers, busyWorkers] = await Promise.all([
-      client.taskrouter.v1.workspaces(WORKSPACE_SID).workers.list({ activityName: 'Available' }),
-      client.taskrouter.v1.workspaces(WORKSPACE_SID).workers.list({ activityName: 'Busy' }),
+      client.taskrouter.v1
+        .workspaces(workspaceSid)
+        .workers.list({ activityName: 'Available' }),
+      client.taskrouter.v1
+        .workspaces(workspaceSid)
+        .workers.list({ activityName: 'Busy' }),
     ])
 
     // Busy workers are on an active call
@@ -53,38 +62,44 @@ export async function GET() {
       )
     }
 
-    const allSids = allWorkers.map((w) => w.sid)
+    // Resolve names from TaskRouter attributes so this frequently refreshed
+    // endpoint does not consume Neon compute hours.
+    const emailBySid = new Map<string, string>()
+    for (const worker of allWorkers) {
+      let email = worker.friendlyName
+      try {
+        const attributes = JSON.parse(worker.attributes || '{}') as {
+          email?: unknown
+        }
+        if (typeof attributes.email === 'string') email = attributes.email
+      } catch {
+        // Fall back to the worker's email-based friendly name.
+      }
 
-    // Fetch matched users to resolve names — exclude voicemail worker
-    const matchedUsers = await db
-      .select({
-        email: user.email,
-        taskRouterWorkerSid: user.taskRouterWorkerSid,
-      })
-      .from(user)
-      .where(inArray(user.taskRouterWorkerSid, allSids))
-
-    const sidToUser = new Map(
-      matchedUsers
-        .filter((u) => u.email !== VOICEMAIL_EMAIL)
-        .map((u) => [u.taskRouterWorkerSid, u]),
-    )
+      if (email.includes('@') && email !== VOICEMAIL_EMAIL) {
+        emailBySid.set(worker.sid, email)
+      }
+    }
 
     // Sort available workers by dateStatusChanged ascending — oldest = longest duration = next in line
     // Busy (on-call) workers appended at the end
     const sortedAvailable = availableWorkers
-      .filter((w) => sidToUser.has(w.sid))
-      .sort((a, b) =>
-        new Date(a.dateStatusChanged).getTime() - new Date(b.dateStatusChanged).getTime()
+      .filter((w) => emailBySid.has(w.sid))
+      .sort(
+        (a, b) =>
+          new Date(a.dateStatusChanged).getTime() -
+          new Date(b.dateStatusChanged).getTime(),
       )
 
-    const sortedBusy = busyWorkers.filter((w) => sidToUser.has(w.sid))
+    const sortedBusy = busyWorkers.filter((w) => emailBySid.has(w.sid))
 
     const sorted = [...sortedAvailable, ...sortedBusy]
 
     const workers = sorted.map((w) => ({
-      name: firstNameFromEmail(sidToUser.get(w.sid)!.email),
-      status: onCallSids.has(w.sid) ? ('on_call' as const) : ('available' as const),
+      name: firstNameFromEmail(emailBySid.get(w.sid)!),
+      status: onCallSids.has(w.sid)
+        ? ('on_call' as const)
+        : ('available' as const),
     }))
 
     return Response.json(

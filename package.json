@@ -18,6 +18,7 @@
     "db:studio:prod": "dotenv -e .env drizzle-kit studio",
     "db:generate": "drizzle-kit generate",
     "test": "vitest",
+    "format:ts": "prettier --write \"**/*.{ts,tsx}\"",
     "make-admin:dev": "dotenv -e .env.dev -- tsx scripts/make-admin.ts",
     "make-admin:prod": "dotenv -e .env -- tsx scripts/make-admin.ts",
     "make-admin": "tsx scripts/make-admin.ts",
@@ -25,7 +26,8 @@
     "taskrouter:update-workflow:prod": "dotenv -e .env -- tsx scripts/update-workflow.ts",
     "taskrouter:setup-voicemail:prod": "dotenv -e .env -- tsx scripts/setup-voicemail-worker.ts",
     "typecheck": "tsc",
-    "prepare": "husky"
+    "prepare": "husky",
+    "fallow:audit": "fallow audit"
   },
   "dependencies": {
     "@ai-sdk/openai": "^2.0.71",
@@ -97,12 +99,14 @@
     "drizzle-kit": "^0.31.6",
     "eslint": "^9.39.2",
     "eslint-config-next": "^15.3.4",
+    "fallow": "3.3.0",
     "husky": "^9.1.7",
     "lint-staged": "^16.3.1",
     "prettier": "^3.8.1",
     "tailwindcss": "^4.1.10",
     "tsx": "^4.20.6",
     "tw-animate-css": "^1.3.4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.9"
   }
 }

@@ -50,46 +50,49 @@ const DURATION_PRICING: Record<string, DurationPricing> = {
   'whisper-1': { perMinute: 0.006 },
 }
 
+const MODEL_PREFIXES: Array<[string, string]> = [
+  ['gpt-4o-mini-transcribe', 'gpt-4o-mini-transcribe'],
+  ['gpt-4o-transcribe', 'gpt-4o-transcribe'],
+  ['whisper-1', 'whisper-1'],
+  ['text-embedding-3-small', 'text-embedding-3-small'],
+  ['gpt-4o-mini', 'gpt-4o-mini'],
+  ['gpt-4o', 'gpt-4o'],
+]
+
 function normalizeModelId(model: string): string {
   const normalized = model.toLowerCase()
-
   if (normalized.includes('gpt-realtime-whisper')) {
     return REALTIME_TRANSCRIPTION_MODEL
   }
-  if (normalized.startsWith('gpt-4o-mini-transcribe')) {
-    return 'gpt-4o-mini-transcribe'
-  }
-  if (normalized.startsWith('gpt-4o-transcribe')) {
-    return 'gpt-4o-transcribe'
-  }
-  if (normalized.startsWith('whisper-1')) {
-    return 'whisper-1'
-  }
-  if (normalized.startsWith('text-embedding-3-small')) {
-    return 'text-embedding-3-small'
-  }
-  if (normalized.startsWith('gpt-4o-mini')) {
-    return 'gpt-4o-mini'
-  }
-  if (normalized.startsWith('gpt-4o')) {
-    return 'gpt-4o'
-  }
+  return (
+    MODEL_PREFIXES.find(([prefix]) => normalized.startsWith(prefix))?.[1] ??
+    normalized
+  )
+}
 
-  return normalized
+function firstTokenCount(...values: Array<number | undefined>) {
+  return values.find((value) => value !== undefined) ?? 0
 }
 
 export function normalizeTokenUsage(
   usage: TokenUsageLike | null | undefined,
 ): NormalizedTokenUsage {
-  const promptTokens =
-    usage?.inputTokens ?? usage?.promptTokens ?? usage?.prompt_tokens ?? 0
-  const completionTokens =
-    usage?.outputTokens ??
-    usage?.completionTokens ??
-    usage?.completion_tokens ??
-    0
-  const totalTokens =
-    usage?.totalTokens ?? usage?.total_tokens ?? promptTokens + completionTokens
+  const tokenUsage = usage || {}
+  const promptTokens = firstTokenCount(
+    tokenUsage.inputTokens,
+    tokenUsage.promptTokens,
+    tokenUsage.prompt_tokens,
+  )
+  const completionTokens = firstTokenCount(
+    tokenUsage.outputTokens,
+    tokenUsage.completionTokens,
+    tokenUsage.completion_tokens,
+  )
+  const totalTokens = firstTokenCount(
+    tokenUsage.totalTokens,
+    tokenUsage.total_tokens,
+    promptTokens + completionTokens,
+  )
 
   return {
     promptTokens,

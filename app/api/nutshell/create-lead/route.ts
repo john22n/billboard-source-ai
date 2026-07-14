@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { upsertNutshellLead } from '@/lib/dal'
+import {
+  configErrorResponseBody,
+  isMissingConfig,
+  serverConfig,
+} from '@/lib/config'
 
 interface ContactInfo {
   name: string
@@ -112,625 +117,496 @@ async function nutshellRequestWithRetry(
   }
 }
 
+function validationError(data: NutshellLeadRequest) {
+  const missingFields = [
+    !data.name?.trim() && 'Name',
+    !data.entityName?.trim() && 'Company Name',
+    !data.phone?.trim() && 'Phone',
+    !data.email?.trim() && 'Email',
+  ].filter(Boolean) as string[]
+  return missingFields.length
+    ? NextResponse.json(
+        { error: 'Missing required fields', missingFields },
+        { status: 400 },
+      )
+    : null
+}
+
+function isValidEmail(email: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+}
+
+function isValidUrl(url: string) {
+  if (['no', 'yes', 'n/a', 'none'].includes(url.toLowerCase())) return false
+  try {
+    new URL(url.startsWith('http') ? url : `https://${url}`)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function resolveNutshellUser(userEmail: string, credentials: string) {
+  const result = await nutshellRequest(
+    'findUsers',
+    { query: { email: userEmail } },
+    credentials,
+  )
+  if (result.error) {
+    return {
+      error: NextResponse.json(
+        { error: result.error.message || 'Failed to find user in Nutshell' },
+        { status: 400 },
+      ),
+    }
+  }
+  const user = (result.result || []).find((candidate: { emails?: string[] }) =>
+    candidate.emails?.some(
+      (email) => email.toLowerCase() === userEmail.toLowerCase(),
+    ),
+  )
+  return user?.id
+    ? { id: Number(user.id) }
+    : {
+        error: NextResponse.json(
+          { error: `No Nutshell user found for email: ${userEmail}` },
+          { status: 400 },
+        ),
+      }
+}
+
+async function findOrCreateAccount(
+  data: NutshellLeadRequest,
+  credentials: string,
+) {
+  if (!data.entityName?.trim()) return null
+  const name = data.entityName.trim()
+  const search = await nutshellRequest(
+    'searchUniversal',
+    { string: name },
+    credentials,
+  )
+  const found = search.result?.accounts?.find(
+    (account: { name?: string }) =>
+      account.name?.toLowerCase() === name.toLowerCase(),
+  )
+  if (found?.id) return Number(found.id)
+  const account: Record<string, unknown> = { name }
+  if (data.website?.trim() && isValidUrl(data.website.trim())) {
+    const url = data.website.trim()
+    account.url = [url.startsWith('http') ? url : `https://${url}`]
+  }
+  const result = await nutshellRequest('newAccount', { account }, credentials)
+  if (result.result?.id) return Number(result.result.id)
+  if (result.error) console.error('Failed to create account:', result.error)
+  return null
+}
+
+function contactPayload(contact: ContactInfo, validEmail: string | null) {
+  const payload: Record<string, unknown> = {}
+  if (contact.name?.trim()) payload.name = contact.name.trim()
+  if (contact.position?.trim()) payload.description = contact.position.trim()
+  if (contact.phone?.trim()) payload.phone = [contact.phone.trim()]
+  if (validEmail) payload.email = [validEmail]
+  return payload
+}
+
+async function updateContact(
+  contactId: number,
+  contact: ContactInfo,
+  validEmail: string | null,
+  accountId: number | null,
+  credentials: string,
+) {
+  const result = await nutshellRequest('getContact', { contactId }, credentials)
+  if (!result.result) return
+  const currentAccounts = result.result.accounts || []
+  const accounts = currentAccounts.map((account: { id?: number }) => ({
+    id: account.id,
+  }))
+  if (
+    !currentAccounts.some(
+      (account: { id?: number }) => Number(account.id) === accountId,
+    ) &&
+    accountId &&
+    accountId > 0
+  ) {
+    accounts.push({ id: accountId })
+  }
+  await nutshellRequest(
+    'editContact',
+    {
+      contactId,
+      rev: result.result.rev,
+      contact: { accounts, ...contactPayload(contact, validEmail) },
+    },
+    credentials,
+  )
+}
+
+async function findOrCreateContact(
+  contact: ContactInfo,
+  accountId: number | null,
+  credentials: string,
+): Promise<number | null> {
+  const email = contact.email?.trim()
+  const validEmail = email && isValidEmail(email) ? email : null
+  if (!(contact.name?.trim() || contact.phone?.trim() || validEmail))
+    return null
+  if (validEmail) {
+    const search = await nutshellRequest(
+      'searchByEmail',
+      { emailAddressString: validEmail },
+      credentials,
+    )
+    const contactId = search.result?.contacts?.[0]?.id
+    if (contactId) {
+      const id = Number(contactId)
+      await updateContact(id, contact, validEmail, accountId, credentials)
+      return id
+    }
+  }
+  const payload = contactPayload(contact, validEmail)
+  if (accountId && accountId > 0) payload.accounts = [{ id: accountId }]
+  const result = await nutshellRequest(
+    'newContact',
+    { contact: payload },
+    credentials,
+  )
+  if (result.result?.id) return Number(result.result.id)
+  if (result.error) console.error('Failed to create contact:', result.error)
+  return null
+}
+
+async function resolveContacts(
+  data: NutshellLeadRequest,
+  accountId: number | null,
+  credentials: string,
+) {
+  const contacts: ContactInfo[] = [
+    {
+      name: data.name,
+      position: data.position,
+      phone: data.phone,
+      email: data.email,
+    },
+    ...(data.additionalContacts || []),
+  ]
+  const ids: number[] = []
+  for (const contact of contacts) {
+    const id = await findOrCreateContact(contact, accountId, credentials)
+    if (id && id > 0) ids.push(id)
+  }
+  return ids
+}
+
+function buildTags(data: NutshellLeadRequest) {
+  const tags: string[] = []
+  const typeRules: [RegExp, string][] = [
+    [/\b(est\.?|established)\s*b2b\b/i, 'Type: Established B2B'],
+    [/\b(est\.?|established)\s*b2c\b/i, 'Type: Established B2C'],
+    [/\bnew\s*b2b\b/i, 'Type: New B2B'],
+    [/\bnew\s*b2c\b/i, 'Type: New B2C'],
+    [/\bpolit/i, 'Type: Political'],
+    [/\b(non-?profit|nonprofit)\b/i, 'Type: Non-Profit'],
+    [/\bpersonal\b/i, 'Type: Personal'],
+  ]
+  if (data.typeName) {
+    const match = typeRules.find(([pattern]) =>
+      pattern.test(data.typeName!.toLowerCase()),
+    )
+    if (match) tags.push(match[1])
+  }
+  const goals: [string, string][] = [
+    ['directional', 'Goal: Directional'],
+    ['enrollment', 'Goal: Enrollment'],
+    ['event', 'Goal: Event'],
+    ['brand awareness', 'Goal: General Brand Awareness'],
+    ['awareness', 'Goal: General Brand Awareness'],
+    ['hiring', 'Goal: Hiring'],
+    ['new location', 'Goal: New Location'],
+    ['location', 'Goal: New Location'],
+    ['new product', 'Goal: New Product/Service'],
+    ['product', 'Goal: New Product/Service'],
+    ['service', 'Goal: New Product/Service'],
+    ['political', 'Goal: Political'],
+    ['calls', 'Goal: Calls'],
+  ]
+  if (data.billboardPurpose) {
+    const match = goals.find(([key]) =>
+      data.billboardPurpose.toLowerCase().includes(key),
+    )
+    if (match) tags.push(match[1])
+  }
+  const request = {
+    Availer: 'Request: Availer',
+    'Panel Requester': 'Request: Panel Requestor',
+    'Tire Kicker': 'Request: Tire-Kicker',
+  }
+  const decision = {
+    alone: 'Decision: Decision Maker',
+    boss: 'Decision: Middle Person',
+    partners: 'Decision: Group (Co-Owners)',
+    committee: 'Decision: Group (Committee or Team)',
+  }
+  if (data.leadType && request[data.leadType]) {
+    tags.push(request[data.leadType])
+  }
+  if (data.decisionMaker && decision[data.decisionMaker]) {
+    tags.push(decision[data.decisionMaker])
+  }
+  return tags
+}
+
+async function resolvePipeline(credentials: string) {
+  const stagesets = await nutshellRequest('findStagesets', {}, credentials)
+  const pipeline = stagesets.result?.find(
+    (item: { name?: string }) => item.name === 'NEW BSI Pipeline',
+  )
+  if (!pipeline?.id) return {}
+  const stagesetId = Number(pipeline.id)
+  const milestones = await nutshellRequest('findMilestones', {}, credentials)
+  const milestone = milestones.result
+    ?.filter((item: { stagesetId?: number }) => item.stagesetId === stagesetId)
+    .find((item: { name?: string }) => item.name === 'Qualify')
+  return {
+    stagesetId,
+    milestoneId: milestone?.id ? Number(milestone.id) : undefined,
+  }
+}
+
+function addMappedCustomFields(
+  fields: Record<string, string>,
+  data: NutshellLeadRequest,
+) {
+  const mappings: [keyof NutshellLeadRequest, string][] = [
+    ['boardType', 'OOH Type of Interest'],
+    ['budget', 'Budget'],
+    ['ballpark', 'Rate Estimate'],
+    ['yearsInBusiness', 'Business Age'],
+    ['targetAudience', 'Consumer Target'],
+    ['notes', 'Notes:'],
+  ]
+  for (const [key, label] of mappings)
+    if (data[key]) fields[label] = String(data[key])
+}
+
+function buildCustomFields(data: NutshellLeadRequest) {
+  const fields: Record<string, string> = {}
+  if (data.billboardsBeforeYN)
+    fields['OOH Experience'] =
+      data.billboardsBeforeYN === 'Y'
+        ? `Yes${data.billboardsBeforeDetails ? ` - ${data.billboardsBeforeDetails}` : ''}`
+        : 'No'
+  const location = [
+    data.targetCity,
+    data.state,
+    data.targetArea ? `- ${data.targetArea}` : '',
+  ].filter(Boolean)
+  if (location.length)
+    fields['Target Market(s) - City/State/Area'] = location.join(', ')
+  if (data.startMonth) fields['Potential Start Date?'] = data.startMonth
+  const length = Array.isArray(data.campaignLength)
+    ? data.campaignLength[0]
+    : data.campaignLength
+  if (length) fields['Contract Length?'] = String(length)
+  addMappedCustomFields(fields, data)
+  if (data.hasMediaExperience !== null && data.hasMediaExperience !== '')
+    fields['Other Ads'] = String(data.hasMediaExperience).trim()
+  if (data.sendOver?.length)
+    fields['Promised Deliverables'] = data.sendOver.join(', ')
+  return fields
+}
+
+function buildNote(data: NutshellLeadRequest) {
+  const parts: string[] = []
+  if (data.accomplishDetails) parts.push(`Goals: ${data.accomplishDetails}`)
+  if (data.targetAudience) parts.push(`Target Audience: ${data.targetAudience}`)
+  if (data.hasMediaExperience !== null && data.hasMediaExperience !== '')
+    parts.push(`Other Advertising: ${String(data.hasMediaExperience).trim()}`)
+  if (data.yearsInBusiness)
+    parts.push(`Years in Business: ${data.yearsInBusiness}`)
+  if (data.website) parts.push('Has Website: Yes')
+  if (data.sendOver?.length) parts.push(`Sending: ${data.sendOver.join(', ')}`)
+  if (data.transcript?.trim())
+    parts.push('', '--- CALL TRANSCRIPT ---', '', data.transcript.trim())
+  return parts
+}
+
+async function resolveSource(credentials: string) {
+  const result = await nutshellRequest(
+    'newSource',
+    { name: 'Call (GPP2)' },
+    credentials,
+  )
+  if (result.result?.id) return Number(result.result.id)
+  if (result.error) console.error('Failed to get/create source:', result.error)
+  return null
+}
+
+function buildLeadPayload(options: {
+  data: NutshellLeadRequest
+  userId: number
+  contactIds: number[]
+  accountId: number | null
+  tags: string[]
+  stagesetId?: number
+  milestoneId?: number
+  sourceId: number | null
+  customFields: Record<string, string>
+}) {
+  const {
+    data,
+    userId,
+    contactIds,
+    accountId,
+    tags,
+    stagesetId,
+    milestoneId,
+    sourceId,
+    customFields,
+  } = options
+  const description =
+    data.entityName?.trim() || data.name?.trim() || 'Billboard Lead'
+  const lead: Record<string, unknown> = {
+    description,
+    assignee: { entityType: 'Users', id: userId },
+  }
+  if (contactIds.length) lead.contacts = contactIds.map((id) => ({ id }))
+  if (accountId && accountId > 0) lead.accounts = [{ id: accountId }]
+  if (tags.length) lead.tags = tags
+  if (stagesetId && stagesetId > 0) lead.stagesetId = stagesetId
+  if (milestoneId && milestoneId > 0) lead.milestoneId = milestoneId
+  if (sourceId && sourceId > 0) lead.sources = [{ id: sourceId }]
+  if (Object.keys(customFields).length) lead.customFields = customFields
+  return { lead, description }
+}
+
+async function createLeadAndPersist(options: {
+  lead: Record<string, unknown>
+  description: string
+  noteParts: string[]
+  credentials: string
+  userEmail: string
+  createdByUserId: string
+  contactIds: number[]
+  accountId: number | null
+}) {
+  const {
+    lead,
+    description,
+    noteParts,
+    credentials,
+    userEmail,
+    createdByUserId,
+    contactIds,
+    accountId,
+  } = options
+  console.log(
+    'Creating Nutshell lead with payload:',
+    JSON.stringify(lead, null, 2),
+  )
+  const result = await nutshellRequestWithRetry(
+    'newLead',
+    { lead },
+    credentials,
+  )
+  if (result?.error) {
+    console.error('Nutshell newLead error:', result.error)
+    return NextResponse.json(
+      { error: result.error.message || 'Failed to create lead in Nutshell' },
+      { status: 400 },
+    )
+  }
+  const leadId = result?.result?.id
+  if (leadId && noteParts.length) {
+    try {
+      await nutshellRequest(
+        'newNote',
+        {
+          entity: { id: leadId, entityType: 'Leads' },
+          note: noteParts.join('\n'),
+        },
+        credentials,
+      )
+    } catch (noteError) {
+      console.error('Failed to post note to Nutshell lead:', noteError)
+    }
+  }
+  if (leadId) {
+    try {
+      await upsertNutshellLead({
+        nutshellLeadId: Number(leadId),
+        description,
+        status: 0,
+        assigneeEmail: userEmail,
+        createdByUserId,
+        nutshellCreatedAt: new Date(),
+      })
+    } catch (dbError) {
+      console.error('Failed to save lead to local DB:', dbError)
+    }
+  }
+  return NextResponse.json({
+    success: true,
+    leadId,
+    contactIds,
+    accountId,
+    message: 'Lead created successfully in Nutshell',
+  })
+}
+
 export async function POST(req: NextRequest) {
   try {
     const session = await getSession()
-    if (!session) {
+    if (!session)
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
     const userEmail = session.email
     const data: NutshellLeadRequest = await req.json()
-
-    // =========================================================================
-    // VALIDATION: Required fields for Nutshell submission
-    // =========================================================================
-    const missingFields: string[] = []
-
-    if (!data.name?.trim()) {
-      missingFields.push('Name')
-    }
-
-    if (!data.entityName?.trim()) {
-      missingFields.push('Company Name')
-    }
-
-    if (!data.phone?.trim()) {
-      missingFields.push('Phone')
-    }
-
-    if (!data.email?.trim()) {
-      missingFields.push('Email')
-    }
-
-    if (missingFields.length > 0) {
-      return NextResponse.json(
-        {
-          error: 'Missing required fields',
-          missingFields,
-        },
-        { status: 400 },
-      )
-    }
-    // =========================================================================
+    const invalid = validationError(data)
+    if (invalid) return invalid
 
     console.log('Nutshell form submitted:', {
       submittedBy: userEmail,
       formData: data,
     })
-
-    const nutshellApiKey = process.env.NUTSHELL_API_KEY
-    if (!nutshellApiKey) {
-      return NextResponse.json(
-        { error: 'Nutshell integration not configured' },
-        { status: 500 },
-      )
+    let apiKey: string
+    try {
+      apiKey = serverConfig.nutshell.requireApiKey()
+    } catch (error) {
+      if (!isMissingConfig(error)) throw error
+      return NextResponse.json(configErrorResponseBody(error), { status: 500 })
     }
-
-    const credentials = Buffer.from(`${userEmail}:${nutshellApiKey}`).toString(
-      'base64',
-    )
-
-    // 1. Find Nutshell user
-    const userResult = await nutshellRequest(
-      'findUsers',
-      {
-        query: { email: userEmail },
-      },
-      credentials,
-    )
-
-    if (userResult.error) {
-      return NextResponse.json(
-        {
-          error: userResult.error.message || 'Failed to find user in Nutshell',
-        },
-        { status: 400 },
-      )
-    }
-
-    const users = userResult.result || []
-    const matchingUser = users.find((user: { emails?: string[] }) =>
-      user.emails?.some(
-        (email: string) => email.toLowerCase() === userEmail.toLowerCase(),
-      ),
-    )
-
-    if (!matchingUser?.id) {
-      return NextResponse.json(
-        { error: `No Nutshell user found for email: ${userEmail}` },
-        { status: 400 },
-      )
-    }
-
-    const nutshellUserId = Number(matchingUser.id)
-
-    // Helper to validate email
-    const isValidEmail = (email: string) => {
-      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
-    }
-
-    // Helper to validate URL
-    const isValidUrl = (url: string) => {
-      const lower = url.toLowerCase()
-      if (
-        lower === 'no' ||
-        lower === 'yes' ||
-        lower === 'n/a' ||
-        lower === 'none'
-      ) {
-        return false
-      }
-      try {
-        const urlToTest = url.startsWith('http') ? url : `https://${url}`
-        new URL(urlToTest)
-        return true
-      } catch {
-        return false
-      }
-    }
-
-    // 2. Find or Create Account (Business) FIRST so we can link contacts to it
-    let accountId: number | null = null
-    if (data.entityName?.trim()) {
-      // First try to find existing account by name
-      const searchResult = await nutshellRequest(
-        'searchUniversal',
-        {
-          string: data.entityName.trim(),
-        },
-        credentials,
-      )
-      const foundAccount = searchResult.result?.accounts?.find(
-        (a: { name?: string }) =>
-          a.name?.toLowerCase() === data.entityName?.trim().toLowerCase(),
-      )
-      if (foundAccount?.id) {
-        accountId = Number(foundAccount.id)
-      }
-
-      // Create new account only if not found
-      if (!accountId) {
-        const accountPayload: Record<string, unknown> = {
-          name: data.entityName.trim(),
-        }
-        if (data.website?.trim() && isValidUrl(data.website.trim())) {
-          const url = data.website.trim()
-          accountPayload.url = [url.startsWith('http') ? url : `https://${url}`]
-        }
-
-        const accountResult = await nutshellRequest(
-          'newAccount',
-          {
-            account: accountPayload,
-          },
-          credentials,
-        )
-
-        if (accountResult.result?.id) {
-          accountId = Number(accountResult.result.id)
-        } else if (accountResult.error) {
-          console.error('Failed to create account:', accountResult.error)
-        }
-      }
-    }
-
-    // 3. Find or Create Contacts and link to Account
-    async function findOrCreateContact(
-      contact: ContactInfo,
-      linkAccountId: number | null,
-    ): Promise<number | null> {
-      const validEmail =
-        contact.email?.trim() && isValidEmail(contact.email.trim())
-          ? contact.email.trim()
-          : null
-      const hasContactInfo =
-        contact.name?.trim() || contact.phone?.trim() || validEmail
-
-      if (!hasContactInfo) return null
-
-      let contactId: number | null = null
-
-      // Match by email ONLY — name is not a unique identifier
-      if (validEmail) {
-        const searchResult = await nutshellRequest(
-          'searchByEmail',
-          { emailAddressString: validEmail },
-          credentials,
-        )
-        if (searchResult.result?.contacts?.[0]?.id) {
-          contactId = Number(searchResult.result.contacts[0].id)
-        }
-      }
-
-      // If found by email, update their info with fresh form data
-      if (contactId) {
-        const getContactResult = await nutshellRequest(
-          'getContact',
-          { contactId },
-          credentials,
-        )
-
-        if (getContactResult.result) {
-          const currentAccounts = getContactResult.result.accounts || []
-          const alreadyLinked = currentAccounts.some(
-            (a: { id?: number }) => Number(a.id) === linkAccountId,
-          )
-
-          const updatedAccounts = alreadyLinked
-            ? currentAccounts.map((a: { id?: number }) => ({ id: a.id }))
-            : [
-                ...currentAccounts.map((a: { id?: number }) => ({ id: a.id })),
-                ...(linkAccountId && linkAccountId > 0
-                  ? [{ id: linkAccountId }]
-                  : []),
-              ]
-
-          // Build update payload with fresh form data
-          const updatePayload: Record<string, unknown> = {
-            accounts: updatedAccounts,
-          }
-          if (contact.name?.trim()) updatePayload.name = contact.name.trim()
-          if (contact.position?.trim())
-            updatePayload.description = contact.position.trim()
-          if (contact.phone?.trim())
-            updatePayload.phone = [contact.phone.trim()]
-          if (validEmail) updatePayload.email = [validEmail]
-
-          await nutshellRequest(
-            'editContact',
-            {
-              contactId,
-              rev: getContactResult.result.rev,
-              contact: updatePayload,
-            },
-            credentials,
-          )
-        }
-
-        return contactId
-      }
-
-      // No email match found — create a new contact (no name fallback)
-      const contactPayload: Record<string, unknown> = {}
-      if (contact.name?.trim()) contactPayload.name = contact.name.trim()
-      if (contact.position?.trim())
-        contactPayload.description = contact.position.trim()
-      if (contact.phone?.trim()) contactPayload.phone = [contact.phone.trim()]
-      if (validEmail) contactPayload.email = [validEmail]
-      if (linkAccountId && linkAccountId > 0) {
-        contactPayload.accounts = [{ id: linkAccountId }]
-      }
-
-      const contactResult = await nutshellRequest(
-        'newContact',
-        { contact: contactPayload },
-        credentials,
-      )
-
-      if (contactResult.result?.id) {
-        return Number(contactResult.result.id)
-      } else if (contactResult.error) {
-        console.error('Failed to create contact:', contactResult.error)
-      }
-
-      return null
-    }
-
-    // Build list of all contacts (primary + additional)
-    const allContacts: ContactInfo[] = [
-      {
-        name: data.name,
-        position: data.position,
-        phone: data.phone,
-        email: data.email,
-      },
-      ...(data.additionalContacts || []),
-    ]
-
-    // Find or create all contacts, linking to account
-    const contactIds: number[] = []
-    for (const contact of allContacts) {
-      const contactId = await findOrCreateContact(contact, accountId)
-      if (contactId && contactId > 0) {
-        contactIds.push(contactId)
-      }
-    }
-
-    // 4. Build tags based on actual Nutshell tags
-    const tags: string[] = []
-
-    // Type tags (What do you want to advertise?) - smart matching from free-form input
-    if (data.typeName) {
-      const typeLower = data.typeName.toLowerCase()
-      let typeTag: string | null = null
-
-      if (/\b(est\.?|established)\s*b2b\b/i.test(typeLower)) {
-        typeTag = 'Type: Established B2B'
-      } else if (/\b(est\.?|established)\s*b2c\b/i.test(typeLower)) {
-        typeTag = 'Type: Established B2C'
-      } else if (/\bnew\s*b2b\b/i.test(typeLower)) {
-        typeTag = 'Type: New B2B'
-      } else if (/\bnew\s*b2c\b/i.test(typeLower)) {
-        typeTag = 'Type: New B2C'
-      } else if (/\bpolit/i.test(typeLower)) {
-        typeTag = 'Type: Political'
-      } else if (/\b(non-?profit|nonprofit)\b/i.test(typeLower)) {
-        typeTag = 'Type: Non-Profit'
-      } else if (/\bpersonal\b/i.test(typeLower)) {
-        typeTag = 'Type: Personal'
-      }
-
-      if (typeTag) {
-        tags.push(typeTag)
-      }
-    }
-
-    // Goal tags (What are you needing to accomplish?)
-    if (data.billboardPurpose) {
-      const goalTagMap: Record<string, string> = {
-        directional: 'Goal: Directional',
-        enrollment: 'Goal: Enrollment',
-        event: 'Goal: Event',
-        'brand awareness': 'Goal: General Brand Awareness',
-        awareness: 'Goal: General Brand Awareness',
-        hiring: 'Goal: Hiring',
-        'new location': 'Goal: New Location',
-        location: 'Goal: New Location',
-        'new product': 'Goal: New Product/Service',
-        product: 'Goal: New Product/Service',
-        service: 'Goal: New Product/Service',
-        political: 'Goal: Political',
-        calls: 'Goal: Calls',
-      }
-      const purposeLower = data.billboardPurpose.toLowerCase()
-      for (const [key, value] of Object.entries(goalTagMap)) {
-        if (purposeLower.includes(key)) {
-          tags.push(value)
-          break
-        }
-      }
-    }
-
-    // Request tag based on lead type
-    if (data.leadType) {
-      const requestTagMap: Record<string, string> = {
-        Availer: 'Request: Availer',
-        'Panel Requester': 'Request: Panel Requestor',
-        'Tire Kicker': 'Request: Tire-Kicker',
-      }
-      if (requestTagMap[data.leadType]) {
-        tags.push(requestTagMap[data.leadType])
-      }
-    }
-
-    // Decision maker tag
-    if (data.decisionMaker) {
-      const decisionTagMap: Record<string, string> = {
-        alone: 'Decision: Decision Maker',
-        boss: 'Decision: Middle Person',
-        partners: 'Decision: Group (Co-Owners)',
-        committee: 'Decision: Group (Committee or Team)',
-      }
-      if (decisionTagMap[data.decisionMaker]) {
-        tags.push(decisionTagMap[data.decisionMaker])
-      }
-    }
-
-    // 5. Find "NEW BSI Pipeline" and set ALL leads to Qualifying stage
-    let stagesetId: number | undefined
-    let milestoneId: number | undefined
-
-    const stagesetsResult = await nutshellRequest(
-      'findStagesets',
-      {},
-      credentials,
-    )
-    if (stagesetsResult.result) {
-      const pipeline = stagesetsResult.result.find(
-        (s: { name?: string }) => s.name === 'NEW BSI Pipeline',
-      )
-      if (pipeline?.id) {
-        stagesetId = Number(pipeline.id)
-
-        const milestonesResult = await nutshellRequest(
-          'findMilestones',
-          {},
-          credentials,
-        )
-        if (milestonesResult.result) {
-          const pipelineMilestones = milestonesResult.result.filter(
-            (m: { stagesetId?: number }) => m.stagesetId === stagesetId,
-          )
-
-          const milestone = pipelineMilestones.find(
-            (m: { name?: string }) => m.name === 'Qualify',
-          )
-          if (milestone?.id) {
-            milestoneId = Number(milestone.id)
-          }
-        }
-      }
-    }
-
-    // 6. Build custom fields with actual Nutshell field names
-    const customFields: Record<string, string> = {}
-
-    if (data.billboardsBeforeYN) {
-      const experience =
-        data.billboardsBeforeYN === 'Y'
-          ? `Yes${data.billboardsBeforeDetails ? ` - ${data.billboardsBeforeDetails}` : ''}`
-          : 'No'
-      customFields['OOH Experience'] = experience
-    }
-
-    const locationParts = [
-      data.targetCity,
-      data.state,
-      data.targetArea ? `- ${data.targetArea}` : '',
-    ].filter(Boolean)
-    if (locationParts.length > 0) {
-      customFields['Target Market(s) - City/State/Area'] =
-        locationParts.join(', ')
-    }
-
-    if (data.startMonth) {
-      customFields['Potential Start Date?'] = data.startMonth
-    }
-
-    if (data.campaignLength) {
-      const length = Array.isArray(data.campaignLength)
-        ? data.campaignLength[0]
-        : data.campaignLength
-      if (length) {
-        customFields['Contract Length?'] = String(length)
-      }
-    }
-
-    if (data.boardType) {
-      customFields['OOH Type of Interest'] = data.boardType
-    }
-
-    if (data.budget) {
-      customFields['Budget'] = data.budget
-    }
-
-    if (data.ballpark) {
-      customFields['Rate Estimate'] = data.ballpark
-    }
-
-    if (data.yearsInBusiness) {
-      customFields['Business Age'] = data.yearsInBusiness
-    }
-
-    if (data.targetAudience) {
-      customFields['Consumer Target'] = data.targetAudience
-    }
-
-    if (data.hasMediaExperience !== null && data.hasMediaExperience !== '') {
-      customFields['Other Ads'] = String(data.hasMediaExperience).trim()
-    }
-
-    if (data.sendOver && data.sendOver.length > 0) {
-      customFields['Promised Deliverables'] = data.sendOver.join(', ')
-    }
-
-    if (data.notes) {
-      customFields['Notes:'] = data.notes
-    }
-
-    // 7. Build note body separately — NOT attached to lead payload
-    const noteParts: string[] = []
-
-    if (data.accomplishDetails) {
-      noteParts.push(`Goals: ${data.accomplishDetails}`)
-    }
-    if (data.targetAudience) {
-      noteParts.push(`Target Audience: ${data.targetAudience}`)
-    }
-    if (data.hasMediaExperience !== null && data.hasMediaExperience !== '') {
-      noteParts.push(
-        `Other Advertising: ${String(data.hasMediaExperience).trim()}`,
-      )
-    }
-    if (data.yearsInBusiness) {
-      noteParts.push(`Years in Business: ${data.yearsInBusiness}`)
-    }
-    if (data.website) {
-      noteParts.push(`Has Website: Yes`)
-    }
-    if (data.sendOver && data.sendOver.length > 0) {
-      noteParts.push(`Sending: ${data.sendOver.join(', ')}`)
-    }
-
-    if (data.transcript?.trim()) {
-      noteParts.push('')
-      noteParts.push('--- CALL TRANSCRIPT ---')
-      noteParts.push('')
-      noteParts.push(data.transcript.trim())
-    }
-
-    // 8. Get or create the source "Call (GPP2)"
-    let sourceId: number | null = null
-    const sourceResult = await nutshellRequest(
-      'newSource',
-      {
-        name: 'Call (GPP2)',
-      },
-      credentials,
-    )
-    if (sourceResult.result?.id) {
-      sourceId = Number(sourceResult.result.id)
-    } else if (sourceResult.error) {
-      console.error('Failed to get/create source:', sourceResult.error)
-    }
-
-    // 9. Create the lead (no note — posted separately below)
-    const leadDescription =
-      data.entityName?.trim() || data.name?.trim() || 'Billboard Lead'
-
-    const leadPayload: Record<string, unknown> = {
-      description: leadDescription,
-      assignee: {
-        entityType: 'Users',
-        id: nutshellUserId,
-      },
-    }
-
-    if (contactIds.length > 0) {
-      leadPayload.contacts = contactIds.map((id) => ({ id }))
-    }
-
-    if (accountId && accountId > 0) {
-      leadPayload.accounts = [{ id: accountId }]
-    }
-
-    if (tags.length > 0) {
-      leadPayload.tags = tags
-    }
-
-    if (stagesetId && stagesetId > 0) {
-      leadPayload.stagesetId = stagesetId
-    }
-    if (milestoneId && milestoneId > 0) {
-      leadPayload.milestoneId = milestoneId
-    }
-
-    if (sourceId && sourceId > 0) {
-      leadPayload.sources = [{ id: sourceId }]
-    }
-
-    if (Object.keys(customFields).length > 0) {
-      leadPayload.customFields = customFields
-    }
-
-    // Note is intentionally excluded here — posted via newNote after lead creation
-
-    console.log(
-      'Creating Nutshell lead with payload:',
-      JSON.stringify(leadPayload, null, 2),
-    )
-
-    // Use retry wrapper for newLead to handle transient Nutshell timeouts
-    const leadResult = await nutshellRequestWithRetry(
-      'newLead',
-      { lead: leadPayload },
-      credentials,
-    )
-
-    if (leadResult?.error) {
-      console.error('Nutshell newLead error:', leadResult.error)
-      return NextResponse.json(
-        {
-          error:
-            leadResult.error.message || 'Failed to create lead in Nutshell',
-        },
-        { status: 400 },
-      )
-    }
-
-    const leadId = leadResult?.result?.id
-
-    // 10. Post note separately after lead is created
-    if (leadId && noteParts.length > 0) {
-      try {
-        await nutshellRequest(
-          'newNote',
-          {
-            entity: { id: leadId, entityType: 'Leads' },
-            note: noteParts.join('\n'),
-          },
-          credentials,
-        )
-      } catch (noteError) {
-        // Don't fail the request if note fails — lead was already created
-        console.error('Failed to post note to Nutshell lead:', noteError)
-      }
-    }
-
-    // Save lead to our DB for tracking
-    if (leadId) {
-      try {
-        await upsertNutshellLead({
-          nutshellLeadId: Number(leadId),
-          description: leadDescription,
-          status: 0, // Open
-          assigneeEmail: userEmail,
-          createdByUserId: session.userId,
-          nutshellCreatedAt: new Date(),
-        })
-      } catch (dbError) {
-        console.error('Failed to save lead to local DB:', dbError)
-        // Don't fail the request - lead was created in Nutshell
-      }
-    }
-
-    return NextResponse.json({
-      success: true,
-      leadId,
+    const credentials = Buffer.from(`${userEmail}:${apiKey}`).toString('base64')
+    const user = await resolveNutshellUser(userEmail, credentials)
+    if (user.error) return user.error
+
+    const accountId = await findOrCreateAccount(data, credentials)
+    const contactIds = await resolveContacts(data, accountId, credentials)
+    const tags = buildTags(data)
+    const pipeline = await resolvePipeline(credentials)
+    const customFields = buildCustomFields(data)
+    const noteParts = buildNote(data)
+    const sourceId = await resolveSource(credentials)
+    const { lead, description } = buildLeadPayload({
+      data,
+      userId: user.id!,
       contactIds,
       accountId,
-      message: 'Lead created successfully in Nutshell',
+      tags,
+      ...pipeline,
+      sourceId,
+      customFields,
+    })
+    return await createLeadAndPersist({
+      lead,
+      description,
+      noteParts,
+      credentials,
+      userEmail,
+      createdByUserId: session.userId,
+      contactIds,
+      accountId,
     })
   } catch (error) {
     console.error('Error creating Nutshell lead:', error)

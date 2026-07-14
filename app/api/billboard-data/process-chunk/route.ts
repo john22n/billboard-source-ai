@@ -9,14 +9,23 @@ import { billboardLocations } from '@/db/schema'
 import { getSession } from '@/lib/auth'
 import { logOpenAIEmbeddingUsage } from '@/lib/dal'
 import { sql } from 'drizzle-orm'
+import {
+  configErrorResponseBody,
+  isMissingConfig,
+  serverConfig,
+} from '@/lib/config'
 
 export const maxDuration = 300
 export const dynamic = 'force-dynamic'
 
-// ⭐ Use OpenAI SDK directly for 512-dimension embeddings
-const openaiClient = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
+let openaiClient: OpenAI | null = null
+
+function getOpenAIClient() {
+  openaiClient ??= new OpenAI({
+    apiKey: serverConfig.openai.requireApiKey(),
+  })
+  return openaiClient
+}
 
 interface CSVRow {
   City: string
@@ -116,7 +125,7 @@ function createEmbeddingText(record: CSVRow): string {
 
 // ⭐ Helper function to generate embeddings in batches using OpenAI SDK
 async function generateEmbeddings(texts: string[]) {
-  const response = await openaiClient.embeddings.create({
+  const response = await getOpenAIClient().embeddings.create({
     model: 'text-embedding-3-small',
     input: texts,
     dimensions: 512,
@@ -280,6 +289,9 @@ export async function POST(req: NextRequest) {
       recordsSkipped: skipped,
     })
   } catch (error) {
+    if (isMissingConfig(error)) {
+      return NextResponse.json(configErrorResponseBody(error), { status: 500 })
+    }
     console.error('Error:', error)
     return NextResponse.json(
       {

@@ -9,40 +9,206 @@
 import twilio from 'twilio'
 import { recordMissedAttempt } from '@/lib/call-attempt-outcomes'
 import { computeMissedAttemptRouting } from '@/lib/taskrouter-retry-routing'
+import { serverConfig } from '@/lib/config'
 
-const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!
-const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!
-const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!
+type TwilioClient = ReturnType<typeof twilio>
 
-const client = twilio(ACCOUNT_SID, AUTH_TOKEN)
+function logConferenceEvent(details: {
+  statusCallbackEvent: string
+  conferenceSid: string
+  callSid: string
+  taskSid: string | null
+  workerSid: string | null
+}) {
+  console.log('═══════════════════════════════════════════')
+  console.log('📞 CONFERENCE STATUS CALLBACK')
+  console.log('═══════════════════════════════════════════')
+  console.log('StatusCallbackEvent:', details.statusCallbackEvent)
+  console.log('ConferenceSid:', details.conferenceSid)
+  console.log('CallSid:', details.callSid)
+  console.log('TaskSid:', details.taskSid)
+  console.log('WorkerSid:', details.workerSid)
+  console.log('═══════════════════════════════════════════')
+}
+
+function isActiveTask(assignmentStatus: string) {
+  return assignmentStatus === 'assigned' || assignmentStatus === 'wrapping'
+}
+
+async function redirectActiveCaller(
+  client: TwilioClient,
+  callerCallSid: string,
+  retryUrl: URL,
+) {
+  try {
+    const callerCall = await client.calls(callerCallSid).fetch()
+    if (callerCall.status !== 'in-progress') {
+      console.log(
+        `ℹ️ Caller already hung up (status: ${callerCall.status}) — skipping redirect`,
+      )
+      return
+    }
+
+    await client.calls(callerCallSid).update({
+      url: retryUrl.toString(),
+      method: 'POST',
+    })
+    console.log(`✅ Caller ${callerCallSid} redirected to retry-or-overflow`)
+  } catch (redirectErr) {
+    console.error(
+      '❌ Failed to redirect caller to retry-or-overflow:',
+      redirectErr,
+    )
+  }
+}
+
+function buildRetryUrl(options: {
+  appUrl: string
+  taskSid: string
+  workspaceSid: string
+  workerSid: string | null
+  callerCallSid: string
+  callerFrom?: string
+}) {
+  const retryUrl = new URL(`${options.appUrl}/api/taskrouter/retry-or-overflow`)
+  retryUrl.searchParams.set('taskSid', options.taskSid)
+  retryUrl.searchParams.set('workspaceSid', options.workspaceSid)
+  if (options.workerSid) {
+    retryUrl.searchParams.set('workerSid', options.workerSid)
+  }
+  retryUrl.searchParams.set('callSid', options.callerCallSid)
+  if (options.callerFrom) {
+    retryUrl.searchParams.set('callerFrom', options.callerFrom)
+  }
+  serverConfig.app.addVercelBypassToken(retryUrl)
+  return retryUrl
+}
+
+async function handleConferenceEnd(options: {
+  client: TwilioClient
+  conferenceSid: string
+  taskSid: string
+  workspaceSid: string
+  workerSid: string | null
+  reservationSid: string
+  appUrl: string
+}) {
+  const {
+    client,
+    conferenceSid,
+    taskSid,
+    workspaceSid,
+    workerSid,
+    reservationSid,
+    appUrl,
+  } = options
+
+  try {
+    const task = await client.taskrouter.v1
+      .workspaces(workspaceSid)
+      .tasks(taskSid)
+      .fetch()
+    const taskAttributes = JSON.parse(task.attributes || '{}')
+    const callerCallSid = taskAttributes.call_sid as string | undefined
+
+    // Twilio can redeliver conference-end. Only the first active delivery may
+    // perform side effects, preventing duplicate redirects and re-enqueues.
+    if (!isActiveTask(task.assignmentStatus)) {
+      console.log(
+        `ℹ️ Task is ${task.assignmentStatus}, skipping conference-end side effects`,
+      )
+      return
+    }
+
+    const participants = await client
+      .conferences(conferenceSid)
+      .participants.list()
+    const wasAnswered = participants.length >= 2
+    console.log(`📊 Participants count: ${participants.length}`)
+    console.log(`📊 wasAnswered: ${wasAnswered}`)
+
+    if (wasAnswered) {
+      await client.taskrouter.v1
+        .workspaces(workspaceSid)
+        .tasks(taskSid)
+        .update({
+          assignmentStatus: 'completed',
+          reason: 'Conference ended',
+        })
+      console.log('✅ Conference was answered — task completed, no retry')
+      return
+    }
+
+    console.log(
+      '📤 Conference ended unanswered — advancing to next Sales Rep or overflow',
+    )
+    if (workerSid) {
+      await recordMissedAttempt({ reservationSid, workerSid })
+    }
+
+    const routing = computeMissedAttemptRouting(taskAttributes, workerSid)
+    await client.taskrouter.v1
+      .workspaces(workspaceSid)
+      .tasks(taskSid)
+      .update({
+        attributes: JSON.stringify(routing.nextTaskAttributes),
+        assignmentStatus: 'completed',
+        reason: routing.shouldOverflow
+          ? 'Conference ended unanswered — overflow'
+          : 'Conference ended unanswered — retrying distinct rep',
+      })
+    console.log(
+      `✅ Task ${taskSid} completed (attempt ${routing.attemptCount}, shouldOverflow=${routing.shouldOverflow})`,
+    )
+
+    if (!callerCallSid) {
+      console.log(
+        '⚠️ Conference ended unanswered but no callerCallSid available',
+      )
+      return
+    }
+
+    const retryUrl = buildRetryUrl({
+      appUrl,
+      taskSid,
+      workspaceSid,
+      workerSid,
+      callerCallSid,
+      callerFrom: taskAttributes.from as string | undefined,
+    })
+    await redirectActiveCaller(client, callerCallSid, retryUrl)
+  } catch (error) {
+    console.error('❌ Failed to handle conference-end:', error)
+  }
+}
 
 export async function POST(req: Request) {
   try {
     const formData = await req.formData()
-
     const statusCallbackEvent = formData.get('StatusCallbackEvent') as string
     const conferenceSid = formData.get('ConferenceSid') as string
     const callSid = formData.get('CallSid') as string
 
     const url = new URL(req.url)
     const taskSid = url.searchParams.get('taskSid')
-    const workspaceSid = url.searchParams.get('workspaceSid') || WORKSPACE_SID
+    const workspaceSid =
+      url.searchParams.get('workspaceSid') ||
+      serverConfig.taskRouter.requireWorkspaceSid()
     const workerSid = url.searchParams.get('workerSid')
     const reservationSid = url.searchParams.get('reservationSid') ?? ''
+    const { accountSid, authToken } =
+      serverConfig.twilio.requireAccountCredentials()
+    const client = twilio(accountSid, authToken)
 
-    const appUrl = (
-      process.env.NEXT_PUBLIC_APP_URL ?? `${url.protocol}//${url.host}`
-    ).replace(/\/$/, '')
+    const appUrl = serverConfig.app.baseUrlFromRequest(req.url)
 
-    console.log('═══════════════════════════════════════════')
-    console.log('📞 CONFERENCE STATUS CALLBACK')
-    console.log('═══════════════════════════════════════════')
-    console.log('StatusCallbackEvent:', statusCallbackEvent)
-    console.log('ConferenceSid:', conferenceSid)
-    console.log('CallSid:', callSid)
-    console.log('TaskSid:', taskSid)
-    console.log('WorkerSid:', workerSid)
-    console.log('═══════════════════════════════════════════')
+    logConferenceEvent({
+      statusCallbackEvent,
+      conferenceSid,
+      callSid,
+      taskSid,
+      workerSid,
+    })
 
     if (!taskSid || !workspaceSid) {
       console.error('❌ Missing taskSid or workspaceSid')
@@ -50,126 +216,15 @@ export async function POST(req: Request) {
     }
 
     if (statusCallbackEvent === 'conference-end') {
-      try {
-        const task = await client.taskrouter.v1
-          .workspaces(workspaceSid)
-          .tasks(taskSid)
-          .fetch()
-        const taskAttributes = JSON.parse(task.attributes || '{}')
-        const callerCallSid = taskAttributes.call_sid as string | undefined
-
-        // Idempotency guard: Twilio can re-deliver conference-end. Only the
-        // first delivery (task still active) performs side effects; later ones
-        // see a completed task and no-op so we never double redirect/re-enqueue.
-        const taskWasActive =
-          task.assignmentStatus === 'assigned' ||
-          task.assignmentStatus === 'wrapping'
-        if (!taskWasActive) {
-          console.log(
-            `ℹ️ Task is ${task.assignmentStatus}, skipping conference-end side effects`,
-          )
-          return new Response('OK', { status: 200 })
-        }
-
-        const participants = await client
-          .conferences(conferenceSid)
-          .participants.list()
-
-        console.log(`📊 Participants count: ${participants.length}`)
-        const wasAnswered = participants.length >= 2
-        console.log(`📊 wasAnswered: ${wasAnswered}`)
-
-        if (wasAnswered) {
-          // Answered → just complete the task; no retry/overflow.
-          await client.taskrouter.v1
-            .workspaces(workspaceSid)
-            .tasks(taskSid)
-            .update({
-              assignmentStatus: 'completed',
-              reason: 'Conference ended',
-            })
-          console.log('✅ Conference was answered — task completed, no retry')
-          return new Response('OK', { status: 200 })
-        }
-
-        console.log(
-          '📤 Conference ended unanswered — advancing to next Sales Rep or overflow',
-        )
-        // Note: worker reset is handled by reservation.canceled in events/route.ts
-
-        // Record this Sales Rep's Call Attempt as Missed (idempotent;
-        // suppressed if the rep just explicitly rejected this attempt).
-        if (workerSid) {
-          await recordMissedAttempt({ reservationSid, workerSid })
-        }
-
-        // The conference instruction ACCEPTED the reservation, so TaskRouter
-        // will not advance to the workflow's next target on its own. Complete
-        // this accepted task (persisting the offered-worker state) and redirect
-        // the caller's live leg to retry-or-overflow, which re-enqueues for a
-        // distinct Sales Rep or hands off to overflow — matching the
-        // simultaneous-ring path's two-attempt-then-overflow behavior.
-        const routing = computeMissedAttemptRouting(taskAttributes, workerSid)
-        await client.taskrouter.v1
-          .workspaces(workspaceSid)
-          .tasks(taskSid)
-          .update({
-            attributes: JSON.stringify(routing.nextTaskAttributes),
-            assignmentStatus: 'completed',
-            reason: routing.shouldOverflow
-              ? 'Conference ended unanswered — overflow'
-              : 'Conference ended unanswered — retrying distinct rep',
-          })
-        console.log(
-          `✅ Task ${taskSid} completed (attempt ${routing.attemptCount}, shouldOverflow=${routing.shouldOverflow})`,
-        )
-
-        if (!callerCallSid) {
-          console.log(
-            '⚠️ Conference ended unanswered but no callerCallSid available',
-          )
-          return new Response('OK', { status: 200 })
-        }
-
-        const retryUrl = new URL(`${appUrl}/api/taskrouter/retry-or-overflow`)
-        retryUrl.searchParams.set('taskSid', taskSid)
-        retryUrl.searchParams.set('workspaceSid', workspaceSid)
-        if (workerSid) retryUrl.searchParams.set('workerSid', workerSid)
-        retryUrl.searchParams.set('callSid', callerCallSid)
-        if (taskAttributes.from) {
-          retryUrl.searchParams.set('callerFrom', taskAttributes.from as string)
-        }
-        if (process.env.VERCEL_BYPASS_TOKEN) {
-          retryUrl.searchParams.set(
-            'x-vercel-protection-bypass',
-            process.env.VERCEL_BYPASS_TOKEN,
-          )
-        }
-
-        try {
-          const callerCall = await client.calls(callerCallSid).fetch()
-          if (callerCall.status === 'in-progress') {
-            await client.calls(callerCallSid).update({
-              url: retryUrl.toString(),
-              method: 'POST',
-            })
-            console.log(
-              `✅ Caller ${callerCallSid} redirected to retry-or-overflow`,
-            )
-          } else {
-            console.log(
-              `ℹ️ Caller already hung up (status: ${callerCall.status}) — skipping redirect`,
-            )
-          }
-        } catch (redirectErr) {
-          console.error(
-            '❌ Failed to redirect caller to retry-or-overflow:',
-            redirectErr,
-          )
-        }
-      } catch (error) {
-        console.error('❌ Failed to handle conference-end:', error)
-      }
+      await handleConferenceEnd({
+        client,
+        conferenceSid,
+        taskSid,
+        workspaceSid,
+        workerSid,
+        reservationSid,
+        appUrl,
+      })
     } else {
       console.log(`ℹ️ Conference event: ${statusCallbackEvent}`)
     }

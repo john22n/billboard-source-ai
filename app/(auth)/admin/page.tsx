@@ -37,6 +37,7 @@ export default async function AdminPage() {
         initialLeadStats={leadStats}
         mainCallsTotal={mainCallsTotal}
         sessionEmail={session.email}
+        sessionIssuedAt={session.issuedAt}
         userCostStartDate={userCostRange.startDate.toISOString().split('T')[0]}
         userCostEndDate={userCostRange.endDate.toISOString().split('T')[0]}
       />
@@ -51,6 +52,7 @@ export default async function AdminPage() {
         initialLeadStats={null}
         mainCallsTotal={0}
         sessionEmail={session.email}
+        sessionIssuedAt={session.issuedAt}
         userCostStartDate={new Date().toISOString().split('T')[0]}
         userCostEndDate={new Date().toISOString().split('T')[0]}
       />

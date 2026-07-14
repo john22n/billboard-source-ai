@@ -40,6 +40,7 @@
 import { db } from '@/db'
 import { user } from '@/db/schema'
 import { and, eq, sql } from 'drizzle-orm'
+import { serverConfig } from '@/lib/config'
 
 // Suppress a Twilio "missed" that arrives shortly after an explicit browser
 // Reject for the same Call Attempt.
@@ -52,7 +53,7 @@ const REJECT_DEBOUNCE_SECONDS = 3
  * Local, preview, staging and simulated traffic must never be recorded.
  */
 export function shouldRecordCallAttempts(): boolean {
-  return process.env.VERCEL_ENV === 'production'
+  return serverConfig.runtime.isProductionDeployment
 }
 
 // Business hours for counting Call Attempt outcomes: 08:00–18:00 Central Time.
@@ -190,7 +191,7 @@ export async function recordOverflowAttempt(input: {
   if (!shouldRecordCallAttempts()) return
   if (!isWithinBusinessHours()) return
 
-  const overflowNumber = process.env.TWILIO_OVERFLOW_NUMBER
+  const overflowNumber = serverConfig.twilio.overflowNumber
   if (!overflowNumber) return
 
   try {

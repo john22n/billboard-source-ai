@@ -5,98 +5,150 @@ import { NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 
 const COST_LOOKBACK_DAYS = 30
+const COSTS_API_URL = 'https://api.openai.com/v1/organization/costs'
 
-export async function GET() {
+interface CostResult {
+  amount?: { value?: number | string }
+}
+
+interface CostBucket {
+  results?: CostResult[]
+}
+
+interface CostsResponse {
+  data?: CostBucket[]
+  has_more?: boolean
+  next_page?: string
+}
+
+class UsageRequestError extends Error {
+  constructor(
+    readonly status: number,
+    readonly publicMessage: string,
+  ) {
+    super(publicMessage)
+  }
+}
+
+async function requireAdmin() {
   const session = await getSession()
-  if (!session?.userId) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-  if (session.role !== 'admin') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
+  if (!session?.userId) throw new UsageRequestError(401, 'Unauthorized')
+  if (session.role !== 'admin') throw new UsageRequestError(403, 'Forbidden')
+}
 
+function requireAdminKey() {
   const adminKey = process.env.OPENAI_ADMIN_KEY
   if (!adminKey) {
-    return NextResponse.json(
-      { error: 'OPENAI_ADMIN_KEY not configured' },
-      { status: 500 },
+    throw new UsageRequestError(500, 'OPENAI_ADMIN_KEY not configured')
+  }
+  return adminKey
+}
+
+function getCostRange() {
+  const endDate = new Date()
+  const startDate = new Date(endDate)
+  startDate.setDate(startDate.getDate() - COST_LOOKBACK_DAYS)
+  return { startDate, endDate }
+}
+
+function buildCostsUrl(startDate: Date, endDate: Date, pageToken?: string) {
+  const url = new URL(COSTS_API_URL)
+  url.searchParams.set(
+    'start_time',
+    `${Math.floor(startDate.getTime() / 1000)}`,
+  )
+  url.searchParams.set('end_time', `${Math.floor(endDate.getTime() / 1000)}`)
+  url.searchParams.set('bucket_width', '1d')
+  url.searchParams.set('limit', `${COST_LOOKBACK_DAYS}`)
+  if (pageToken) url.searchParams.set('page', pageToken)
+  return url
+}
+
+function parseCostValue(value: number | string | undefined) {
+  if (typeof value === 'number') return value
+  const parsed = Number.parseFloat(value ?? '')
+  return Number.isNaN(parsed) ? 0 : parsed
+}
+
+function sumCosts(data: CostsResponse) {
+  return (data.data ?? [])
+    .flatMap((bucket) => bucket.results ?? [])
+    .reduce((total, result) => total + parseCostValue(result.amount?.value), 0)
+}
+
+async function fetchCostsPage(
+  adminKey: string,
+  startDate: Date,
+  endDate: Date,
+  pageToken?: string,
+) {
+  const response = await fetch(buildCostsUrl(startDate, endDate, pageToken), {
+    headers: {
+      Authorization: `Bearer ${adminKey}`,
+      'Content-Type': 'application/json',
+    },
+  })
+
+  if (!response.ok) {
+    console.error('OpenAI Admin API error:', await response.text())
+    throw new UsageRequestError(
+      response.status,
+      'Failed to fetch OpenAI usage data. Ensure OPENAI_ADMIN_KEY has organization.costs.read permission.',
     )
   }
 
+  return (await response.json()) as CostsResponse
+}
+
+function getNextPageToken(data: CostsResponse) {
+  if (!data.has_more) return undefined
+  if (!data.next_page) {
+    throw new Error('OpenAI costs response is missing next_page cursor')
+  }
+  return data.next_page
+}
+
+async function fetchTotalCost(
+  adminKey: string,
+  startDate: Date,
+  endDate: Date,
+) {
+  let totalCost = 0
+  let pageToken: string | undefined
+
+  do {
+    const data = await fetchCostsPage(adminKey, startDate, endDate, pageToken)
+    totalCost += sumCosts(data)
+    pageToken = getNextPageToken(data)
+  } while (pageToken)
+
+  return totalCost
+}
+
+function formatDate(date: Date) {
+  return date.toISOString().split('T')[0]
+}
+
+function usageErrorResponse(error: unknown) {
+  console.error('Error fetching OpenAI usage:', error)
+  if (error instanceof UsageRequestError) {
+    return NextResponse.json(
+      { error: error.publicMessage },
+      { status: error.status },
+    )
+  }
+  return NextResponse.json(
+    { error: 'Failed to fetch usage data' },
+    { status: 500 },
+  )
+}
+
+export async function GET() {
   try {
-    // Calculate date range (last 30 days) as Unix timestamps
-    const endDate = new Date()
-    const startDate = new Date()
-    startDate.setDate(startDate.getDate() - COST_LOOKBACK_DAYS)
-
-    const startTime = Math.floor(startDate.getTime() / 1000)
-    const endTime = Math.floor(endDate.getTime() / 1000)
-
-    const formatDate = (date: Date) => date.toISOString().split('T')[0]
-
-    // Fetch all pages of costs from OpenAI's Admin API
-    let totalCostDollars = 0
-    let hasMore = true
-    let pageToken: string | undefined
-
-    while (hasMore) {
-      const url = new URL('https://api.openai.com/v1/organization/costs')
-      url.searchParams.set('start_time', startTime.toString())
-      url.searchParams.set('end_time', endTime.toString())
-      url.searchParams.set('bucket_width', '1d')
-      url.searchParams.set('limit', COST_LOOKBACK_DAYS.toString())
-      if (pageToken) {
-        url.searchParams.set('page', pageToken)
-      }
-
-      const response = await fetch(url.toString(), {
-        headers: {
-          Authorization: `Bearer ${adminKey}`,
-          'Content-Type': 'application/json',
-        },
-      })
-
-      if (!response.ok) {
-        const error = await response.text()
-        console.error('OpenAI Admin API error:', error)
-        return NextResponse.json(
-          {
-            error:
-              'Failed to fetch OpenAI usage data. Ensure OPENAI_ADMIN_KEY has organization.costs.read permission.',
-          },
-          { status: response.status },
-        )
-      }
-
-      const data = await response.json()
-
-      // Sum up costs from this page
-      if (data.data && Array.isArray(data.data)) {
-        for (const bucket of data.data) {
-          if (bucket.results && Array.isArray(bucket.results)) {
-            for (const result of bucket.results) {
-              // Amount value is in dollars - ensure it's a number
-              const value = result.amount?.value
-              if (typeof value === 'number') {
-                totalCostDollars += value
-              } else if (typeof value === 'string') {
-                const parsed = parseFloat(value)
-                if (!isNaN(parsed)) {
-                  totalCostDollars += parsed
-                }
-              }
-            }
-          }
-        }
-      }
-
-      // Check for more pages
-      hasMore = data.has_more === true
-      pageToken = data.next_page
-      if (hasMore && !pageToken) {
-        throw new Error('OpenAI costs response is missing next_page cursor')
-      }
-    }
+    await requireAdmin()
+    const adminKey = requireAdminKey()
+    const { startDate, endDate } = getCostRange()
+    const totalCostDollars = await fetchTotalCost(adminKey, startDate, endDate)
 
     return NextResponse.json({
       totalCost: totalCostDollars,
@@ -105,10 +157,6 @@ export async function GET() {
       endDate: formatDate(endDate),
     })
   } catch (error) {
-    console.error('Error fetching OpenAI usage:', error)
-    return NextResponse.json(
-      { error: 'Failed to fetch usage data' },
-      { status: 500 },
-    )
+    return usageErrorResponse(error)
   }
 }

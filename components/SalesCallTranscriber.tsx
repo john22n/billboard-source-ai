@@ -1,594 +1,951 @@
-"use client";
+'use client'
 
-import { useRef, useState, useEffect, useMemo, useCallback } from "react";
-import dynamic from "next/dynamic";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useBillboardFormExtraction } from "@/hooks/useBillboardFormExtraction";
-import { useTwilioContext } from "@/components/providers/TwilioProvider";
-import { useOpenAITranscription } from "@/hooks/useOpenAITranscription";
-import { LeadForm, PricingPanel, TranscriptView } from "@/components/sales-call";
-import type { TranscriptItem } from "@/types/sales-call";
-import { showSuccessToast, showErrorToast } from "@/lib/error-handling";
-import { useFormStore } from "@/stores/formStore";
-import { useAutoLogout } from "@/hooks/useAutoLogout"; 
+import { useRef, useState, useEffect, useMemo, useCallback } from 'react'
+import dynamic from 'next/dynamic'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useBillboardFormExtraction } from '@/hooks/useBillboardFormExtraction'
+import { useTwilioContext } from '@/components/providers/TwilioProvider'
+import { useOpenAITranscription } from '@/hooks/useOpenAITranscription'
+import { LeadForm, PricingPanel, TranscriptView } from '@/components/sales-call'
+import type { TranscriptItem } from '@/types/sales-call'
+import { showSuccessToast, showErrorToast } from '@/lib/error-handling'
+import { publicConfig } from '@/lib/public-config'
+import { useFormStore } from '@/stores/formStore'
+import { isAutoLogoutDue, useAutoLogout } from '@/hooks/useAutoLogout'
+
+type NutshellFormData = ReturnType<
+  ReturnType<typeof useFormStore.getState>['getFormData']
+>
+type AdditionalContacts = ReturnType<
+  typeof useFormStore.getState
+>['additionalContacts']
+
+function valueOrEmpty<T>(value: T) {
+  return value || ''
+}
+
+function buildNutshellPayload(
+  formData: NutshellFormData,
+  ballpark: string,
+  transcript: string,
+  additionalContacts: AdditionalContacts,
+) {
+  return {
+    name: valueOrEmpty(formData.name),
+    phone: valueOrEmpty(formData.phone),
+    email: valueOrEmpty(formData.email),
+    position: valueOrEmpty(formData.position),
+    website: valueOrEmpty(formData.website),
+    decisionMaker: valueOrEmpty(formData.decisionMaker),
+    typeName: valueOrEmpty(formData.typeName),
+    businessName: valueOrEmpty(formData.businessName),
+    entityName: valueOrEmpty(formData.entityName),
+    billboardsBeforeYN: valueOrEmpty(formData.billboardsBeforeYN),
+    billboardsBeforeDetails: valueOrEmpty(formData.billboardsBeforeDetails),
+    billboardPurpose: valueOrEmpty(formData.billboardPurpose),
+    accomplishDetails: valueOrEmpty(formData.accomplishDetails),
+    targetAudience: valueOrEmpty(formData.targetAudience),
+    targetCity: valueOrEmpty(formData.targetCity),
+    state: valueOrEmpty(formData.state),
+    targetArea: valueOrEmpty(formData.targetArea),
+    startMonth: valueOrEmpty(formData.startMonth),
+    campaignLength: valueOrEmpty(formData.campaignLength),
+    boardType: valueOrEmpty(formData.boardType),
+    hasMediaExperience: formData.hasMediaExperience,
+    yearsInBusiness: valueOrEmpty(formData.yearsInBusiness),
+    leadType: valueOrEmpty(formData.leadType),
+    notes: valueOrEmpty(formData.notes),
+    sendOver: formData.sendOver || [],
+    ballpark: valueOrEmpty(ballpark),
+    transcript: valueOrEmpty(transcript),
+    additionalContacts: additionalContacts.map((contact) => ({
+      name: contact.name,
+      position: contact.position,
+      phone: contact.phone,
+      email: contact.email,
+    })),
+  }
+}
+
+type NutshellResult = {
+  error?: string
+  missingFields?: unknown
+}
+
+type NutshellResponseActions = {
+  setStatus: (status: 'success' | 'error') => void
+  setMessage: (message: string) => void
+  setValidationErrors: (errors: string[]) => void
+  clearAll: () => void
+}
+
+function handleNutshellResponse(
+  response: Response,
+  result: NutshellResult,
+  actions: NutshellResponseActions,
+) {
+  if (response.ok) {
+    actions.setStatus('success')
+    actions.setMessage('Lead created')
+    showSuccessToast('Lead sent to Nutshell')
+    actions.clearAll()
+    return
+  }
+
+  actions.setStatus('error')
+  actions.setMessage(result.error || 'Failed')
+  if (result.missingFields && Array.isArray(result.missingFields)) {
+    actions.setValidationErrors(result.missingFields)
+  }
+  showErrorToast(result.error || 'Failed to create lead')
+}
+
+type StatusIndicatorsProps = {
+  isExtracting: boolean
+  isLoadingBillboard: boolean
+  billboardContext: string
+  extractionError: string | null | undefined
+  canRetry: boolean
+  overallConfidence: number
+  onRetry: () => void
+  onClearError: () => void
+}
+
+function StatusIndicators({
+  isExtracting,
+  isLoadingBillboard,
+  billboardContext,
+  extractionError,
+  canRetry,
+  overallConfidence,
+  onRetry,
+  onClearError,
+}: StatusIndicatorsProps) {
+  return (
+    <div className="flex flex-wrap gap-1 sm:gap-1.5">
+      {isExtracting && (
+        <div className="px-1.5 sm:px-2 py-0.5 sm:py-1 bg-blue-500/30 backdrop-blur-sm border border-blue-300/30 rounded text-[10px] sm:text-xs">
+          <span className="text-white font-medium">🤖 Extracting...</span>
+        </div>
+      )}
+      {isLoadingBillboard && (
+        <div className="px-1.5 sm:px-2 py-0.5 sm:py-1 bg-purple-500/30 backdrop-blur-sm border border-purple-300/30 rounded text-[10px] sm:text-xs">
+          <span className="text-white font-medium">📊 Loading pricing...</span>
+        </div>
+      )}
+      {billboardContext && !isLoadingBillboard && (
+        <div className="px-1.5 sm:px-2 py-0.5 sm:py-1 bg-green-500/30 backdrop-blur-sm border border-green-300/30 rounded text-[10px] sm:text-xs">
+          <span className="text-white font-medium">✓ Pricing loaded</span>
+        </div>
+      )}
+      {extractionError && (
+        <div className="flex-1 min-w-full px-1.5 sm:px-2 py-1 sm:py-1.5 bg-red-500/30 backdrop-blur-sm border border-red-300/30 rounded">
+          <div className="flex items-center justify-between gap-1.5 sm:gap-2">
+            <p className="text-white text-[10px] sm:text-xs font-medium truncate">
+              {extractionError}
+            </p>
+            <div className="flex gap-1 sm:gap-1.5 flex-shrink-0">
+              {canRetry && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={onRetry}
+                  className="h-5 sm:h-6 text-[10px] sm:text-xs px-1.5 sm:px-2"
+                >
+                  Retry
+                </Button>
+              )}
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={onClearError}
+                className="h-5 sm:h-6 text-[10px] sm:text-xs px-1.5 sm:px-2 text-white hover:bg-white/20"
+              >
+                ✕
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+      {overallConfidence > 0 && !isExtracting && !extractionError && (
+        <div className="px-1.5 sm:px-2 py-0.5 sm:py-1 bg-green-500/30 backdrop-blur-sm border border-green-300/30 rounded text-[10px] sm:text-xs">
+          <span className="text-white font-medium">
+            ✓ Confidence: {overallConfidence}%
+          </span>
+        </div>
+      )}
+    </div>
+  )
+}
 
 // Dynamic imports for heavy map components
 const GoogleMapPanel = dynamic(
-  () => import("@/components/sales-call/GoogleMapPanel").then(mod => mod.GoogleMapPanel),
-  { ssr: false, loading: () => <div className="h-full flex items-center justify-center text-gray-500">Loading Google Maps...</div> }
-);
+  () =>
+    import('@/components/sales-call/GoogleMapPanel').then(
+      (mod) => mod.GoogleMapPanel,
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-full flex items-center justify-center text-gray-500">
+        Loading Google Maps...
+      </div>
+    ),
+  },
+)
 
 const ArcGISMapPanel = dynamic(
-  () => import("@/components/sales-call/ArcGISMapPanel").then(mod => mod.ArcGISMapPanel),
-  { ssr: false, loading: () => <div className="h-full flex items-center justify-center text-gray-500">Loading ArcGIS Map...</div> }
-);
+  () =>
+    import('@/components/sales-call/ArcGISMapPanel').then(
+      (mod) => mod.ArcGISMapPanel,
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-full flex items-center justify-center text-gray-500">
+        Loading ArcGIS Map...
+      </div>
+    ),
+  },
+)
 
-export default function SalesCallTranscriber({ sessionEmail }: { sessionEmail?: string }) {
+type TwilioState = ReturnType<typeof useTwilioContext>
+type TranscriptionState = ReturnType<typeof useOpenAITranscription>
 
-  useAutoLogout(sessionEmail);
+type CallHeaderProps = {
+  userEmail: TwilioState['userEmail']
+  status: TwilioState['status']
+  twilioReady: TwilioState['twilioReady']
+  incomingCall: TwilioState['incomingCall']
+  callActive: TwilioState['callActive']
+  callerPhone: string
+  isProcessing: boolean
+  isUploading: boolean
+  fileInputRef: React.RefObject<HTMLInputElement | null>
+  onFileSelect: (event: React.ChangeEvent<HTMLInputElement>) => void
+  onUploadClick: () => void
+  onClearAll: () => void
+  onHangupCall: TwilioState['hangupCall']
+  onAcceptCall: TwilioState['acceptCall']
+  onRejectCall: TwilioState['rejectCall']
+  isExtracting: boolean
+  isLoadingBillboard: boolean
+  billboardContext: string
+  extractionError: string | null | undefined
+  canRetry: boolean
+  overallConfidence: number
+  onRetryExtraction: () => void
+  onClearError: () => void
+}
 
-  if (process.env.NODE_ENV === 'development') {
-    console.log('🔄 Re-render: SalesCallTranscriber');
-  }
-
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-
-  const [isUploading, setIsUploading] = useState(false);
-  const [billboardContext, setBillboardContext] = useState<string>("");
-  const [isLoadingBillboard, setIsLoadingBillboard] = useState(false);
-  const [isSubmittingNutshell, setIsSubmittingNutshell] = useState(false);
-  const [nutshellStatus, setNutshellStatus] = useState<'idle' | 'success' | 'error'>('idle');
-  const [nutshellMessage, setNutshellMessage] = useState('');
-  const [validationErrors, setValidationErrors] = useState<string[]>([]);
-  const [resetTrigger, setResetTrigger] = useState(0);
-
-  useEffect(() => {
-    if (nutshellStatus !== 'success') return;
-    const timer = setTimeout(() => {
-      setNutshellStatus('idle');
-      setNutshellMessage('');
-    }, 10000);
-    return () => clearTimeout(timer);
-  }, [nutshellStatus]);
-  
-  const [callerPhone, setCallerPhone] = useState<string>("");
-
-  const updateFromAI = useFormStore((s) => s.updateFromAI);
-  const resetForm = useFormStore((s) => s.reset);
-  const getFormData = useFormStore((s) => s.getFormData);
-
-  const activeMarketIndex = useFormStore((s) => s.activeMarketIndex);
-  const additionalMarkets = useFormStore((s) => s.additionalMarkets);
-  const targetCity = useFormStore((s) => s.fields.targetCity);
-  const state = useFormStore((s) => s.fields.state);
-  const targetArea = useFormStore((s) => s.fields.targetArea);
-  const ballpark = useFormStore((s) => s.ballpark);
-  const additionalContacts = useFormStore((s) => s.additionalContacts);
-
+function CallHeader(props: CallHeaderProps) {
   const {
-    transcripts,
-    interimTranscript,
-    interimSpeaker,
-    startTranscription,
-    stopTranscription,
-    clearTranscripts,
-    addTranscript,
-  } = useOpenAITranscription({
-    onStatusChange: (newStatus) => updateStatus(newStatus),
-  });
-
-  const {
+    userEmail,
     status,
     twilioReady,
     incomingCall,
     callActive,
-    userEmail,
-    acceptCall,
-    rejectCall,
-    hangupCall,
-    updateStatus,
-    resetStatus,
-    onCallAccepted,
-    onCallDisconnected,
-  } = useTwilioContext();
+    callerPhone,
+    isProcessing,
+    isUploading,
+    fileInputRef,
+    onFileSelect,
+    onUploadClick,
+    onClearAll,
+    onHangupCall,
+    onAcceptCall,
+    onRejectCall,
+    isExtracting,
+    isLoadingBillboard,
+    billboardContext,
+    extractionError,
+    canRetry,
+    overallConfidence,
+    onRetryExtraction,
+    onClearError,
+  } = props
 
-  // ✅ Capture caller's real phone number from the incoming call.
-  // For simultaneous-ring workers, the real caller number is passed as a
-  // custom parameter "callerFrom" via the <Parameter> tag in the <Client>
-  // TwiML noun. For all other workers it falls back to parameters.From.
-  useEffect(() => {
-    if (incomingCall) {
-      // customParameters is a Map set by <Parameter> tags in the <Client> noun
-      const customFrom = incomingCall.customParameters?.get('callerFrom');
-      const from = customFrom || incomingCall.parameters?.From || '';
-      if (from) {
-        console.log('📞 Captured caller phone:', from, customFrom ? '(custom param)' : '(parameters.From)');
-        setCallerPhone(from);
-      }
-    }
-  }, [incomingCall]);
+  return (
+    <CardHeader className="bg-gradient-to-r from-blue-600 via-indigo-600 to-primary text-white py-2 sm:py-3 px-3 sm:px-4 flex-shrink-0">
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div className="min-w-0">
+            <CardTitle className="text-lg sm:text-xl font-bold tracking-tight truncate">
+              Billboard Lead Form
+              {userEmail && (
+                <span className="text-[10px] sm:text-xs font-normal ml-2 opacity-75 hidden sm:inline">
+                  ({userEmail})
+                </span>
+              )}
+            </CardTitle>
+            <p className="text-blue-100 text-[10px] sm:text-xs mt-0.5 hidden sm:block">
+              Real-time transcription & AI-powered data extraction
+            </p>
+          </div>
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+            <div
+              className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs ${isProcessing ? 'animate-pulse' : ''}`}
+            >
+              {twilioReady && !callActive && (
+                <span
+                  className={`inline-block w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full flex-shrink-0 ${status === 'Ready to receive calls' ? 'bg-green-600 animate-pulse' : 'bg-red-600'}`}
+                ></span>
+              )}
+              {callActive && (
+                <span className="inline-block w-1.5 h-1.5 sm:w-2 sm:h-2 bg-red-400 rounded-full animate-pulse flex-shrink-0"></span>
+              )}
+              <span className="font-medium truncate max-w-[100px] sm:max-w-none">
+                {status}
+              </span>
+            </div>
+            <div className="flex flex-1 sm:flex-initial gap-1 sm:gap-2">
+              {callActive && (
+                <Button
+                  onClick={onHangupCall}
+                  size="sm"
+                  className="flex-1 sm:flex-initial bg-red-500 hover:bg-red-600 text-white font-semibold shadow-lg hover:shadow-xl transition-all duration-200 h-7 sm:h-8 text-[10px] sm:text-xs px-2 sm:px-3"
+                >
+                  Hang Up
+                </Button>
+              )}
+              <Button
+                onClick={onClearAll}
+                size="sm"
+                variant="secondary"
+                className="flex-1 sm:flex-initial bg-white/20 hover:bg-white/30 text-white border border-white/30 font-semibold backdrop-blur-sm h-7 sm:h-8 text-[10px] sm:text-xs px-2 sm:px-3"
+                disabled={callActive}
+              >
+                Clear
+              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="audio/*,.mp3,.wav,.m4a,.ogg"
+                onChange={onFileSelect}
+                disabled={isUploading || callActive}
+                className="hidden"
+              />
+              <Button
+                onClick={onUploadClick}
+                disabled={isUploading || callActive}
+                size="sm"
+                className="flex-1 sm:flex-initial bg-white/20 hover:bg-white/30 text-white border border-white/30 font-semibold backdrop-blur-sm h-7 sm:h-8 text-[10px] sm:text-xs px-2 sm:px-3"
+              >
+                <span className="mr-1 sm:mr-1.5">📁</span>
+                <span className="hidden sm:inline">
+                  {isUploading ? 'Uploading...' : 'Upload'}
+                </span>
+                <span className="sm:hidden">
+                  {isUploading ? '...' : 'File'}
+                </span>
+              </Button>
+            </div>
+          </div>
+        </div>
+        {incomingCall && (
+          <div className="bg-green-500/30 border border-white/30 rounded px-2 sm:px-3 py-1.5 sm:py-2 animate-pulse">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-1.5 sm:gap-2">
+              <p className="text-white text-xs sm:text-sm font-semibold">
+                📞 Incoming:{' '}
+                {incomingCall.customParameters?.get('callerFrom') ||
+                  incomingCall.parameters.From}
+              </p>
+              <div className="flex gap-1.5 sm:gap-2">
+                <Button
+                  onClick={onAcceptCall}
+                  size="sm"
+                  className="bg-green-600 hover:bg-green-700 h-6 sm:h-7 text-xs px-2 sm:px-3"
+                >
+                  Accept
+                </Button>
+                <Button
+                  onClick={onRejectCall}
+                  size="sm"
+                  variant="destructive"
+                  className="h-6 sm:h-7 text-xs px-2 sm:px-3"
+                >
+                  Reject
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+        {callerPhone && !incomingCall && (
+          <div className="px-2 py-1 bg-blue-500/30 backdrop-blur-sm border border-blue-300/30 rounded text-[10px] sm:text-xs w-fit">
+            <span className="text-white font-medium">
+              📱 Caller: {callerPhone}
+            </span>
+          </div>
+        )}
+        <StatusIndicators
+          isExtracting={isExtracting}
+          isLoadingBillboard={isLoadingBillboard}
+          billboardContext={billboardContext}
+          extractionError={extractionError}
+          canRetry={canRetry}
+          overallConfidence={overallConfidence}
+          onRetry={onRetryExtraction}
+          onClearError={onClearError}
+        />
+      </div>
+    </CardHeader>
+  )
+}
+
+type TabbedBodyProps = {
+  resetTrigger: number
+  callerPhone: string
+  validationErrors: string[]
+  isLoadingBillboard: boolean
+  billboardContext: string
+  transcripts: TranscriptionState['transcripts']
+  onNutshellSubmit: () => Promise<void>
+  isSubmittingNutshell: boolean
+  nutshellStatus: 'idle' | 'success' | 'error'
+  nutshellMessage: string
+  fullTranscript: string
+  setIsLoadingBillboard: React.Dispatch<React.SetStateAction<boolean>>
+  setBillboardContext: React.Dispatch<React.SetStateAction<string>>
+  onClearAll: () => void
+  currentMarketLocation: string
+  scrollRef: React.RefObject<HTMLDivElement | null>
+  interimTranscript: TranscriptionState['interimTranscript']
+  interimSpeaker: TranscriptionState['interimSpeaker']
+  twilioReady: boolean
+}
+
+function TabbedBody(props: TabbedBodyProps) {
+  const {
+    resetTrigger,
+    callerPhone,
+    validationErrors,
+    isLoadingBillboard,
+    billboardContext,
+    transcripts,
+    onNutshellSubmit,
+    isSubmittingNutshell,
+    nutshellStatus,
+    nutshellMessage,
+    fullTranscript,
+    setIsLoadingBillboard,
+    setBillboardContext,
+    onClearAll,
+    currentMarketLocation,
+    scrollRef,
+    interimTranscript,
+    interimSpeaker,
+    twilioReady,
+  } = props
+  return (
+    <CardContent className="p-1.5 sm:p-2 flex flex-col flex-1 min-h-0 overflow-hidden">
+      <Tabs
+        defaultValue="form"
+        className="w-full flex-1 flex flex-col min-h-0 overflow-hidden"
+      >
+        <TabsList className="grid w-full grid-cols-4 mb-2 sm:mb-4 bg-slate-100 p-0.5 sm:p-1 rounded-lg h-8 sm:h-9 flex-shrink-0">
+          <TabsTrigger
+            value="form"
+            className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs"
+          >
+            <span className="hidden sm:inline">Lead Form & Pricing</span>
+            <span className="sm:hidden">Form</span>
+          </TabsTrigger>
+          <TabsTrigger
+            value="map"
+            className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs"
+          >
+            <span className="hidden sm:inline">Google Map</span>
+            <span className="sm:hidden">Map</span>
+          </TabsTrigger>
+          <TabsTrigger
+            value="arcgis"
+            className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs"
+          >
+            <span className="hidden sm:inline">BSI Map</span>
+            <span className="sm:hidden">BSI</span>
+          </TabsTrigger>
+          <TabsTrigger
+            value="transcript"
+            className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs"
+          >
+            <span className="hidden sm:inline">Transcript</span>
+            <span className="sm:hidden">Trans</span>
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent
+          value="form"
+          className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col"
+        >
+          <div className="flex flex-col xl:flex-row gap-2 sm:gap-1 h-full min-h-0 overflow-hidden">
+            <LeadForm
+              key={resetTrigger}
+              resetTrigger={resetTrigger}
+              inboundPhone={callerPhone}
+              validationErrors={validationErrors}
+            />
+            <PricingPanel
+              key={`pricing-${resetTrigger}`}
+              isLoading={isLoadingBillboard}
+              billboardContext={billboardContext}
+              hasTranscripts={transcripts.length > 0}
+              onNutshellSubmit={onNutshellSubmit}
+              isSubmittingNutshell={isSubmittingNutshell}
+              nutshellStatus={nutshellStatus}
+              nutshellMessage={nutshellMessage}
+              fullTranscript={fullTranscript}
+              setIsLoadingBillboard={setIsLoadingBillboard}
+              setBillboardContext={setBillboardContext}
+              onClearAll={onClearAll}
+            />
+          </div>
+        </TabsContent>
+        <TabsContent
+          value="map"
+          className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col"
+        >
+          <div className="h-full overflow-hidden">
+            <GoogleMapPanel
+              key={`google-map-${resetTrigger}`}
+              initialLocation={currentMarketLocation}
+            />
+          </div>
+        </TabsContent>
+        <TabsContent
+          value="arcgis"
+          className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col"
+        >
+          <div className="h-full overflow-hidden">
+            <ArcGISMapPanel
+              key={`arcgis-map-${resetTrigger}`}
+              initialLocation={currentMarketLocation}
+            />
+          </div>
+        </TabsContent>
+        <TabsContent
+          value="transcript"
+          className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col"
+        >
+          <div className="h-full overflow-hidden">
+            <TranscriptView
+              key={`transcript-${resetTrigger}`}
+              ref={scrollRef}
+              transcripts={transcripts}
+              interimTranscript={interimTranscript}
+              interimSpeaker={interimSpeaker}
+              twilioReady={twilioReady}
+            />
+          </div>
+        </TabsContent>
+      </Tabs>
+    </CardContent>
+  )
+}
+
+function useCallerPhone(incomingCall: TwilioState['incomingCall']) {
+  const [callerPhone, setCallerPhone] = useState<string>('')
 
   useEffect(() => {
-    onCallAccepted((call) => startTranscription(call));
-    onCallDisconnected(() => {
-      stopTranscription();
-      resetStatus();
-      
+    if (!incomingCall) return
+    const customFrom = incomingCall.customParameters?.get('callerFrom')
+    const from = customFrom || incomingCall.parameters?.From || ''
+    if (!from) return
+    console.log(
+      '📞 Captured caller phone:',
+      from,
+      customFrom ? '(custom param)' : '(parameters.From)',
+    )
+    setCallerPhone(from)
+  }, [incomingCall])
+
+  return { callerPhone, setCallerPhone }
+}
+
+function useCallLifecycle(
+  twilio: TwilioState,
+  transcription: Pick<
+    TranscriptionState,
+    'startTranscription' | 'stopTranscription'
+  >,
+  sessionIssuedAt: number,
+) {
+  useEffect(() => {
+    twilio.onCallAccepted((call) => transcription.startTranscription(call))
+    twilio.onCallDisconnected(() => {
+      transcription.stopTranscription()
+      twilio.resetStatus()
+
+      // The deferred 7 PM logout owns the final offline status update.
+      if (isAutoLogoutDue(sessionIssuedAt)) return
+
       fetch('/api/taskrouter/worker-status', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'available' }),
       })
-        .then(res => res.ok ? console.log('✅ Worker status reset to Available') : console.warn('⚠️ Failed to reset worker status'))
-        .catch(err => console.error('❌ Error resetting worker status:', err));
-    });
-  }, [onCallAccepted, onCallDisconnected, startTranscription, stopTranscription, resetStatus]);
+        .then((res) =>
+          res.ok
+            ? console.log('✅ Worker status reset to Available')
+            : console.warn('⚠️ Failed to reset worker status'),
+        )
+        .catch((err) => console.error('❌ Error resetting worker status:', err))
+    })
+  }, [
+    twilio.onCallAccepted,
+    twilio.onCallDisconnected,
+    transcription.startTranscription,
+    transcription.stopTranscription,
+    twilio.resetStatus,
+    sessionIssuedAt,
+  ])
+}
 
-  const {
-    formData: aiFormData,
-    isExtracting,
-    extractFields,
-    error: extractionError,
-    overallConfidence,
-    clearError,
-    reset: resetExtraction,
-    cleanup,
-    canRetry,
-    extractionCount,
-  } = useBillboardFormExtraction();
+function formatTranscript(transcripts: TranscriptionState['transcripts']) {
+  return transcripts
+    .map((item) => {
+      const speaker = item.speaker === 'agent' ? 'Sales Rep' : 'Caller'
+      return `${speaker}: ${item.text}`
+    })
+    .join('\n')
+}
+
+function useTranscriptExtraction(
+  transcripts: TranscriptionState['transcripts'],
+  interimTranscript: TranscriptionState['interimTranscript'],
+  callActive: boolean,
+  scrollRef: React.RefObject<HTMLDivElement | null>,
+) {
+  const updateFromAI = useFormStore((s) => s.updateFromAI)
+  const extraction = useBillboardFormExtraction()
+  const hasDoneFinalExtractionRef = useRef<boolean>(false)
+  const fullTranscriptRef = useRef<string>('')
+  const fullTranscript = useMemo(
+    () => formatTranscript(transcripts),
+    [transcripts],
+  )
 
   useEffect(() => {
-    if (aiFormData) {
-      console.log("🎯 Applying extracted data to form:", aiFormData);
-      updateFromAI(aiFormData);
+    if (!extraction.formData) return
+    console.log('🎯 Applying extracted data to form:', extraction.formData)
+    updateFromAI(extraction.formData)
+  }, [extraction.formData, extraction.extractionCount, updateFromAI])
+  useEffect(() => {
+    fullTranscriptRef.current = fullTranscript
+  }, [fullTranscript])
+  useEffect(() => {
+    if (callActive) hasDoneFinalExtractionRef.current = false
+  }, [callActive])
+  useEffect(() => {
+    if (callActive || hasDoneFinalExtractionRef.current) return
+    if (fullTranscriptRef.current.length <= 50) return
+    hasDoneFinalExtractionRef.current = true
+    console.log('📞 Call ended - running final extraction')
+    extraction.extractFields(fullTranscriptRef.current)
+  }, [callActive, extraction.extractFields])
+  useEffect(() => () => extraction.cleanup(), [extraction.cleanup])
+  useEffect(() => {
+    if (!scrollRef.current) return
+    scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+  }, [transcripts, interimTranscript, scrollRef])
+  useEffect(() => {
+    if (fullTranscript.length > 50 && !extraction.isExtracting && callActive) {
+      extraction.extractFields(fullTranscript)
     }
-  }, [aiFormData, extractionCount, updateFromAI]);
+  }, [
+    fullTranscript,
+    extraction.extractFields,
+    extraction.isExtracting,
+    callActive,
+  ])
 
-  const hasDoneFinalExtractionRef = useRef<boolean>(false);
-  const fullTranscriptRef = useRef<string>("");
-  
-  const fullTranscript = useMemo(() => {
-    return transcripts.map(t => {
-      const speaker = t.speaker === 'agent' ? 'Sales Rep' : 'Caller';
-      return `${speaker}: ${t.text}`;
-    }).join("\n");
-  }, [transcripts]);
+  const retry = useCallback(() => {
+    extraction.clearError()
+    if (fullTranscript.length > 50) extraction.extractFields(fullTranscript)
+  }, [extraction.clearError, extraction.extractFields, fullTranscript])
+  const resetFinalExtraction = useCallback(() => {
+    hasDoneFinalExtractionRef.current = false
+  }, [])
+  return { ...extraction, fullTranscript, retry, resetFinalExtraction }
+}
 
-  useEffect(() => {
-    fullTranscriptRef.current = fullTranscript;
-  }, [fullTranscript]);
-  
-  useEffect(() => {
-    if (callActive) {
-      hasDoneFinalExtractionRef.current = false;
-    }
-  }, [callActive]);
-  
-  useEffect(() => {
-    if (!callActive && !hasDoneFinalExtractionRef.current && fullTranscriptRef.current.length > 50) {
-      hasDoneFinalExtractionRef.current = true;
-      console.log("📞 Call ended - running final extraction");
-      extractFields(fullTranscriptRef.current);
-    }
-  }, [callActive, extractFields]);
-
-  const clearAll = useCallback(() => {
-    clearTranscripts();
-    setBillboardContext("");
-    resetExtraction();
-    resetForm();
-    setCallerPhone("");
-    setResetTrigger(prev => prev + 1);
-    hasDoneFinalExtractionRef.current = false; 
-  }, [clearTranscripts, resetExtraction, resetForm]);
-
-  useEffect(() => {
-    return () => {
-      cleanup();
-    };
-  }, [cleanup]);
-
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [transcripts, interimTranscript]);
-
-  useEffect(() => {
-    if (fullTranscript.length > 50 && !isExtracting && callActive) {
-      extractFields(fullTranscript);
-    }
-  }, [fullTranscript, extractFields, isExtracting, callActive]);
-
-  const handleFileSelect = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    if (!files || files.length === 0) return;
-
-    const selectedFile = files[0];
-    setIsUploading(true);
-    updateStatus("Uploading and transcribing...");
-
-    const formDataUpload = new FormData();
-    formDataUpload.append("file", selectedFile);
-
-    try {
-      const res = await fetch("/api/transcribe-file", {
-        method: "POST",
-        body: formDataUpload,
-      });
-
-      const result = await res.json();
-
-      if (result.text) {
-        const newTranscript: TranscriptItem = {
-          id: `file-${Date.now()}`,
-          text: result.text,
-          isFinal: true,
-          timestamp: Date.now(),
-        };
-        addTranscript(newTranscript);
-        updateStatus("File transcribed successfully");
-      } else {
-        updateStatus("Transcription failed");
+function useFileUpload(
+  addTranscript: TranscriptionState['addTranscript'],
+  updateStatus: TwilioState['updateStatus'],
+) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
+  const handleFileSelect = useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const files = event.target.files
+      if (!files || files.length === 0) return
+      setIsUploading(true)
+      updateStatus('Uploading and transcribing...')
+      const formDataUpload = new FormData()
+      formDataUpload.append('file', files[0])
+      try {
+        const res = await fetch('/api/transcribe-file', {
+          method: 'POST',
+          body: formDataUpload,
+        })
+        const result = await res.json()
+        if (result.text) {
+          const newTranscript: TranscriptItem = {
+            id: `file-${Date.now()}`,
+            text: result.text,
+            isFinal: true,
+            timestamp: Date.now(),
+          }
+          addTranscript(newTranscript)
+          updateStatus('File transcribed successfully')
+        } else updateStatus('Transcription failed')
+      } catch (error) {
+        console.error('File transcription error:', error)
+        updateStatus('Error transcribing file')
+      } finally {
+        setIsUploading(false)
+        if (event.target) event.target.value = ''
       }
-    } catch (error) {
-      console.error("File transcription error:", error);
-      updateStatus("Error transcribing file");
-    } finally {
-      setIsUploading(false);
-      if (event.target) {
-        event.target.value = '';
-      }
-    }
-  }, [addTranscript, updateStatus]);
+    },
+    [addTranscript, updateStatus],
+  )
+  const handleUploadClick = useCallback(() => fileInputRef.current?.click(), [])
+  return { fileInputRef, isUploading, handleFileSelect, handleUploadClick }
+}
 
-  const handleUploadClick = useCallback(() => {
-    fileInputRef.current?.click();
-  }, []);
-
-  const handleRetryExtraction = useCallback(() => {
-    clearError();
-    if (fullTranscript.length > 50) {
-      extractFields(fullTranscript);
-    }
-  }, [clearError, extractFields, fullTranscript]);
-
-  const handleNutshellSubmit = useCallback(async () => {
-    setIsSubmittingNutshell(true);
-    setNutshellStatus('idle');
-    setNutshellMessage('');
-    setValidationErrors([]);
-
-    const formData = getFormData();
-
+function useNutshellSubmission(fullTranscript: string, clearAll: () => void) {
+  const getFormData = useFormStore((s) => s.getFormData)
+  const ballpark = useFormStore((s) => s.ballpark)
+  const additionalContacts = useFormStore((s) => s.additionalContacts)
+  const [isSubmittingNutshell, setIsSubmittingNutshell] = useState(false)
+  const [nutshellStatus, setNutshellStatus] = useState<
+    'idle' | 'success' | 'error'
+  >('idle')
+  const [nutshellMessage, setNutshellMessage] = useState('')
+  const [validationErrors, setValidationErrors] = useState<string[]>([])
+  useEffect(() => {
+    if (nutshellStatus !== 'success') return
+    const timer = setTimeout(() => {
+      setNutshellStatus('idle')
+      setNutshellMessage('')
+    }, 10000)
+    return () => clearTimeout(timer)
+  }, [nutshellStatus])
+  const submit = useCallback(async () => {
+    setIsSubmittingNutshell(true)
+    setNutshellStatus('idle')
+    setNutshellMessage('')
+    setValidationErrors([])
+    const formData = getFormData()
     try {
       const response = await fetch('/api/nutshell/create-lead', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: formData.name || '',
-          phone: formData.phone || '',
-          email: formData.email || '',
-          position: formData.position || '',
-          website: formData.website || '',
-          decisionMaker: formData.decisionMaker || '',
-          typeName: formData.typeName || '',
-          businessName: formData.businessName || '',
-          entityName: formData.entityName || '',
-          billboardsBeforeYN: formData.billboardsBeforeYN || '',
-          billboardsBeforeDetails: formData.billboardsBeforeDetails || '',
-          billboardPurpose: formData.billboardPurpose || '',
-          accomplishDetails: formData.accomplishDetails || '',
-          targetAudience: formData.targetAudience || '',
-          targetCity: formData.targetCity || '',
-          state: formData.state || '',
-          targetArea: formData.targetArea || '',
-          startMonth: formData.startMonth || '',
-          campaignLength: formData.campaignLength || '',
-          boardType: formData.boardType || '',
-          hasMediaExperience: formData.hasMediaExperience,
-          yearsInBusiness: formData.yearsInBusiness || '',
-          leadType: formData.leadType || '',
-          notes: formData.notes || '',
-          sendOver: formData.sendOver || [],
-          ballpark: ballpark || '',
-          transcript: fullTranscript || '',
-          additionalContacts: additionalContacts.map(c => ({
-            name: c.name,
-            position: c.position,
-            phone: c.phone,
-            email: c.email,
-          })),
-        }),
-      });
-
-      const result = await response.json();
-
-      if (response.ok) {
-        setNutshellStatus('success');
-        setNutshellMessage('Lead created');
-        showSuccessToast('Lead sent to Nutshell');
-        clearAll();
-      } else {
-        setNutshellStatus('error');
-        setNutshellMessage(result.error || 'Failed');
-        if (result.missingFields && Array.isArray(result.missingFields)) {
-          setValidationErrors(result.missingFields);
-        }
-        showErrorToast(result.error || 'Failed to create lead');
-      }
+        body: JSON.stringify(
+          buildNutshellPayload(
+            formData,
+            ballpark,
+            fullTranscript,
+            additionalContacts,
+          ),
+        ),
+      })
+      const result: NutshellResult = await response.json()
+      handleNutshellResponse(response, result, {
+        setStatus: setNutshellStatus,
+        setMessage: setNutshellMessage,
+        setValidationErrors,
+        clearAll,
+      })
     } catch (error) {
-      console.error('Error submitting to Nutshell:', error);
-      setNutshellStatus('error');
-      setNutshellMessage('Connection failed');
-      showErrorToast('Connection to Nutshell failed');
+      console.error('Error submitting to Nutshell:', error)
+      setNutshellStatus('error')
+      setNutshellMessage('Connection failed')
+      showErrorToast('Connection to Nutshell failed')
     } finally {
-      setIsSubmittingNutshell(false);
+      setIsSubmittingNutshell(false)
     }
-  }, [getFormData, ballpark, fullTranscript, additionalContacts, clearAll]);
+  }, [getFormData, ballpark, fullTranscript, additionalContacts, clearAll])
+  return {
+    isSubmittingNutshell,
+    nutshellStatus,
+    nutshellMessage,
+    validationErrors,
+    submit,
+  }
+}
 
-  const isProcessing = isUploading || isExtracting ||
-    status.includes("Fetching") || status.includes("Connecting") ||
-    status.includes("Starting") || status.includes("Uploading") ||
-    status.includes("Initializing");
+function useClearTranscriber(
+  clearTranscripts: TranscriptionState['clearTranscripts'],
+  resetExtraction: () => void,
+  resetFinalExtraction: () => void,
+  setCallerPhone: React.Dispatch<React.SetStateAction<string>>,
+  setBillboardContext: React.Dispatch<React.SetStateAction<string>>,
+  setResetTrigger: React.Dispatch<React.SetStateAction<number>>,
+) {
+  const resetForm = useFormStore((store) => store.reset)
+  return useCallback(() => {
+    clearTranscripts()
+    setBillboardContext('')
+    resetExtraction()
+    resetForm()
+    setCallerPhone('')
+    setResetTrigger((previous) => previous + 1)
+    resetFinalExtraction()
+  }, [
+    clearTranscripts,
+    resetExtraction,
+    resetForm,
+    setCallerPhone,
+    setBillboardContext,
+    setResetTrigger,
+    resetFinalExtraction,
+  ])
+}
 
-  const currentMarketLocation = useMemo(() => {
-    if (activeMarketIndex === 0) {
-      return targetCity && state
-        ? `${targetCity}, ${state}`
-        : targetArea || "";
-    } else {
-      const market = additionalMarkets[activeMarketIndex - 1];
-      if (!market) return "";
-      return market.targetCity && market.state
-        ? `${market.targetCity}, ${market.state}`
-        : market.targetArea || "";
-    }
-  }, [activeMarketIndex, targetCity, state, targetArea, additionalMarkets]);
+type Market = {
+  targetCity?: string | null
+  state?: string | null
+  targetArea?: string | null
+}
+function getMarketLocation(
+  activeMarketIndex: number,
+  primary: Market,
+  additionalMarkets: Market[],
+) {
+  const market =
+    activeMarketIndex === 0 ? primary : additionalMarkets[activeMarketIndex - 1]
+  if (!market) return ''
+  return market.targetCity && market.state
+    ? `${market.targetCity}, ${market.state}`
+    : market.targetArea || ''
+}
+
+function useMarketLocation() {
+  const activeMarketIndex = useFormStore((store) => store.activeMarketIndex)
+  const additionalMarkets = useFormStore((store) => store.additionalMarkets)
+  const targetCity = useFormStore((store) => store.fields.targetCity)
+  const state = useFormStore((store) => store.fields.state)
+  const targetArea = useFormStore((store) => store.fields.targetArea)
+  return useMemo(
+    () =>
+      getMarketLocation(
+        activeMarketIndex,
+        { targetCity, state, targetArea },
+        additionalMarkets,
+      ),
+    [activeMarketIndex, targetCity, state, targetArea, additionalMarkets],
+  )
+}
+
+function isTranscriberProcessing(
+  isUploading: boolean,
+  isExtracting: boolean,
+  status: string,
+) {
+  if (isUploading || isExtracting) return true
+  return [
+    'Fetching',
+    'Connecting',
+    'Starting',
+    'Uploading',
+    'Initializing',
+  ].some((text) => status.includes(text))
+}
+
+export default function SalesCallTranscriber({
+  sessionIssuedAt,
+}: {
+  sessionIssuedAt: number
+}) {
+  if (publicConfig.runtime.isDevelopment)
+    console.log('🔄 Re-render: SalesCallTranscriber')
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const [billboardContext, setBillboardContext] = useState<string>('')
+  const [isLoadingBillboard, setIsLoadingBillboard] = useState(false)
+  const [resetTrigger, setResetTrigger] = useState(0)
+  const twilio = useTwilioContext()
+  useAutoLogout(sessionIssuedAt, twilio.callActive)
+  const transcription = useOpenAITranscription({
+    onStatusChange: twilio.updateStatus,
+  })
+  useCallLifecycle(twilio, transcription, sessionIssuedAt)
+  const { callerPhone, setCallerPhone } = useCallerPhone(twilio.incomingCall)
+  const extraction = useTranscriptExtraction(
+    transcription.transcripts,
+    transcription.interimTranscript,
+    twilio.callActive,
+    scrollRef,
+  )
+  const upload = useFileUpload(transcription.addTranscript, twilio.updateStatus)
+  const clearAll = useClearTranscriber(
+    transcription.clearTranscripts,
+    extraction.reset,
+    extraction.resetFinalExtraction,
+    setCallerPhone,
+    setBillboardContext,
+    setResetTrigger,
+  )
+  const nutshell = useNutshellSubmission(extraction.fullTranscript, clearAll)
+  const isProcessing = isTranscriberProcessing(
+    upload.isUploading,
+    extraction.isExtracting,
+    twilio.status,
+  )
+  const currentMarketLocation = useMarketLocation()
 
   return (
     <div className="h-full overflow-hidden flex items-center justify-center m-0 p-0">
       <div className="max-w-[1800px] xl:max-h-[1250px] w-full h-full flex flex-col px-2 sm:px-0">
         <Card className="shadow-lg border-0 flex flex-col h-full overflow-hidden">
-          {/* Header */}
-          <CardHeader className="bg-gradient-to-r from-blue-600 via-indigo-600 to-primary text-white py-2 sm:py-3 px-3 sm:px-4 flex-shrink-0">
-            <div className="flex flex-col gap-2">
-              {/* Title Row */}
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                <div className="min-w-0">
-                  <CardTitle className="text-lg sm:text-xl font-bold tracking-tight truncate">
-                    Billboard Lead Form
-                    {userEmail && (
-                      <span className="text-[10px] sm:text-xs font-normal ml-2 opacity-75 hidden sm:inline">
-                        ({userEmail})
-                      </span>
-                    )}
-                  </CardTitle>
-                  <p className="text-blue-100 text-[10px] sm:text-xs mt-0.5 hidden sm:block">Real-time transcription & AI-powered data extraction</p>
-                </div>
-                
-                {/* Status and Buttons */}
-                <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                  <div className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs ${isProcessing ? "animate-pulse" : ""}`}>
-                    {twilioReady && !callActive && (
-                      <span className={`inline-block w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full flex-shrink-0 ${
-                          status === 'Ready to receive calls' 
-                            ? 'bg-green-600 animate-pulse' 
-                            : 'bg-red-600'
-                        }`}></span>
-                    )}
-                    {callActive && (
-                      <span className="inline-block w-1.5 h-1.5 sm:w-2 sm:h-2 bg-red-400 rounded-full animate-pulse flex-shrink-0"></span>
-                    )}
-                    <span className="font-medium truncate max-w-[100px] sm:max-w-none">{status}</span>
-                  </div>
-                  
-                  <div className="flex flex-1 sm:flex-initial gap-1 sm:gap-2">
-                    {callActive && (
-                      <Button
-                        onClick={hangupCall}
-                        size="sm"
-                        className="flex-1 sm:flex-initial bg-red-500 hover:bg-red-600 text-white font-semibold shadow-lg hover:shadow-xl transition-all duration-200 h-7 sm:h-8 text-[10px] sm:text-xs px-2 sm:px-3"
-                      >
-                        Hang Up
-                      </Button>
-                    )}
-                    <Button
-                      onClick={clearAll}
-                      size="sm"
-                      variant="secondary"
-                      className="flex-1 sm:flex-initial bg-white/20 hover:bg-white/30 text-white border border-white/30 font-semibold backdrop-blur-sm h-7 sm:h-8 text-[10px] sm:text-xs px-2 sm:px-3"
-                      disabled={callActive}
-                    >
-                      Clear
-                    </Button>
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="audio/*,.mp3,.wav,.m4a,.ogg"
-                      onChange={handleFileSelect}
-                      disabled={isUploading || callActive}
-                      className="hidden"
-                    />
-                    <Button
-                      onClick={handleUploadClick}
-                      disabled={isUploading || callActive}
-                      size="sm"
-                      className="flex-1 sm:flex-initial bg-white/20 hover:bg-white/30 text-white border border-white/30 font-semibold backdrop-blur-sm h-7 sm:h-8 text-[10px] sm:text-xs px-2 sm:px-3"
-                    >
-                      <span className="mr-1 sm:mr-1.5">📁</span> 
-                      <span className="hidden sm:inline">{isUploading ? "Uploading..." : "Upload"}</span>
-                      <span className="sm:hidden">{isUploading ? "..." : "File"}</span>
-                    </Button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Incoming Call Alert */}
-              {incomingCall && (
-                <div className="bg-green-500/30 border border-white/30 rounded px-2 sm:px-3 py-1.5 sm:py-2 animate-pulse">
-                  <div className="flex flex-col sm:flex-row items-center justify-between gap-1.5 sm:gap-2">
-                    <p className="text-white text-xs sm:text-sm font-semibold">
-                      📞 Incoming: {incomingCall.customParameters?.get('callerFrom') || incomingCall.parameters.From}
-                    </p>
-                    <div className="flex gap-1.5 sm:gap-2">
-                      <Button
-                        onClick={acceptCall}
-                        size="sm"
-                        className="bg-green-600 hover:bg-green-700 h-6 sm:h-7 text-xs px-2 sm:px-3"
-                      >
-                        Accept
-                      </Button>
-                      <Button
-                        onClick={rejectCall}
-                        size="sm"
-                        variant="destructive"
-                        className="h-6 sm:h-7 text-xs px-2 sm:px-3"
-                      >
-                        Reject
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Caller Phone Badge */}
-              {callerPhone && !incomingCall && (
-                <div className="px-2 py-1 bg-blue-500/30 backdrop-blur-sm border border-blue-300/30 rounded text-[10px] sm:text-xs w-fit">
-                  <span className="text-white font-medium">📱 Caller: {callerPhone}</span>
-                </div>
-              )}
-
-              {/* Status Indicators */}
-              <div className="flex flex-wrap gap-1 sm:gap-1.5">
-                {isExtracting && (
-                  <div className="px-1.5 sm:px-2 py-0.5 sm:py-1 bg-blue-500/30 backdrop-blur-sm border border-blue-300/30 rounded text-[10px] sm:text-xs">
-                    <span className="text-white font-medium">🤖 Extracting...</span>
-                  </div>
-                )}
-                {isLoadingBillboard && (
-                  <div className="px-1.5 sm:px-2 py-0.5 sm:py-1 bg-purple-500/30 backdrop-blur-sm border border-purple-300/30 rounded text-[10px] sm:text-xs">
-                    <span className="text-white font-medium">📊 Loading pricing...</span>
-                  </div>
-                )}
-                {billboardContext && !isLoadingBillboard && (
-                  <div className="px-1.5 sm:px-2 py-0.5 sm:py-1 bg-green-500/30 backdrop-blur-sm border border-green-300/30 rounded text-[10px] sm:text-xs">
-                    <span className="text-white font-medium">✓ Pricing loaded</span>
-                  </div>
-                )}
-                {extractionError && (
-                  <div className="flex-1 min-w-full px-1.5 sm:px-2 py-1 sm:py-1.5 bg-red-500/30 backdrop-blur-sm border border-red-300/30 rounded">
-                    <div className="flex items-center justify-between gap-1.5 sm:gap-2">
-                      <p className="text-white text-[10px] sm:text-xs font-medium truncate">{extractionError}</p>
-                      <div className="flex gap-1 sm:gap-1.5 flex-shrink-0">
-                        {canRetry && (
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={handleRetryExtraction}
-                            className="h-5 sm:h-6 text-[10px] sm:text-xs px-1.5 sm:px-2"
-                          >
-                            Retry
-                          </Button>
-                        )}
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={clearError}
-                          className="h-5 sm:h-6 text-[10px] sm:text-xs px-1.5 sm:px-2 text-white hover:bg-white/20"
-                        >
-                          ✕
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                {overallConfidence > 0 && !isExtracting && !extractionError && (
-                  <div className="px-1.5 sm:px-2 py-0.5 sm:py-1 bg-green-500/30 backdrop-blur-sm border border-green-300/30 rounded text-[10px] sm:text-xs">
-                    <span className="text-white font-medium">✓ Confidence: {overallConfidence}%</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          </CardHeader>
-
-          <CardContent className="p-1.5 sm:p-2 flex flex-col flex-1 min-h-0 overflow-hidden">
-            <Tabs defaultValue="form" className="w-full flex-1 flex flex-col min-h-0 overflow-hidden">
-              <TabsList className="grid w-full grid-cols-4 mb-2 sm:mb-4 bg-slate-100 p-0.5 sm:p-1 rounded-lg h-8 sm:h-9 flex-shrink-0">
-                <TabsTrigger value="form" className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs">
-                  <span className="hidden sm:inline">Lead Form & Pricing</span>
-                  <span className="sm:hidden">Form</span>
-                </TabsTrigger>
-                <TabsTrigger value="map" className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs">
-                  <span className="hidden sm:inline">Google Map</span>
-                  <span className="sm:hidden">Map</span>
-                </TabsTrigger>
-                <TabsTrigger value="arcgis" className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs">
-                  <span className="hidden sm:inline">BSI Map</span>
-                  <span className="sm:hidden">BSI</span>
-                </TabsTrigger>
-                <TabsTrigger value="transcript" className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs">
-                  <span className="hidden sm:inline">Transcript</span>
-                  <span className="sm:hidden">Trans</span>
-                </TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="form" className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col">
-                <div className="flex flex-col xl:flex-row gap-2 sm:gap-1 h-full min-h-0 overflow-hidden">
-                  <LeadForm
-                    key={resetTrigger}
-                    resetTrigger={resetTrigger}
-                    inboundPhone={callerPhone}
-                    validationErrors={validationErrors}
-                  />
-                  <PricingPanel
-                    key={`pricing-${resetTrigger}`}
-                    isLoading={isLoadingBillboard}
-                    billboardContext={billboardContext}
-                    hasTranscripts={transcripts.length > 0}
-                    onNutshellSubmit={handleNutshellSubmit}
-                    isSubmittingNutshell={isSubmittingNutshell}
-                    nutshellStatus={nutshellStatus}
-                    nutshellMessage={nutshellMessage}
-                    fullTranscript={fullTranscript}
-                    setIsLoadingBillboard={setIsLoadingBillboard}
-                    setBillboardContext={setBillboardContext}
-                    onClearAll={clearAll}
-                  />
-                </div>
-              </TabsContent>
-
-              <TabsContent value="map" className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col">
-                <div className="h-full overflow-hidden">
-                  <GoogleMapPanel key={`google-map-${resetTrigger}`} initialLocation={currentMarketLocation} />
-                </div>
-              </TabsContent>
-
-              <TabsContent value="arcgis" className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col">
-                <div className="h-full overflow-hidden">
-                  <ArcGISMapPanel key={`arcgis-map-${resetTrigger}`} initialLocation={currentMarketLocation} />
-                </div>
-              </TabsContent>
-
-              <TabsContent value="transcript" className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col">
-                <div className="h-full overflow-hidden">
-                  <TranscriptView
-                    key={`transcript-${resetTrigger}`}
-                    ref={scrollRef}
-                    transcripts={transcripts}
-                    interimTranscript={interimTranscript}
-                    interimSpeaker={interimSpeaker}
-                    twilioReady={twilioReady}
-                  />
-                </div>
-              </TabsContent>
-            </Tabs>
-          </CardContent>
+          <CallHeader
+            userEmail={twilio.userEmail}
+            status={twilio.status}
+            twilioReady={twilio.twilioReady}
+            incomingCall={twilio.incomingCall}
+            callActive={twilio.callActive}
+            callerPhone={callerPhone}
+            isProcessing={isProcessing}
+            isUploading={upload.isUploading}
+            fileInputRef={upload.fileInputRef}
+            onFileSelect={upload.handleFileSelect}
+            onUploadClick={upload.handleUploadClick}
+            onClearAll={clearAll}
+            onHangupCall={twilio.hangupCall}
+            onAcceptCall={twilio.acceptCall}
+            onRejectCall={twilio.rejectCall}
+            isExtracting={extraction.isExtracting}
+            isLoadingBillboard={isLoadingBillboard}
+            billboardContext={billboardContext}
+            extractionError={extraction.error}
+            canRetry={extraction.canRetry}
+            overallConfidence={extraction.overallConfidence}
+            onRetryExtraction={extraction.retry}
+            onClearError={extraction.clearError}
+          />
+          <TabbedBody
+            resetTrigger={resetTrigger}
+            callerPhone={callerPhone}
+            validationErrors={nutshell.validationErrors}
+            isLoadingBillboard={isLoadingBillboard}
+            billboardContext={billboardContext}
+            transcripts={transcription.transcripts}
+            onNutshellSubmit={nutshell.submit}
+            isSubmittingNutshell={nutshell.isSubmittingNutshell}
+            nutshellStatus={nutshell.nutshellStatus}
+            nutshellMessage={nutshell.nutshellMessage}
+            fullTranscript={extraction.fullTranscript}
+            setIsLoadingBillboard={setIsLoadingBillboard}
+            setBillboardContext={setBillboardContext}
+            onClearAll={clearAll}
+            currentMarketLocation={currentMarketLocation}
+            scrollRef={scrollRef}
+            interimTranscript={transcription.interimTranscript}
+            interimSpeaker={transcription.interimSpeaker}
+            twilioReady={twilio.twilioReady}
+          />
         </Card>
       </div>
     </div>
-  );
+  )
 }

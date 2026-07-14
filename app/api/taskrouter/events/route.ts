@@ -13,199 +13,221 @@ import {
   recordAcceptedAttempt,
   recordMissedAttempt,
 } from '@/lib/call-attempt-outcomes'
+import { serverConfig } from '@/lib/config'
 
-const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN
-const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!
-const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!
-const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!
-const BUSY_ACTIVITY_SID = process.env.TASKROUTER_ACTIVITY_BUSY_SID!
-const AVAILABLE_ACTIVITY_SID = process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID!
-
-const ACTIVITY_MAP: Record<
+function getActivityMap(): Record<
   string,
   'available' | 'unavailable' | 'offline' | 'busy'
-> = {
-  [process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID || '']: 'available',
-  [process.env.TASKROUTER_ACTIVITY_UNAVAILABLE_SID || '']: 'unavailable',
-  [process.env.TASKROUTER_ACTIVITY_OFFLINE_SID || '']: 'offline',
-  [process.env.TASKROUTER_ACTIVITY_BUSY_SID || '']: 'busy',
+> {
+  const activitySids = serverConfig.taskRouter.activitySids
+  return {
+    [activitySids.available || '']: 'available',
+    [activitySids.unavailable || '']: 'unavailable',
+    [activitySids.offline || '']: 'offline',
+    [activitySids.busy || '']: 'busy',
+  }
 }
 
 async function resetWorkerToBack(workerSid: string, label: string) {
-  if (
-    !workerSid ||
-    !WORKSPACE_SID ||
-    !BUSY_ACTIVITY_SID ||
-    !AVAILABLE_ACTIVITY_SID
-  )
-    return
+  if (!workerSid) return
   try {
-    const client = twilio(ACCOUNT_SID, AUTH_TOKEN)
+    const { accountSid, authToken } =
+      serverConfig.twilio.requireAccountCredentials()
+    const workspaceSid = serverConfig.taskRouter.requireWorkspaceSid()
+    const activitySids = serverConfig.taskRouter.requireActivitySids([
+      'busy',
+      'available',
+    ] as const)
+    const client = twilio(accountSid, authToken)
     await client.taskrouter.v1
-      .workspaces(WORKSPACE_SID)
+      .workspaces(workspaceSid)
       .workers(workerSid)
-      .update({ activitySid: BUSY_ACTIVITY_SID })
+      .update({ activitySid: activitySids.busy })
     await client.taskrouter.v1
-      .workspaces(WORKSPACE_SID)
+      .workspaces(workspaceSid)
       .workers(workerSid)
-      .update({ activitySid: AVAILABLE_ACTIVITY_SID })
+      .update({ activitySid: activitySids.available })
     console.log(`✅ Worker ${workerSid} reset to back of queue after ${label}`)
   } catch (err) {
     console.error(`❌ Failed to reset worker after ${label}:`, err)
   }
 }
 
+function hasValidTwilioSignature(req: Request, bodyText: string) {
+  const twilioAuthToken = serverConfig.twilio.authToken
+  if (!twilioAuthToken || !serverConfig.runtime.isProductionDeployment) {
+    return true
+  }
+
+  const params = Object.fromEntries(new URLSearchParams(bodyText))
+  return twilio.validateRequest(
+    twilioAuthToken,
+    req.headers.get('X-Twilio-Signature') || '',
+    req.url,
+    params,
+  )
+}
+
+async function setWorkerActivity(workerSid: string, activitySid: string) {
+  const { accountSid, authToken } =
+    serverConfig.twilio.requireAccountCredentials()
+  const workspaceSid = serverConfig.taskRouter.requireWorkspaceSid()
+  const client = twilio(accountSid, authToken)
+  await client.taskrouter.v1
+    .workspaces(workspaceSid)
+    .workers(workerSid)
+    .update({ activitySid })
+}
+
+async function handleReservationAccepted(
+  formData: FormData,
+  workerSid: string,
+  reservationSid: string,
+) {
+  console.log(`✅ Reservation accepted by worker: ${workerSid}`)
+  if (!workerSid) return
+
+  // Skip Busy switch for voicemail worker.
+  const workerAttrsRaw = formData.get('WorkerAttributes') as string
+  const workerAttrs = JSON.parse(workerAttrsRaw || '{}')
+  if (workerAttrs.email === 'voicemail@system') {
+    console.log('⏭️ Skipping Busy switch for voicemail worker')
+    return
+  }
+
+  // Simultaneous-ring workers accept the reservation before the rep answers,
+  // so simultaneous-dial-complete records their accepted attempt instead.
+  if (!workerAttrs.simultaneous_ring) {
+    await recordAcceptedAttempt({ reservationSid, workerSid })
+  }
+
+  try {
+    const busyActivitySid = serverConfig.taskRouter.requireActivitySid('busy')
+    await setWorkerActivity(workerSid, busyActivitySid)
+    console.log(`✅ Worker ${workerSid} switched to Busy`)
+  } catch (err) {
+    console.error('❌ Failed to switch worker to Busy:', err)
+  }
+}
+
+async function handleMissedReservation(
+  reservationSid: string,
+  workerSid: string,
+  label: string,
+) {
+  await recordMissedAttempt({ reservationSid, workerSid })
+  await resetWorkerToBack(workerSid, label)
+}
+
+async function handleWorkerActivityUpdate(
+  formData: FormData,
+  workerSid: string,
+) {
+  console.log(`👤 Worker activity updated: ${workerSid}`)
+  const activitySid = formData.get('WorkerActivitySid') as string
+  if (!activitySid || !workerSid) return
+
+  const newStatus = getActivityMap()[activitySid] || 'offline'
+  console.log(`   Status: ${newStatus}`)
+
+  // Busy is transient and set automatically, so it is not persisted.
+  if (newStatus === 'busy') {
+    console.log('   ⏭️ Skipping DB update for Busy activity')
+    return
+  }
+
+  const currentUser = await db
+    .select({ id: user.id, email: user.email })
+    .from(user)
+    .where(eq(user.taskRouterWorkerSid, workerSid))
+    .limit(1)
+    .then((rows) => rows[0])
+
+  if (!currentUser) return
+
+  await db
+    .update(user)
+    .set({ workerActivity: newStatus })
+    .where(eq(user.id, currentUser.id))
+  console.log(`   ✅ Updated ${currentUser.email} to ${newStatus}`)
+}
+
+async function handleTaskRouterEvent(formData: FormData) {
+  const eventType = formData.get('EventType') as string
+  const taskQueueName = formData.get('TaskQueueName') as string
+  const workerSid = formData.get('WorkerSid') as string
+  const reservationSid = formData.get('ReservationSid') as string
+
+  switch (eventType) {
+    case 'task.created':
+      console.log('📋 Task created')
+      break
+
+    case 'task-queue.entered':
+      console.log(`📥 Task entered queue: ${taskQueueName}`)
+      if (taskQueueName === 'Voicemail') {
+        console.log(
+          '📼 Task entered Voicemail queue - assignment callback will handle redirect',
+        )
+      }
+      break
+
+    case 'reservation.created':
+      console.log(`🔔 Reservation created for worker: ${workerSid}`)
+      break
+
+    case 'reservation.accepted':
+      await handleReservationAccepted(formData, workerSid, reservationSid)
+      break
+
+    case 'reservation.canceled':
+      console.log(`❌ Reservation canceled for worker: ${workerSid}`)
+      // Missed (suppressed if the rep just explicitly rejected this attempt).
+      await handleMissedReservation(reservationSid, workerSid, 'cancellation')
+      break
+
+    case 'reservation.rejected':
+      console.log(`🚫 Reservation rejected by worker: ${workerSid}`)
+      // The explicit browser Reject is recorded by the browser endpoint and
+      // stamps last_reject_at, so recordMissedAttempt is suppressed within the
+      // window and the attempt is not double-counted.
+      await handleMissedReservation(reservationSid, workerSid, 'rejection')
+      break
+
+    case 'reservation.timeout':
+      console.log(`⏰ Reservation timeout for worker: ${workerSid}`)
+      await handleMissedReservation(reservationSid, workerSid, 'timeout')
+      break
+
+    case 'task.canceled':
+      console.log('🗑️ Task canceled')
+      console.log('Reason:', formData.get('TaskCanceledReason') || 'unknown')
+      break
+
+    case 'task.completed':
+      console.log(`📞 Task completed for worker: ${workerSid}`)
+      break
+
+    case 'worker.activity.update':
+      await handleWorkerActivityUpdate(formData, workerSid)
+      break
+
+    default:
+      console.log(`ℹ️ Unhandled event type: ${eventType}`)
+  }
+}
+
 export async function POST(req: Request) {
   try {
-    const clonedReq = req.clone()
-    const bodyText = await clonedReq.text()
+    const bodyTextPromise = req.clone().text()
     const formData = await req.formData()
 
-    // Validate Twilio signature — skip on preview deployments
-    const isProduction = process.env.VERCEL_ENV === 'production'
-
-    if (TWILIO_AUTH_TOKEN && isProduction) {
-      const twilioSignature = req.headers.get('X-Twilio-Signature') || ''
-      const url = new URL(req.url)
-
-      const params: Record<string, string> = {}
-      new URLSearchParams(bodyText).forEach((value, key) => {
-        params[key] = value
-      })
-
-      const isValid = twilio.validateRequest(
-        TWILIO_AUTH_TOKEN,
-        twilioSignature,
-        url.toString(),
-        params,
-      )
-
-      if (!isValid) {
-        console.error('❌ Invalid Twilio signature on events callback')
-        return new Response('Forbidden', { status: 403 })
-      }
+    if (!hasValidTwilioSignature(req, await bodyTextPromise)) {
+      console.error('❌ Invalid Twilio signature on events callback')
+      return new Response('Forbidden', { status: 403 })
     }
 
-    const eventType = formData.get('EventType') as string
-    const taskQueueName = formData.get('TaskQueueName') as string
-    const workerSid = formData.get('WorkerSid') as string
-    const reservationSid = formData.get('ReservationSid') as string
-
-    switch (eventType) {
-      case 'task.created':
-        console.log('📋 Task created')
-        break
-
-      case 'task-queue.entered':
-        console.log(`📥 Task entered queue: ${taskQueueName}`)
-        if (taskQueueName === 'Voicemail') {
-          console.log(
-            '📼 Task entered Voicemail queue - assignment callback will handle redirect',
-          )
-        }
-        break
-
-      case 'reservation.created':
-        console.log(`🔔 Reservation created for worker: ${workerSid}`)
-        break
-
-      case 'reservation.accepted': {
-        console.log(`✅ Reservation accepted by worker: ${workerSid}`)
-        if (workerSid && WORKSPACE_SID && BUSY_ACTIVITY_SID) {
-          // Skip Busy switch for voicemail worker
-          const workerAttrsRaw = formData.get('WorkerAttributes') as string
-          const workerAttrs = JSON.parse(workerAttrsRaw || '{}')
-          if (workerAttrs.email === 'voicemail@system') {
-            console.log('⏭️ Skipping Busy switch for voicemail worker')
-            break
-          }
-          // Accepted for the normal conference path. Simultaneous-ring workers
-          // accept the reservation early (accept:true on redirect) before the
-          // rep actually answers, so their Accepted is recorded authoritatively
-          // in simultaneous-dial-complete instead.
-          if (!workerAttrs.simultaneous_ring) {
-            await recordAcceptedAttempt({ reservationSid, workerSid })
-          }
-          try {
-            const client = twilio(ACCOUNT_SID, AUTH_TOKEN)
-            await client.taskrouter.v1
-              .workspaces(WORKSPACE_SID)
-              .workers(workerSid)
-              .update({ activitySid: BUSY_ACTIVITY_SID })
-            console.log(`✅ Worker ${workerSid} switched to Busy`)
-          } catch (err) {
-            console.error('❌ Failed to switch worker to Busy:', err)
-          }
-        }
-        break
-      }
-
-      case 'reservation.canceled':
-        console.log(`❌ Reservation canceled for worker: ${workerSid}`)
-        // Missed (suppressed if the rep just explicitly rejected this attempt).
-        await recordMissedAttempt({ reservationSid, workerSid })
-        await resetWorkerToBack(workerSid, 'cancellation')
-        break
-
-      case 'reservation.rejected':
-        console.log(`🚫 Reservation rejected by worker: ${workerSid}`)
-        // The explicit browser Reject is recorded by the browser endpoint and
-        // stamps last_reject_at, so recordMissedAttempt is suppressed within the
-        // window and the attempt is not double-counted.
-        await recordMissedAttempt({ reservationSid, workerSid })
-        await resetWorkerToBack(workerSid, 'rejection')
-        break
-
-      case 'reservation.timeout':
-        console.log(`⏰ Reservation timeout for worker: ${workerSid}`)
-        await recordMissedAttempt({ reservationSid, workerSid })
-        await resetWorkerToBack(workerSid, 'timeout')
-        break
-
-      case 'task.canceled':
-        console.log('🗑️ Task canceled')
-        console.log('Reason:', formData.get('TaskCanceledReason') || 'unknown')
-        break
-
-      case 'task.completed':
-        console.log(`📞 Task completed for worker: ${workerSid}`)
-        break
-
-      case 'worker.activity.update':
-        console.log(`👤 Worker activity updated: ${workerSid}`)
-        const activitySid = formData.get('WorkerActivitySid') as string
-
-        if (activitySid && workerSid) {
-          const newStatus = ACTIVITY_MAP[activitySid] || 'offline'
-          console.log(`   Status: ${newStatus}`)
-
-          // Skip DB update for Busy — it's transient and set automatically
-          if (newStatus === 'busy') {
-            console.log(`   ⏭️ Skipping DB update for Busy activity`)
-            break
-          }
-
-          const currentUser = await db
-            .select({ id: user.id, email: user.email })
-            .from(user)
-            .where(eq(user.taskRouterWorkerSid, workerSid))
-            .limit(1)
-            .then((rows) => rows[0])
-
-          if (currentUser) {
-            await db
-              .update(user)
-              .set({ workerActivity: newStatus })
-              .where(eq(user.id, currentUser.id))
-
-            console.log(`   ✅ Updated ${currentUser.email} to ${newStatus}`)
-          }
-        }
-        break
-
-      default:
-        console.log(`ℹ️ Unhandled event type: ${eventType}`)
-    }
+    await handleTaskRouterEvent(formData)
 
     return new Response(null, { status: 204 })
   } catch (error) {

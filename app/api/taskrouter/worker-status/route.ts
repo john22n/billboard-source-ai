@@ -10,18 +10,11 @@ import { db } from '@/db'
 import { user } from '@/db/schema'
 import { eq } from 'drizzle-orm'
 import { getSession } from '@/lib/auth'
-
-const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!
-const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!
-const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!
-
-const ACTIVITY_SIDS = {
-  available: process.env.TASKROUTER_ACTIVITY_AVAILABLE_SID!,
-  unavailable: process.env.TASKROUTER_ACTIVITY_UNAVAILABLE_SID!,
-  offline: process.env.TASKROUTER_ACTIVITY_OFFLINE_SID!,
-}
-
-const client = twilio(ACCOUNT_SID, AUTH_TOKEN)
+import {
+  configErrorResponseBody,
+  isMissingConfig,
+  serverConfig,
+} from '@/lib/config'
 
 export async function GET() {
   try {
@@ -75,6 +68,16 @@ export async function POST(req: Request) {
       return Response.json({ error: 'Invalid status' }, { status: 400 })
     }
 
+    const { accountSid, authToken } =
+      serverConfig.twilio.requireAccountCredentials()
+    const workspaceSid = serverConfig.taskRouter.requireWorkspaceSid()
+    const activitySids = serverConfig.taskRouter.requireActivitySids([
+      'available',
+      'unavailable',
+      'offline',
+    ] as const)
+    const client = twilio(accountSid, authToken)
+
     const currentUser = await db
       .select({
         id: user.id,
@@ -95,15 +98,23 @@ export async function POST(req: Request) {
 
     let workerSid = currentUser.taskRouterWorkerSid
 
-    // Create worker if doesn't exist
-    if (!workerSid && WORKSPACE_SID) {
+    // Recover an existing email-linked worker if the database SID is missing.
+    if (!workerSid) {
+      const [existingWorker] = await client.taskrouter.v1
+        .workspaces(workspaceSid)
+        .workers.list({ friendlyName: currentUser.email, limit: 1 })
+      workerSid = existingWorker?.sid
+    }
+
+    // Create the email-linked worker only when neither source has one.
+    if (!workerSid) {
       console.log('📋 Creating new TaskRouter worker for:', currentUser.email)
 
       const worker = await client.taskrouter.v1
-        .workspaces(WORKSPACE_SID)
+        .workspaces(workspaceSid)
         .workers.create({
           friendlyName: currentUser.email,
-          activitySid: ACTIVITY_SIDS[effectiveStatus],
+          activitySid: activitySids[effectiveStatus],
           attributes: JSON.stringify({
             email: currentUser.email,
             contact_uri: `client:${currentUser.email}`,
@@ -117,7 +128,7 @@ export async function POST(req: Request) {
     }
 
     // Update worker activity in TaskRouter with retry for conflicts
-    if (workerSid && WORKSPACE_SID) {
+    if (workerSid) {
       const maxRetries = 3
       let lastError: Error | null = null
 
@@ -132,7 +143,7 @@ export async function POST(req: Request) {
       let existingAttrs: Record<string, unknown> = {}
       try {
         const existingWorker = await client.taskrouter.v1
-          .workspaces(WORKSPACE_SID)
+          .workspaces(workspaceSid)
           .workers(workerSid)
           .fetch()
         existingAttrs = JSON.parse(existingWorker.attributes ?? '{}')
@@ -166,10 +177,10 @@ export async function POST(req: Request) {
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
           await client.taskrouter.v1
-            .workspaces(WORKSPACE_SID)
+            .workspaces(workspaceSid)
             .workers(workerSid)
             .update({
-              activitySid: ACTIVITY_SIDS[effectiveStatus],
+              activitySid: activitySids[effectiveStatus],
               attributes: JSON.stringify(mergedAttributes),
             })
 
@@ -218,6 +229,9 @@ export async function POST(req: Request) {
       workerSid,
     })
   } catch (error) {
+    if (isMissingConfig(error)) {
+      return Response.json(configErrorResponseBody(error), { status: 500 })
+    }
     console.error('❌ Worker status POST error:', error)
     return Response.json({ error: 'Internal error' }, { status: 500 })
   }

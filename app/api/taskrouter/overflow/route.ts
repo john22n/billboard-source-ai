@@ -14,9 +14,7 @@
 
 import twilio from 'twilio'
 import { recordOverflowAttempt } from '@/lib/call-attempt-outcomes'
-
-const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!
-const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!
+import { serverConfig } from '@/lib/config'
 
 const escapeXml = (s: string): string =>
   s
@@ -32,10 +30,10 @@ export async function POST(req: Request) {
     const workspaceSid = url.searchParams.get('workspaceSid')
     let callSid = url.searchParams.get('callSid')
 
-    const overflowNumber = process.env.TWILIO_OVERFLOW_NUMBER
+    const overflowNumber = serverConfig.twilio.overflowNumber
     const callerId =
       url.searchParams.get('callerFrom') ||
-      process.env.TWILIO_MAIN_NUMBER ||
+      serverConfig.twilio.mainNumber ||
       '+18338547126'
 
     console.log('═══════════════════════════════════════════')
@@ -48,7 +46,9 @@ export async function POST(req: Request) {
     // for attribution if it wasn't passed in.
     if (taskSid && workspaceSid) {
       try {
-        const client = twilio(ACCOUNT_SID, AUTH_TOKEN)
+        const { accountSid, authToken } =
+          serverConfig.twilio.requireAccountCredentials()
+        const client = twilio(accountSid, authToken)
         const task = await client.taskrouter.v1
           .workspaces(workspaceSid)
           .tasks(taskSid)

@@ -1,5 +1,10 @@
 import { getSession } from '@/lib/auth'
 import { upsertNutshellLead } from '@/lib/dal'
+import {
+  configErrorResponseBody,
+  isMissingConfig,
+  serverConfig,
+} from '@/lib/config'
 
 interface NutshellLead {
   id: number
@@ -59,12 +64,15 @@ export async function POST() {
       })
     }
 
-    const nutshellApiKey = process.env.NUTSHELL_API_KEY
-    if (!nutshellApiKey) {
-      return new Response(
-        JSON.stringify({ error: 'Nutshell integration not configured' }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } },
-      )
+    let nutshellApiKey: string
+    try {
+      nutshellApiKey = serverConfig.nutshell.requireApiKey()
+    } catch (error) {
+      if (!isMissingConfig(error)) throw error
+      return new Response(JSON.stringify(configErrorResponseBody(error)), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      })
     }
 
     const credentials = Buffer.from(

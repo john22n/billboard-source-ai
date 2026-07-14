@@ -107,7 +107,8 @@ Protected admin area for managing the application:
 
 Dual authentication supporting both password-based login and passwordless WebAuthn passkeys.
 
-- **Password auth:** JWT in HTTP-only session cookie; 4-hour expiry with auto-refresh; clears on browser close
+- **Password auth:** JWT in HTTP-only session cookie; fixed 8-hour expiry with no refresh; clears on browser close
+- **Daily cutoff:** Sessions started before 7 PM are logged out at 7 PM in the browser's local timezone, or immediately after an active call ends; sessions started at or after 7 PM have no nightly cutoff
 - **Passkeys:** Full WebAuthn/FIDO2 via `@simplewebauthn/server`; platform and cross-platform authenticators supported
 - **Domain restriction:** Only `@billboardsource.com` email addresses may register or log in
 - **RBAC:** `user` (default) and `admin` roles

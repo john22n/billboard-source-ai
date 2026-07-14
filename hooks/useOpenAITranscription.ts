@@ -21,6 +21,59 @@ interface CostLog {
   startedAt: number
 }
 
+interface TranscriptionToken {
+  value: string
+  logId?: number
+  model?: string
+}
+
+interface AudioSource {
+  stream: MediaStream | null | undefined
+  speaker: 'agent' | 'caller'
+}
+
+async function fetchTranscriptionToken(
+  speaker: 'agent' | 'caller',
+): Promise<TranscriptionToken | null> {
+  const response = await fetch('/api/token')
+  const data = (await response.json()) as Partial<TranscriptionToken>
+  if (!response.ok || !data.value) {
+    console.error(`${speaker} token fetch failed:`, data)
+    return null
+  }
+  return data as TranscriptionToken
+}
+
+function getTokenModel(model: unknown) {
+  return typeof model === 'string' ? model : REALTIME_TRANSCRIPTION_MODEL
+}
+
+function describeStream(stream: MediaStream | null | undefined) {
+  return stream ? 'available' : 'not available'
+}
+
+function getTranscriptionStatus(sessionCount: number) {
+  return sessionCount > 0
+    ? 'Transcribing call...'
+    : 'Could not start transcription'
+}
+
+async function createAvailableSessions(
+  sources: AudioSource[],
+  createSession: (
+    stream: MediaStream,
+    speaker: 'agent' | 'caller',
+  ) => Promise<TranscriptionSession | null>,
+) {
+  const newSessions: TranscriptionSession[] = []
+  for (const { stream, speaker } of sources) {
+    if (!stream) continue
+    const session = await createSession(stream, speaker)
+    if (session) newSessions.push(session)
+  }
+  return newSessions
+}
+
 export function useOpenAITranscription(
   options: UseOpenAITranscriptionOptions = {},
 ) {
@@ -169,27 +222,19 @@ export function useOpenAITranscription(
       speaker: 'agent' | 'caller',
     ): Promise<TranscriptionSession | null> => {
       setStatus(`Fetching OpenAI token for ${speaker}...`)
-      const tokenResponse = await fetch('/api/token')
-      const data = await tokenResponse.json()
-
-      if (!tokenResponse.ok || !data?.value) {
-        console.error(`${speaker} token fetch failed:`, data)
-        return null
-      }
+      const token = await fetchTranscriptionToken(speaker)
+      if (!token) return null
 
       const transcriptionSession = await createTranscriptionSession(
         stream,
         speaker,
-        data.value,
+        token.value,
       )
 
-      if (transcriptionSession && typeof data.logId === 'number') {
+      if (transcriptionSession && typeof token.logId === 'number') {
         costLogs.current.push({
-          logId: data.logId,
-          model:
-            typeof data.model === 'string'
-              ? data.model
-              : REALTIME_TRANSCRIPTION_MODEL,
+          logId: token.logId,
+          model: getTokenModel(token.model),
           startedAt: Date.now(),
         })
       }
@@ -208,42 +253,19 @@ export function useOpenAITranscription(
         const remoteStream = call.getRemoteStream()
         const localStream = call.getLocalStream()
 
-        console.log(
-          'Remote stream (caller):',
-          remoteStream ? 'available' : 'not available',
+        console.log('Remote stream (caller):', describeStream(remoteStream))
+        console.log('Local stream (agent):', describeStream(localStream))
+
+        const newSessions = await createAvailableSessions(
+          [
+            { stream: remoteStream, speaker: 'caller' },
+            { stream: localStream, speaker: 'agent' },
+          ],
+          createTrackedTranscriptionSession,
         )
-        console.log(
-          'Local stream (agent):',
-          localStream ? 'available' : 'not available',
-        )
-
-        const newSessions: TranscriptionSession[] = []
-
-        // Create separate session for caller audio
-        if (remoteStream) {
-          const callerSession = await createTrackedTranscriptionSession(
-            remoteStream,
-            'caller',
-          )
-          if (callerSession) newSessions.push(callerSession)
-        }
-
-        // Create separate session for agent audio
-        if (localStream) {
-          const agentSession = await createTrackedTranscriptionSession(
-            localStream,
-            'agent',
-          )
-          if (agentSession) newSessions.push(agentSession)
-        }
 
         sessions.current = newSessions
-
-        if (newSessions.length > 0) {
-          setStatus('Transcribing call...')
-        } else {
-          setStatus('Could not start transcription')
-        }
+        setStatus(getTranscriptionStatus(newSessions.length))
       } catch (error) {
         console.error('Setup failed:', error)
         setStatus('Error during setup')

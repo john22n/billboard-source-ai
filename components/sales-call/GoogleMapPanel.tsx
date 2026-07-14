@@ -1,157 +1,167 @@
-"use client";
+'use client'
 
-import { useEffect, useRef, useState, useCallback } from "react";
-import Script from "next/script";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { useEffect, useRef, useState, useCallback } from 'react'
+import Script from 'next/script'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { publicConfig } from '@/lib/public-config'
 
 interface GoogleMapPanelProps {
-  initialLocation?: string;
+  initialLocation?: string
 }
 
 declare global {
   interface Window {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    google: any;
+    google: any
   }
 }
 
 export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
-  const mapRef = useRef<HTMLDivElement>(null);
-  const streetViewRef = useRef<HTMLDivElement>(null);
-  const searchInputRef = useRef<HTMLInputElement>(null);
+  const googleMapsApiKey = publicConfig.googleMaps.apiKey
+  const mapRef = useRef<HTMLDivElement>(null)
+  const streetViewRef = useRef<HTMLDivElement>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const mapInstanceRef = useRef<any>(null);
+  const mapInstanceRef = useRef<any>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const markerRef = useRef<any>(null);
+  const markerRef = useRef<any>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const streetViewPanoramaRef = useRef<any>(null);
-  const initCalledRef = useRef(false);
-  const [scriptReady, setScriptReady] = useState(false);
+  const streetViewPanoramaRef = useRef<any>(null)
+  const initCalledRef = useRef(false)
+  const [scriptReady, setScriptReady] = useState(false)
 
-  const [isLoaded, setIsLoaded] = useState(false);
-  const [showStreetView, setShowStreetView] = useState(false);
-  const [streetViewAvailable, setStreetViewAvailable] = useState(false);
-  const [currentAddress, setCurrentAddress] = useState(initialLocation || "");
-  const [searchQuery, setSearchQuery] = useState(initialLocation || "");
-  const [isSearching, setIsSearching] = useState(false);
+  const [isLoaded, setIsLoaded] = useState(false)
+  const [showStreetView, setShowStreetView] = useState(false)
+  const [streetViewAvailable, setStreetViewAvailable] = useState(false)
+  const [currentAddress, setCurrentAddress] = useState(initialLocation || '')
+  const [searchQuery, setSearchQuery] = useState(initialLocation || '')
+  const [isSearching, setIsSearching] = useState(false)
 
   const handleSearch = useCallback(() => {
-    if (!searchQuery.trim() || !window.google?.maps || !isLoaded) return;
+    if (!searchQuery.trim() || !window.google?.maps || !isLoaded) return
 
-    setIsSearching(true);
-    const geocoder = new window.google.maps.Geocoder();
+    setIsSearching(true)
+    const geocoder = new window.google.maps.Geocoder()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     geocoder.geocode({ address: searchQuery }, (results: any, status: any) => {
-      setIsSearching(false);
-      if (status === "OK" && results?.[0]?.geometry?.location) {
-        const location = results[0].geometry.location;
-        const address = results[0].formatted_address;
+      setIsSearching(false)
+      if (status === 'OK' && results?.[0]?.geometry?.location) {
+        const location = results[0].geometry.location
+        const address = results[0].formatted_address
 
         // Update marker and map
         if (mapInstanceRef.current) {
           if (markerRef.current) {
-            markerRef.current.position = location;
+            markerRef.current.position = location
           } else {
-            markerRef.current = new window.google.maps.marker.AdvancedMarkerElement({
-              map: mapInstanceRef.current,
-              position: location,
-            });
+            markerRef.current =
+              new window.google.maps.marker.AdvancedMarkerElement({
+                map: mapInstanceRef.current,
+                position: location,
+              })
           }
-          mapInstanceRef.current.setCenter(location);
-          mapInstanceRef.current.setZoom(13);
+          mapInstanceRef.current.setCenter(location)
+          mapInstanceRef.current.setZoom(13)
         }
 
-        setCurrentAddress(address);
+        setCurrentAddress(address)
 
         // Check Street View availability
-        const streetViewService = new window.google.maps.StreetViewService();
+        const streetViewService = new window.google.maps.StreetViewService()
         streetViewService.getPanorama(
           { location, radius: 50 },
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           (data: any, svStatus: any) => {
-            const available = svStatus === window.google.maps.StreetViewStatus.OK;
-            setStreetViewAvailable(available);
+            const available =
+              svStatus === window.google.maps.StreetViewStatus.OK
+            setStreetViewAvailable(available)
 
             if (available && streetViewPanoramaRef.current) {
-              streetViewPanoramaRef.current.setPosition(location);
-              streetViewPanoramaRef.current.setPov({ heading: 0, pitch: 0 });
+              streetViewPanoramaRef.current.setPosition(location)
+              streetViewPanoramaRef.current.setPov({ heading: 0, pitch: 0 })
             }
-          }
-        );
+          },
+        )
       }
-    });
-  }, [searchQuery, isLoaded]);
+    })
+  }, [searchQuery, isLoaded])
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
-      handleSearch();
-    }
-  }, [handleSearch]);
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        handleSearch()
+      }
+    },
+    [handleSearch],
+  )
 
   const updateMarkerAndStreetView = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (location: any, address?: string) => {
-      if (!mapInstanceRef.current || !window.google?.maps) return;
+      if (!mapInstanceRef.current || !window.google?.maps) return
 
       // Update or create marker
       if (markerRef.current) {
-        markerRef.current.position = location;
+        markerRef.current.position = location
       } else {
-        markerRef.current = new window.google.maps.marker.AdvancedMarkerElement({
-          map: mapInstanceRef.current,
-          position: location,
-        });
+        markerRef.current = new window.google.maps.marker.AdvancedMarkerElement(
+          {
+            map: mapInstanceRef.current,
+            position: location,
+          },
+        )
       }
 
       // Center map on location
-      mapInstanceRef.current.setCenter(location);
-      mapInstanceRef.current.setZoom(13);
+      mapInstanceRef.current.setCenter(location)
+      mapInstanceRef.current.setZoom(13)
 
       if (address) {
-        setCurrentAddress(address);
+        setCurrentAddress(address)
       }
 
       // Check Street View availability
-      const streetViewService = new window.google.maps.StreetViewService();
+      const streetViewService = new window.google.maps.StreetViewService()
       streetViewService.getPanorama(
         { location, radius: 50 },
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (data: any, status: any) => {
-          const available = status === window.google.maps.StreetViewStatus.OK;
-          setStreetViewAvailable(available);
+          const available = status === window.google.maps.StreetViewStatus.OK
+          setStreetViewAvailable(available)
 
           if (available && streetViewPanoramaRef.current) {
-            streetViewPanoramaRef.current.setPosition(location);
+            streetViewPanoramaRef.current.setPosition(location)
             streetViewPanoramaRef.current.setPov({
               heading: 0,
               pitch: 0,
-            });
+            })
           }
-        }
-      );
+        },
+      )
     },
-    []
-  );
+    [],
+  )
 
   const initializeMap = useCallback(() => {
-    if (!mapRef.current || !window.google?.maps?.Map || initCalledRef.current) return;
-    initCalledRef.current = true;
+    if (!mapRef.current || !window.google?.maps?.Map || initCalledRef.current)
+      return
+    initCalledRef.current = true
 
     // Default to US center
-    const defaultCenter = { lat: 39.8283, lng: -98.5795 };
-    const defaultZoom = 4;
+    const defaultCenter = { lat: 39.8283, lng: -98.5795 }
+    const defaultZoom = 4
 
     // Create map
     const map = new window.google.maps.Map(mapRef.current, {
       center: defaultCenter,
       zoom: defaultZoom,
-      mapId: "billboard-source-map",
-      gestureHandling: "greedy",
+      mapId: 'billboard-source-map',
+      gestureHandling: 'greedy',
       streetViewControl: false,
       mapTypeControl: true,
-    });
-    mapInstanceRef.current = map;
+    })
+    mapInstanceRef.current = map
 
     // Create Street View panorama
     if (streetViewRef.current) {
@@ -164,87 +174,99 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
           linksControl: true,
           panControl: true,
           enableCloseButton: false,
-        }
-      );
+        },
+      )
     }
-
 
     // Allow clicking on map to place marker
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    map.addListener("click", (event: any) => {
+    map.addListener('click', (event: any) => {
       if (event.latLng) {
-        const geocoder = new window.google.maps.Geocoder();
+        const geocoder = new window.google.maps.Geocoder()
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        geocoder.geocode({ location: event.latLng }, (results: any, status: any) => {
-          if (status === "OK" && results?.[0]) {
-            updateMarkerAndStreetView(
-              event.latLng!,
-              results[0].formatted_address
-            );
-          } else {
-            updateMarkerAndStreetView(event.latLng!);
-          }
-        });
+        geocoder.geocode(
+          { location: event.latLng },
+          (results: any, status: any) => {
+            if (status === 'OK' && results?.[0]) {
+              updateMarkerAndStreetView(
+                event.latLng!,
+                results[0].formatted_address,
+              )
+            } else {
+              updateMarkerAndStreetView(event.latLng!)
+            }
+          },
+        )
       }
-    });
+    })
 
     // If initial location provided, geocode and show it
     if (initialLocation) {
-      const geocoder = new window.google.maps.Geocoder();
+      const geocoder = new window.google.maps.Geocoder()
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      geocoder.geocode({ address: initialLocation }, (results: any, status: any) => {
-        if (status === "OK" && results?.[0]?.geometry?.location) {
-          updateMarkerAndStreetView(
-            results[0].geometry.location,
-            results[0].formatted_address
-          );
-        }
-      });
+      geocoder.geocode(
+        { address: initialLocation },
+        (results: any, status: any) => {
+          if (status === 'OK' && results?.[0]?.geometry?.location) {
+            updateMarkerAndStreetView(
+              results[0].geometry.location,
+              results[0].formatted_address,
+            )
+          }
+        },
+      )
     }
 
-    setIsLoaded(true);
-  }, [initialLocation, updateMarkerAndStreetView]);
+    setIsLoaded(true)
+  }, [initialLocation, updateMarkerAndStreetView])
 
   // Initialize map when script is ready
   useEffect(() => {
     if (scriptReady && window.google?.maps?.Map) {
-      initializeMap();
+      initializeMap()
     }
-  }, [scriptReady, initializeMap]);
+  }, [scriptReady, initializeMap])
 
   // Check if Google Maps is already loaded (e.g., from another component)
   useEffect(() => {
     if (window.google?.maps?.Map) {
-      setScriptReady(true);
+      setScriptReady(true)
     }
-  }, []);
+  }, [])
 
   // Update map when initialLocation changes
   useEffect(() => {
-    if (!isLoaded || !initialLocation || !window.google?.maps) return;
+    if (!isLoaded || !initialLocation || !window.google?.maps) return
 
-    setSearchQuery(initialLocation);
-    const geocoder = new window.google.maps.Geocoder();
+    setSearchQuery(initialLocation)
+    const geocoder = new window.google.maps.Geocoder()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    geocoder.geocode({ address: initialLocation }, (results: any, status: any) => {
-      if (status === "OK" && results?.[0]?.geometry?.location) {
-        updateMarkerAndStreetView(
-          results[0].geometry.location,
-          results[0].formatted_address
-        );
-      }
-    });
-  }, [initialLocation, isLoaded, updateMarkerAndStreetView]);
+    geocoder.geocode(
+      { address: initialLocation },
+      (results: any, status: any) => {
+        if (status === 'OK' && results?.[0]?.geometry?.location) {
+          updateMarkerAndStreetView(
+            results[0].geometry.location,
+            results[0].formatted_address,
+          )
+        }
+      },
+    )
+  }, [initialLocation, isLoaded, updateMarkerAndStreetView])
 
   // Trigger resize when Street View visibility changes
   useEffect(() => {
-    if (showStreetView && streetViewPanoramaRef.current && window.google?.maps) {
-      window.google.maps.event.trigger(streetViewPanoramaRef.current, "resize");
+    if (
+      showStreetView &&
+      streetViewPanoramaRef.current &&
+      window.google?.maps
+    ) {
+      window.google.maps.event.trigger(streetViewPanoramaRef.current, 'resize')
     }
     if (mapInstanceRef.current && window.google?.maps) {
-      window.google.maps.event.trigger(mapInstanceRef.current, "resize");
+      window.google.maps.event.trigger(mapInstanceRef.current, 'resize')
     }
-  }, [showStreetView]);
+  }, [showStreetView])
 
   return (
     <div className="h-full w-full flex flex-col gap-3">
@@ -265,16 +287,16 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
           size="sm"
           className="whitespace-nowrap"
         >
-          {isSearching ? "Searching..." : "Search"}
+          {isSearching ? 'Searching...' : 'Search'}
         </Button>
         <Button
           onClick={() => setShowStreetView(!showStreetView)}
           disabled={!streetViewAvailable}
-          variant={showStreetView ? "default" : "outline"}
+          variant={showStreetView ? 'default' : 'outline'}
           size="sm"
           className="whitespace-nowrap"
         >
-          {showStreetView ? "Hide Street View" : "Street View"}
+          {showStreetView ? 'Hide Street View' : 'Street View'}
         </Button>
       </div>
 
@@ -289,23 +311,23 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
       <div className="flex-1 flex gap-3 min-h-0">
         {/* Map */}
         <div
-          className={`${showStreetView ? "w-1/2" : "w-full"} h-full transition-all duration-300`}
+          className={`${showStreetView ? 'w-1/2' : 'w-full'} h-full transition-all duration-300`}
         >
           <div
             ref={mapRef}
             className="w-full h-full rounded-lg border border-slate-200"
-            style={{ minHeight: "300px" }}
+            style={{ minHeight: '300px' }}
           />
         </div>
 
         {/* Street View - always rendered but hidden when not active */}
         <div
-          className={`w-1/2 h-full transition-all duration-300 ${showStreetView ? "block" : "hidden"}`}
+          className={`w-1/2 h-full transition-all duration-300 ${showStreetView ? 'block' : 'hidden'}`}
         >
           <div
             ref={streetViewRef}
             className="w-full h-full rounded-lg border border-slate-200"
-            style={{ minHeight: "300px" }}
+            style={{ minHeight: '300px' }}
           />
         </div>
       </div>
@@ -316,14 +338,14 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
       </p>
 
       {/* Google Maps Script - lazy loaded during browser idle time */}
-      {process.env.NEXT_PUBLIC_GOOGLE_MAP_KEY && (
+      {googleMapsApiKey && (
         <Script
-          src={`https://maps.googleapis.com/maps/api/js?key=${process.env.NEXT_PUBLIC_GOOGLE_MAP_KEY}&libraries=marker&v=weekly`}
+          src={`https://maps.googleapis.com/maps/api/js?key=${googleMapsApiKey}&libraries=marker&v=weekly`}
           strategy="lazyOnload"
           async
           onReady={() => setScriptReady(true)}
         />
       )}
     </div>
-  );
+  )
 }

@@ -5,25 +5,30 @@
  * Sends email with full voicemail details including transcription.
  */
 
-const VOICEMAIL_EMAIL = process.env.VOICEMAIL_NOTIFICATION_EMAIL || 'sky@billboardsource.com';
-const RESEND_API_KEY = process.env.RESEND_API_KEY;
+import {
+  configErrorResponseBody,
+  isMissingConfig,
+  serverConfig,
+} from '@/lib/config'
 
 async function sendVoicemailEmail(
   from: string,
   recordingUrl: string,
   transcription: string,
   duration?: string,
-  transcriptionStatus?: string
+  transcriptionStatus?: string,
+  config?: { resendApiKey: string; notificationEmail: string },
 ) {
-  if (!RESEND_API_KEY) {
-    console.warn('⚠️ RESEND_API_KEY not set - skipping email notification');
-    return;
-  }
+  const resendApiKey =
+    config?.resendApiKey ?? serverConfig.email.requireResendApiKey()
+  const notificationEmail =
+    config?.notificationEmail ??
+    serverConfig.voicemail.requireNotificationEmail()
 
   const transcriptionNote =
     transcriptionStatus !== 'completed'
       ? `<p><strong>Transcription Status:</strong> ${transcriptionStatus || 'Unknown'} (may be incomplete)</p>`
-      : '';
+      : ''
 
   const emailBody = `
     <h2>New Voicemail Received</h2>
@@ -37,66 +42,81 @@ async function sendVoicemailEmail(
     </blockquote>
     <br/>
     <p>— Billboard Source AI</p>
-  `;
+  `
 
   try {
     const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${RESEND_API_KEY}`,
+        Authorization: `Bearer ${resendApiKey}`,
       },
       body: JSON.stringify({
         from: 'Billboard Source <tech@billboardsource.com>',
-        to: [VOICEMAIL_EMAIL],
+        to: [notificationEmail],
         subject: `New Voicemail from ${from}`,
         html: emailBody,
       }),
-    });
+    })
 
     if (response.ok) {
-      console.log('✅ Voicemail email sent to', VOICEMAIL_EMAIL);
+      console.log('✅ Voicemail email sent to', notificationEmail)
     } else {
-      const errorText = await response.text();
-      console.error('❌ Failed to send voicemail email:', response.status, errorText);
+      const errorText = await response.text()
+      console.error(
+        '❌ Failed to send voicemail email:',
+        response.status,
+        errorText,
+      )
     }
   } catch (error) {
-    console.error('❌ Email send error:', error);
+    console.error('❌ Email send error:', error)
   }
 }
 
 export async function POST(req: Request) {
   try {
-    const formData = await req.formData();
+    const formData = await req.formData()
 
-    const transcriptionText = formData.get('TranscriptionText') as string;
-    const transcriptionStatus = formData.get('TranscriptionStatus') as string;
-    const recordingUrl = formData.get('RecordingUrl') as string;
-    const recordingDuration = formData.get('RecordingDuration') as string;
-    const from = formData.get('From') as string;
+    const transcriptionText = formData.get('TranscriptionText') as string
+    const transcriptionStatus = formData.get('TranscriptionStatus') as string
+    const recordingUrl = formData.get('RecordingUrl') as string
+    const recordingDuration = formData.get('RecordingDuration') as string
+    const from = formData.get('From') as string
 
-    console.log('═══════════════════════════════════════════');
-    console.log('📝 VOICEMAIL TRANSCRIPTION CALLBACK');
-    console.log('═══════════════════════════════════════════');
-    console.log('From:', from);
-    console.log('Status:', transcriptionStatus);
-    console.log('RecordingUrl:', recordingUrl);
-    console.log('Duration:', recordingDuration);
-    console.log('Transcription:', transcriptionText);
-    console.log('═══════════════════════════════════════════');
+    console.log('═══════════════════════════════════════════')
+    console.log('📝 VOICEMAIL TRANSCRIPTION CALLBACK')
+    console.log('═══════════════════════════════════════════')
+    console.log('From:', from)
+    console.log('Status:', transcriptionStatus)
+    console.log('RecordingUrl:', recordingUrl)
+    console.log('Duration:', recordingDuration)
+    console.log('Transcription:', transcriptionText)
+    console.log('═══════════════════════════════════════════')
+
+    const resendApiKey = serverConfig.email.requireResendApiKey()
+    const notificationEmail = serverConfig.voicemail.requireNotificationEmail()
 
     await sendVoicemailEmail(
       from || 'Unknown',
       recordingUrl || '',
       transcriptionText || '',
       recordingDuration,
-      transcriptionStatus
-    );
+      transcriptionStatus,
+      { resendApiKey, notificationEmail },
+    )
 
-    return new Response('OK', { status: 200 });
+    return new Response('OK', { status: 200 })
   } catch (error) {
-    console.error('❌ Transcription callback error:', error);
-    return new Response('Error', { status: 500 });
+    if (isMissingConfig(error)) {
+      const responseBody = configErrorResponseBody(error)
+      console.error(
+        '❌ Voicemail transcription configuration error:',
+        responseBody.details,
+      )
+      return Response.json(responseBody, { status: 500 })
+    }
+    console.error('❌ Transcription callback error:', error)
+    return new Response('Error', { status: 500 })
   }
 }
-

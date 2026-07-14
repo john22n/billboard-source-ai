@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
+import { serverConfig } from '@/lib/config'
 import { generatePasskeyAuthenticationOptions } from '@/lib/passkey'
 
 /**
@@ -30,7 +31,7 @@ export async function POST(request: NextRequest) {
       name: 'passkey_auth_challenge',
       value: options.challenge,
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: serverConfig.auth.secureCookies,
       maxAge: 60 * 5, // 5 minutes
       path: '/',
       sameSite: 'strict',
@@ -41,7 +42,7 @@ export async function POST(request: NextRequest) {
     console.error('Error generating authentication options:', error)
     return NextResponse.json(
       { error: 'Failed to generate authentication options' },
-      { status: 500 }
+      { status: 500 },
     )
   }
 }

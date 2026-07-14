@@ -3,17 +3,26 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/db'
 import { sql } from 'drizzle-orm'
 import { generateText } from 'ai'
-import { openai } from '@ai-sdk/openai'
+import { createOpenAI } from '@ai-sdk/openai'
 import { getSession } from '@/lib/auth'
 import { logOpenAIEmbeddingUsage, logOpenAITokenUsage } from '@/lib/dal'
 import OpenAI from 'openai'
+import {
+  configErrorResponseBody,
+  isMissingConfig,
+  serverConfig,
+} from '@/lib/config'
 
 export const dynamic = 'force-dynamic'
 
-// ⭐ Use OpenAI SDK directly for 512-dimension embeddings
-const openaiClient = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
+let openaiClient: OpenAI | null = null
+
+function getOpenAIClient() {
+  openaiClient ??= new OpenAI({
+    apiKey: serverConfig.openai.requireApiKey(),
+  })
+  return openaiClient
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -30,9 +39,13 @@ export async function POST(req: NextRequest) {
 
     console.log('🔍 Extracting location from transcript...')
 
+    const openaiProvider = createOpenAI({
+      apiKey: serverConfig.openai.requireApiKey(),
+    })
+
     // Extract location information from transcript using AI
     const locationResult = await generateText({
-      model: openai('gpt-4o-mini'),
+      model: openaiProvider('gpt-4o-mini'),
       prompt: `Extract the geographic location from this conversation transcript.
 
 IMPORTANT formatting rules:
@@ -74,7 +87,7 @@ Transcript: ${transcript}`,
     console.log('🔍 Location parts array:', locationParts)
 
     // ⭐ Generate 512-dimension embedding using OpenAI SDK directly
-    const embeddingResponse = await openaiClient.embeddings.create({
+    const embeddingResponse = await getOpenAIClient().embeddings.create({
       model: 'text-embedding-3-small',
       input: extractedLocation,
       dimensions: 512,
@@ -138,6 +151,9 @@ Transcript: ${transcript}`,
       extractedLocation,
     })
   } catch (error) {
+    if (isMissingConfig(error)) {
+      return NextResponse.json(configErrorResponseBody(error), { status: 500 })
+    }
     console.error('❌ Billboard pricing error:', error)
     return NextResponse.json(
       {

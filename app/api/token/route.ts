@@ -2,8 +2,11 @@ import { NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { createPendingLog } from '@/lib/dal'
 import { REALTIME_TRANSCRIPTION_MODEL } from '@/lib/openai-pricing'
-
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY!
+import {
+  configErrorResponseBody,
+  isMissingConfig,
+  serverConfig,
+} from '@/lib/config'
 
 export async function GET() {
   const instructions = `
@@ -18,6 +21,8 @@ Your tasks:
 `.trim()
 
   try {
+    const openaiApiKey = serverConfig.openai.requireApiKey()
+
     const session = await getSession()
     if (!session?.userId) {
       return NextResponse.json(
@@ -31,7 +36,7 @@ Your tasks:
       {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          Authorization: `Bearer ${openaiApiKey}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -65,6 +70,9 @@ Your tasks:
 
     const data = await response.json()
 
+    // ✅ CRITICAL: Log the response to see the structure
+    console.log('OpenAI full response:', JSON.stringify(data, null, 2))
+
     // ✅ CRITICAL: Extract session ID correctly
     const sessionId = data.session?.id || data.id || 'unknown'
 
@@ -90,6 +98,9 @@ Your tasks:
       expires_at: data.expires_at,
     })
   } catch (error) {
+    if (isMissingConfig(error)) {
+      return NextResponse.json(configErrorResponseBody(error), { status: 500 })
+    }
     console.error('Token generation error:', error)
     return NextResponse.json(
       { error: 'Failed to generate token', details: String(error) },

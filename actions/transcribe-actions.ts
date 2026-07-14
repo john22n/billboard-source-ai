@@ -1,59 +1,73 @@
-'use server';
+'use server'
 
-import OpenAI from 'openai';
+import OpenAI from 'openai'
+import { serverConfig } from '@/lib/config'
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
+let openaiClient: OpenAI | null = null
+
+function getOpenAIClient() {
+  openaiClient ??= new OpenAI({
+    apiKey: serverConfig.openai.requireApiKey(),
+  })
+  return openaiClient
+}
 
 /**
  * Create a Realtime transcription session for sales calls
  * Uses gpt-4o-transcribe model for high-accuracy transcription
  */
 export async function createTranscriptionSession(options?: {
-  language?: string;
-  speakerLabels?: boolean;
-  customInstructions?: string;
+  language?: string
+  speakerLabels?: boolean
+  customInstructions?: string
 }) {
   try {
-    const response = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-transcribe',
-        voice: 'alloy', // Required but not used for transcription-only
-        modalities: ['text'], // Transcription only, no audio output
-        instructions: options?.customInstructions ||
-          'Transcribe the sales call accurately. Identify different speakers. Include timestamps.',
-        input_audio_format: 'pcm16',
-        input_audio_transcription: {
-          model: 'whisper-1',
+    const openaiApiKey = serverConfig.openai.requireApiKey()
+
+    const response = await fetch(
+      'https://api.openai.com/v1/realtime/client_secrets',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${openaiApiKey}`,
+          'Content-Type': 'application/json',
         },
-        turn_detection: null, // Disable turn detection for continuous transcription
-      }),
-    });
+        body: JSON.stringify({
+          model: 'gpt-4o-transcribe',
+          voice: 'alloy', // Required but not used for transcription-only
+          modalities: ['text'], // Transcription only, no audio output
+          instructions:
+            options?.customInstructions ||
+            'Transcribe the sales call accurately. Identify different speakers. Include timestamps.',
+          input_audio_format: 'pcm16',
+          input_audio_transcription: {
+            model: 'whisper-1',
+          },
+          turn_detection: null, // Disable turn detection for continuous transcription
+        }),
+      },
+    )
 
     if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error?.message || 'Failed to create transcription session');
+      const errorData = await response.json()
+      throw new Error(
+        errorData.error?.message || 'Failed to create transcription session',
+      )
     }
 
-    const data = await response.json();
+    const data = await response.json()
     return {
       success: true,
       token: data.client_secret.value,
       sessionId: data.id,
       expiresAt: data.expires_at,
-    };
+    }
   } catch (error) {
-    console.error('Error creating transcription session:', error);
+    console.error('Error creating transcription session:', error)
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error'
-    };
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }
   }
 }
 
@@ -61,18 +75,21 @@ export async function createTranscriptionSession(options?: {
  * Transcribe an uploaded audio file (for pre-recorded sales calls)
  * Uses standard Whisper API for file uploads
  */
-export async function transcribeAudioFile(audioBase64: string, filename: string = 'sales_call.mp3') {
+export async function transcribeAudioFile(
+  audioBase64: string,
+  filename: string = 'sales_call.mp3',
+) {
   try {
-    const buffer = Buffer.from(audioBase64, 'base64');
-    const file = new File([buffer], filename, { type: 'audio/mpeg' });
+    const buffer = Buffer.from(audioBase64, 'base64')
+    const file = new File([buffer], filename, { type: 'audio/mpeg' })
 
-    const transcription = await openai.audio.transcriptions.create({
+    const transcription = await getOpenAIClient().audio.transcriptions.create({
       file: file,
       model: 'whisper-1',
       language: 'en',
       response_format: 'verbose_json',
       timestamp_granularities: ['word', 'segment'],
-    });
+    })
 
     return {
       success: true,
@@ -80,13 +97,13 @@ export async function transcribeAudioFile(audioBase64: string, filename: string 
       segments: (transcription as any).segments,
       words: (transcription as any).words,
       duration: (transcription as any).duration,
-    };
+    }
   } catch (error) {
-    console.error('Error transcribing audio file:', error);
+    console.error('Error transcribing audio file:', error)
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
-    };
+    }
   }
 }
 
@@ -96,7 +113,7 @@ export async function transcribeAudioFile(audioBase64: string, filename: string 
  */
 export async function analyzeSalesCall(transcript: string) {
   try {
-    const completion = await openai.chat.completions.create({
+    const completion = await getOpenAIClient().chat.completions.create({
       model: 'gpt-4o',
       messages: [
         {
@@ -108,27 +125,27 @@ export async function analyzeSalesCall(transcript: string) {
 4. Action items and next steps
 5. Sentiment analysis
 6. Sales outcome/opportunities
-Format your response as structured JSON.`
+Format your response as structured JSON.`,
         },
         {
           role: 'user',
-          content: `Analyze this sales call transcript:\n\n${transcript}`
-        }
+          content: `Analyze this sales call transcript:\n\n${transcript}`,
+        },
       ],
       response_format: { type: 'json_object' },
-    });
+    })
 
-    const analysis = JSON.parse(completion.choices[0].message.content || '{}');
+    const analysis = JSON.parse(completion.choices[0].message.content || '{}')
 
     return {
       success: true,
       analysis,
-    };
+    }
   } catch (error) {
-    console.error('Error analyzing sales call:', error);
+    console.error('Error analyzing sales call:', error)
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
-    };
+    }
   }
 }
