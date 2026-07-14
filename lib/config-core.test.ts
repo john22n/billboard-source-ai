@@ -111,18 +111,12 @@ describe('public config', () => {
       NODE_ENV: 'development',
       NEXT_PUBLIC_GOOGLE_MAP_KEY: 'google-map-key',
       NEXT_PUBLIC_APP_URL: 'https://example.com',
-      NEXT_PUBLIC_AUTO_LOGOUT_EXCLUDED_EMAILS:
-        'First@Example.com, second@example.com ',
       OPENAI_API_KEY: 'server-secret',
     })
 
     expect(config.runtime.isDevelopment).toBe(true)
     expect(config.googleMaps.apiKey).toBe('google-map-key')
     expect(config.app.url).toBe('https://example.com')
-    expect(config.autoLogout.excludedEmails).toEqual([
-      'first@example.com',
-      'second@example.com',
-    ])
     expect('openai' in config).toBe(false)
   })
 })

@@ -176,9 +176,6 @@ export interface PublicConfig {
   googleMaps: {
     apiKey: string | null
   }
-  autoLogout: {
-    excludedEmails: string[]
-  }
 }
 
 const taskRouterActivityEnvKeys: Record<TaskRouterActivityName, string> = {
@@ -485,16 +482,6 @@ export function createPublicConfig(env: EnvSource): PublicConfig {
     googleMaps: {
       get apiKey() {
         return optionalString(env, 'NEXT_PUBLIC_GOOGLE_MAP_KEY')
-      },
-    },
-    autoLogout: {
-      get excludedEmails() {
-        return (
-          optionalString(env, 'NEXT_PUBLIC_AUTO_LOGOUT_EXCLUDED_EMAILS') ?? ''
-        )
-          .split(',')
-          .map((email) => email.trim().toLowerCase())
-          .filter(Boolean)
       },
     },
   }

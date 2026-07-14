@@ -1,16 +1,8 @@
-"use client"
+'use client'
 
-import {
-  IconDotsVertical,
-  IconLogout,
-  IconKey,
-} from "@tabler/icons-react"
-import { ShieldUser } from 'lucide-react';
-import {
-  Avatar,
-  AvatarFallback,
-  AvatarImage,
-} from "@/components/ui/avatar"
+import { IconDotsVertical, IconLogout, IconKey } from '@tabler/icons-react'
+import { ShieldUser } from 'lucide-react'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,23 +10,23 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+} from '@/components/ui/dropdown-menu'
 import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
   useSidebar,
-} from "@/components/ui/sidebar"
+} from '@/components/ui/sidebar'
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog"
-import { signOut } from "@/actions/auth"
-import { useTransition, useState } from "react"
-import { useRouter } from "next/navigation"
-import { PasskeyManager } from "@/components/passkey-manager"
+} from '@/components/ui/dialog'
+import { signOut } from '@/actions/auth'
+import { useTransition, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { PasskeyManager } from '@/components/passkey-manager'
 
 export function NavUser({
   user,
@@ -55,22 +47,28 @@ export function NavUser({
     startTransition(async () => {
       // Set worker status to offline before logout
       try {
-        await fetch('/api/taskrouter/worker-status', {
+        const response = await fetch('/api/taskrouter/worker-status', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ status: 'offline' }),
-        });
-        console.log('✅ Worker status set to offline on logout');
+        })
+        if (!response.ok) {
+          throw new Error(`Worker status returned ${response.status}`)
+        }
+        console.log('✅ Worker status set to offline on logout')
       } catch (error) {
-        console.error('❌ Failed to set worker status to offline:', error);
+        console.error('❌ Failed to set worker status to offline:', error)
       }
 
       // Clean up Twilio device if it exists (from TwilioProvider)
       if (typeof window !== 'undefined') {
-        const twilioDeviceRef = (window as any).twilioDevice;
-        if (twilioDeviceRef?.current && twilioDeviceRef.current.state !== 'destroyed') {
-          console.log('🧹 Cleaning up Twilio device on logout');
-          twilioDeviceRef.current.destroy();
+        const twilioDeviceRef = (window as any).twilioDevice
+        if (
+          twilioDeviceRef?.current &&
+          twilioDeviceRef.current.state !== 'destroyed'
+        ) {
+          console.log('🧹 Cleaning up Twilio device on logout')
+          twilioDeviceRef.current.destroy()
         }
       }
       await signOut()
@@ -91,7 +89,7 @@ export function NavUser({
               <Avatar className="h-8 w-8 rounded-lg grayscale">
                 <AvatarImage src={user.avatar} alt={user.name} />
                 <AvatarFallback className="rounded-lg">
-                  {user.name?.charAt(0).toUpperCase() || "U"}
+                  {user.name?.charAt(0).toUpperCase() || 'U'}
                 </AvatarFallback>
               </Avatar>
               <div className="grid flex-1 text-left text-sm leading-tight">
@@ -105,7 +103,7 @@ export function NavUser({
           </DropdownMenuTrigger>
           <DropdownMenuContent
             className="w-(--radix-dropdown-menu-trigger-width) min-w-56 rounded-lg"
-            side={isMobile ? "bottom" : "right"}
+            side={isMobile ? 'bottom' : 'right'}
             align="end"
             sideOffset={4}
           >
@@ -114,7 +112,7 @@ export function NavUser({
                 <Avatar className="h-8 w-8 rounded-lg">
                   <AvatarImage src={user.avatar} alt={user.name} />
                   <AvatarFallback className="rounded-lg">
-                    {user.name?.charAt(0).toUpperCase() || "U"}
+                    {user.name?.charAt(0).toUpperCase() || 'U'}
                   </AvatarFallback>
                 </Avatar>
                 <div className="grid flex-1 text-left text-sm leading-tight">
@@ -145,7 +143,7 @@ export function NavUser({
 
             <DropdownMenuItem onClick={handleLogout} disabled={isPending}>
               <IconLogout />
-              {isPending ? "Logging out..." : "Log out"}
+              {isPending ? 'Logging out...' : 'Log out'}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

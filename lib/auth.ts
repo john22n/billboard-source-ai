@@ -16,12 +16,8 @@ interface JWTPayload {
 
 const JWT_SECRET = new TextEncoder().encode(serverConfig.auth.jwtSecret)
 
-// JWT expiration - 4 hours of inactivity will log user out
-const JWT_EXPIRATION = '4h'
-
-// token refresh threshold - refresh if token expires within this time
-// This keeps active users logged in by refreshing before expiration
-const REFRESH_THRESHOLD = 60 * 60 // 1 hour in seconds
+// A work session lasts at most eight hours and is never extended.
+const JWT_EXPIRATION = '8h'
 
 // hash a password
 export async function hashPassword(password: string) {
@@ -93,24 +89,6 @@ export async function verifyJWT(token: string): Promise<JWTPayload | null> {
   }
 }
 
-// check if token needs refreshing
-export async function shouldRefreshToken(token: string): Promise<boolean> {
-  try {
-    const { payload } = await jose.jwtVerify(token, JWT_SECRET, {
-      clockTolerance: 15, // tolerance for clock skew
-    })
-
-    // get expiration time
-    const exp = payload.exp as number
-    const now = Math.floor(Date.now() / 1000)
-
-    // if token expires within threshold, refresh it
-    return exp - now < REFRESH_THRESHOLD
-  } catch {
-    return false
-  }
-}
-
 // helper to set auth cookie (SESSION COOKIE - no maxAge means it dies when browser closes)
 async function setAuthCookie(token: string) {
   const cookieStore = await cookies()
@@ -145,45 +123,7 @@ export async function createSession(
   }
 }
 
-/**
- * Get current session WITHOUT refreshing the token
- * Use this for SSE endpoints and background checks that shouldn't extend the session
- */
-export const getSessionWithoutRefresh = cache(async () => {
-  try {
-    const cookieStore = await cookies()
-    const token = cookieStore.get('auth_token')?.value
-
-    if (!token) return null
-
-    const payload = await verifyJWT(token)
-    if (!payload) return null
-
-    return {
-      userId: payload.userId,
-      email: payload.email as string,
-      role: (payload.role as string) || 'user',
-    }
-  } catch (error) {
-    if (
-      error instanceof Error &&
-      error.message.includes('During prerendering, `cookies()` rejects')
-    ) {
-      console.log(
-        'Cookies not available during prerendering, returning null session',
-      )
-      return null
-    }
-    console.error('Error getting session:', error)
-    return null
-  }
-})
-
-/**
- * Get current session WITH auto-refresh
- * Use this for user-initiated actions (form submissions, page loads, API calls)
- * This keeps active users logged in by refreshing tokens before they expire
- */
+/** Returns the current session without extending its fixed eight-hour lifetime. */
 export const getSession = cache(async () => {
   try {
     const cookieStore = await cookies()
@@ -194,28 +134,11 @@ export const getSession = cache(async () => {
     const payload = await verifyJWT(token)
     if (!payload) return null
 
-    // Auto-refresh token if it's getting close to expiration
-    // This keeps active users logged in during working hours
-    try {
-      if (await shouldRefreshToken(token)) {
-        const newToken = await generateJWT({
-          userId: payload.userId,
-          email: payload.email as string,
-          role: (payload.role as string) || 'user',
-        })
-        await setAuthCookie(newToken)
-        console.log('🔄 Session token auto-refreshed for user:', payload.userId)
-      }
-    } catch (refreshError) {
-      // If refresh fails, still return the valid session
-      // The user will just need to login when the token eventually expires
-      console.error('Token refresh failed (non-fatal):', refreshError)
-    }
-
     return {
       userId: payload.userId,
       email: payload.email as string,
       role: (payload.role as string) || 'user',
+      issuedAt: payload.iat as number,
     }
   } catch (error) {
     if (
@@ -231,6 +154,9 @@ export const getSession = cache(async () => {
     return null
   }
 })
+
+// Retain the existing API name for background callers; all sessions are now fixed.
+export const getSessionWithoutRefresh = getSession
 
 // delete session by clearing the JWT cookie
 export async function deleteSession() {

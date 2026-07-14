@@ -35,6 +35,7 @@ export default async function AdminPage() {
         initialLeadStats={leadStats}
         mainCallsTotal={mainCallsTotal}
         sessionEmail={session.email}
+        sessionIssuedAt={session.issuedAt}
       />
     )
   } catch (error) {
@@ -47,6 +48,7 @@ export default async function AdminPage() {
         initialLeadStats={null}
         mainCallsTotal={0}
         sessionEmail={session.email}
+        sessionIssuedAt={session.issuedAt}
       />
     )
   }
