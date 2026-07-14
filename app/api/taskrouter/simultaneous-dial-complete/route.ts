@@ -41,6 +41,206 @@ const GENUINE_ANSWER_THRESHOLD_SECONDS = 4
 const HANGUP_TWIML =
   '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>'
 
+type TwilioClient = ReturnType<typeof twilio>
+
+function twimlResponse(body: string) {
+  return new Response(body, {
+    status: 200,
+    headers: { 'Content-Type': 'text/xml' },
+  })
+}
+
+function logDialResult(
+  dialCallStatus: string | null,
+  durationSeconds: number | null,
+  taskSid: string | null,
+  workerSid: string,
+) {
+  console.log('═══════════════════════════════════════════')
+  console.log('📱 SIMULTANEOUS DIAL COMPLETE')
+  console.log('DialCallStatus:', dialCallStatus)
+  console.log(
+    'DialCallDuration:',
+    durationSeconds != null ? `${durationSeconds}s` : 'n/a',
+  )
+  console.log('TaskSid:', taskSid)
+  console.log('WorkerSid:', workerSid)
+  console.log('═══════════════════════════════════════════')
+}
+
+async function resetWorkerToBack(
+  client: TwilioClient,
+  workspaceSid: string,
+  workerSid: string,
+  activitySids: { busy: string; available: string },
+) {
+  if (!workerSid) return
+
+  try {
+    await client.taskrouter.v1
+      .workspaces(workspaceSid)
+      .workers(workerSid)
+      .update({ activitySid: activitySids.busy })
+    await client.taskrouter.v1
+      .workspaces(workspaceSid)
+      .workers(workerSid)
+      .update({ activitySid: activitySids.available })
+    console.log(
+      `✅ Worker ${workerSid} reset to back of queue after missed simultaneous dial`,
+    )
+  } catch (err) {
+    console.error(
+      '❌ Failed to reset worker after missed simultaneous dial:',
+      err,
+    )
+  }
+}
+
+async function switchWorkerToAvailable(
+  client: TwilioClient,
+  workspaceSid: string,
+  workerSid: string,
+  availableActivitySid: string,
+) {
+  if (!workerSid) return
+
+  try {
+    await client.taskrouter.v1
+      .workspaces(workspaceSid)
+      .workers(workerSid)
+      .update({ activitySid: availableActivitySid })
+    console.log(
+      `✅ Worker ${workerSid} switched back to Available after genuine answer`,
+    )
+  } catch (err) {
+    console.error('❌ Failed to switch worker back to Available:', err)
+  }
+}
+
+function canCompleteTask(assignmentStatus: string) {
+  return assignmentStatus === 'assigned' || assignmentStatus === 'wrapping'
+}
+
+async function completeAnsweredTask(
+  client: TwilioClient,
+  workspaceSid: string,
+  taskSid: string | null,
+) {
+  if (!taskSid) return
+
+  try {
+    const task = await client.taskrouter.v1
+      .workspaces(workspaceSid)
+      .tasks(taskSid)
+      .fetch()
+
+    if (!canCompleteTask(task.assignmentStatus)) return
+
+    await client.taskrouter.v1.workspaces(workspaceSid).tasks(taskSid).update({
+      assignmentStatus: 'completed',
+      reason: 'Simultaneous dial completed successfully',
+    })
+    console.log(`✅ Task ${taskSid} completed`)
+  } catch (taskErr) {
+    console.error('❌ Failed to complete task:', taskErr)
+  }
+}
+
+async function handleGenuineAnswer(options: {
+  client: TwilioClient
+  workspaceSid: string
+  taskSid: string | null
+  workerSid: string
+  reservationSid: string
+  durationSeconds: number
+  availableActivitySid: string
+}) {
+  const {
+    client,
+    workspaceSid,
+    taskSid,
+    workerSid,
+    reservationSid,
+    durationSeconds,
+    availableActivitySid,
+  } = options
+
+  console.log(
+    `📞 DialCallStatus="completed" duration=${durationSeconds}s — genuine answer, hanging up cleanly`,
+  )
+  // Simultaneous ring is authoritative here because reservation.accepted fires
+  // early, when Twilio redirects rather than when the rep actually answers.
+  await recordAcceptedAttempt({ reservationSid, workerSid })
+  await completeAnsweredTask(client, workspaceSid, taskSid)
+  await switchWorkerToAvailable(
+    client,
+    workspaceSid,
+    workerSid,
+    availableActivitySid,
+  )
+}
+
+function normalizeDialCallStatus(
+  dialCallStatus: string | null,
+  durationSeconds: number | null,
+) {
+  if (dialCallStatus && dialCallStatus !== 'completed') return dialCallStatus
+
+  const reason =
+    durationSeconds === null
+      ? 'null duration (rejected during screening)'
+      : `duration=${durationSeconds}s < ${GENUINE_ANSWER_THRESHOLD_SECONDS}s (carrier voicemail)`
+  console.log(`⚠️ "completed" but ${reason} — treating as no-answer`)
+  return 'no-answer'
+}
+
+async function fetchAndCompleteMissedTask(
+  client: TwilioClient,
+  workspaceSid: string,
+  taskSid: string | null,
+  dialCallStatus: string,
+): Promise<Record<string, unknown>> {
+  if (!taskSid) {
+    console.warn(
+      '⚠️ Missing taskSid or workspaceSid — task will not be completed',
+    )
+    return {}
+  }
+
+  try {
+    const task = await client.taskrouter.v1
+      .workspaces(workspaceSid)
+      .tasks(taskSid)
+      .fetch()
+    const taskAttributes = JSON.parse(task.attributes || '{}')
+
+    if (!canCompleteTask(task.assignmentStatus)) {
+      console.log(
+        `ℹ️ Task ${taskSid} is already "${task.assignmentStatus}" — skipping completion`,
+      )
+      return taskAttributes
+    }
+
+    await client.taskrouter.v1
+      .workspaces(workspaceSid)
+      .tasks(taskSid)
+      .update({
+        assignmentStatus: 'completed',
+        reason: `Simultaneous dial finished: ${dialCallStatus}`,
+      })
+    console.log(
+      `✅ Task ${taskSid} completed (DialCallStatus: ${dialCallStatus})`,
+    )
+    return taskAttributes
+  } catch (taskErr) {
+    console.error(
+      '❌ Failed to fetch/complete simultaneous-dial task:',
+      taskErr,
+    )
+    return {}
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const url = new URL(req.url)
@@ -50,28 +250,16 @@ export async function POST(req: Request) {
       serverConfig.taskRouter.requireWorkspaceSid()
     const workerSid = url.searchParams.get('workerSid') ?? ''
     const reservationSid = url.searchParams.get('reservationSid') ?? ''
-
     const formData = await req.formData()
-    let dialCallStatus = formData.get('DialCallStatus') as string | null
+    const rawDialCallStatus = formData.get('DialCallStatus') as string | null
     const dialCallDuration = formData.get('DialCallDuration') as string | null
-
     const durationSeconds = dialCallDuration
       ? parseInt(dialCallDuration, 10)
       : null
 
-    console.log('═══════════════════════════════════════════')
-    console.log('📱 SIMULTANEOUS DIAL COMPLETE')
-    console.log('DialCallStatus:', dialCallStatus)
-    console.log(
-      'DialCallDuration:',
-      durationSeconds != null ? `${durationSeconds}s` : 'n/a',
-    )
-    console.log('TaskSid:', taskSid)
-    console.log('WorkerSid:', workerSid)
-    console.log('═══════════════════════════════════════════')
+    logDialResult(rawDialCallStatus, durationSeconds, taskSid, workerSid)
 
     const appUrl = serverConfig.app.baseUrlFromRequest(req.url)
-
     const { accountSid, authToken } =
       serverConfig.twilio.requireAccountCredentials()
     const client = twilio(accountSid, authToken)
@@ -80,143 +268,34 @@ export async function POST(req: Request) {
       'available',
     ] as const)
 
-    // ── Helper: reset worker to back of queue ────────────────────────────────
-    const resetWorkerToBack = async () => {
-      if (!workerSid) return
-      try {
-        await client.taskrouter.v1
-          .workspaces(workspaceSid)
-          .workers(workerSid)
-          .update({ activitySid: activitySids.busy })
-        await client.taskrouter.v1
-          .workspaces(workspaceSid)
-          .workers(workerSid)
-          .update({ activitySid: activitySids.available })
-        console.log(
-          `✅ Worker ${workerSid} reset to back of queue after missed simultaneous dial`,
-        )
-      } catch (err) {
-        console.error(
-          '❌ Failed to reset worker after missed simultaneous dial:',
-          err,
-        )
-      }
+    const isGenuineAnswer =
+      (!rawDialCallStatus || rawDialCallStatus === 'completed') &&
+      durationSeconds != null &&
+      durationSeconds >= GENUINE_ANSWER_THRESHOLD_SECONDS
+
+    if (isGenuineAnswer) {
+      await handleGenuineAnswer({
+        client,
+        workspaceSid,
+        taskSid,
+        workerSid,
+        reservationSid,
+        durationSeconds,
+        availableActivitySid: activitySids.available,
+      })
+      return twimlResponse(HANGUP_TWIML)
     }
 
-    // ── Helper: switch worker back to Available after answered call ───────────
-    const switchWorkerToAvailable = async () => {
-      if (!workerSid) return
-      try {
-        await client.taskrouter.v1
-          .workspaces(workspaceSid)
-          .workers(workerSid)
-          .update({ activitySid: activitySids.available })
-        console.log(
-          `✅ Worker ${workerSid} switched back to Available after genuine answer`,
-        )
-      } catch (err) {
-        console.error('❌ Failed to switch worker back to Available:', err)
-      }
-    }
-
-    // ── completed → only trust it if duration confirms a real answer ─────────
-    if (!dialCallStatus || dialCallStatus === 'completed') {
-      const isGenuineAnswer =
-        durationSeconds != null &&
-        durationSeconds >= GENUINE_ANSWER_THRESHOLD_SECONDS
-
-      if (isGenuineAnswer) {
-        console.log(
-          `📞 DialCallStatus="completed" duration=${durationSeconds}s — genuine answer, hanging up cleanly`,
-        )
-
-        // Record the Accepted Call Attempt (simultaneous ring is authoritative
-        // here, not reservation.accepted which fires early on redirect).
-        await recordAcceptedAttempt({ reservationSid, workerSid })
-
-        if (taskSid && workspaceSid) {
-          try {
-            const task = await client.taskrouter.v1
-              .workspaces(workspaceSid)
-              .tasks(taskSid)
-              .fetch()
-
-            if (
-              task.assignmentStatus === 'assigned' ||
-              task.assignmentStatus === 'wrapping'
-            ) {
-              await client.taskrouter.v1
-                .workspaces(workspaceSid)
-                .tasks(taskSid)
-                .update({
-                  assignmentStatus: 'completed',
-                  reason: 'Simultaneous dial completed successfully',
-                })
-              console.log(`✅ Task ${taskSid} completed`)
-            }
-          } catch (taskErr) {
-            console.error('❌ Failed to complete task:', taskErr)
-          }
-        }
-
-        // Switch worker back to Available so they don't stay stuck in Busy
-        await switchWorkerToAvailable()
-
-        return new Response(HANGUP_TWIML, {
-          status: 200,
-          headers: { 'Content-Type': 'text/xml' },
-        })
-      }
-
-      const reason =
-        durationSeconds === null
-          ? 'null duration (rejected during screening)'
-          : `duration=${durationSeconds}s < ${GENUINE_ANSWER_THRESHOLD_SECONDS}s (carrier voicemail)`
-      console.log(`⚠️ "completed" but ${reason} — treating as no-answer`)
-      dialCallStatus = 'no-answer'
-    }
-
-    // ── Fetch task attributes for all non-completed cases ────────────────────
-    let taskAttributes: Record<string, unknown> = {}
-    if (taskSid && workspaceSid) {
-      try {
-        const task = await client.taskrouter.v1
-          .workspaces(workspaceSid)
-          .tasks(taskSid)
-          .fetch()
-
-        taskAttributes = JSON.parse(task.attributes || '{}')
-
-        if (
-          task.assignmentStatus === 'assigned' ||
-          task.assignmentStatus === 'wrapping'
-        ) {
-          await client.taskrouter.v1
-            .workspaces(workspaceSid)
-            .tasks(taskSid)
-            .update({
-              assignmentStatus: 'completed',
-              reason: `Simultaneous dial finished: ${dialCallStatus ?? 'unknown'}`,
-            })
-          console.log(
-            `✅ Task ${taskSid} completed (DialCallStatus: ${dialCallStatus})`,
-          )
-        } else {
-          console.log(
-            `ℹ️ Task ${taskSid} is already "${task.assignmentStatus}" — skipping completion`,
-          )
-        }
-      } catch (taskErr) {
-        console.error(
-          '❌ Failed to fetch/complete simultaneous-dial task:',
-          taskErr,
-        )
-      }
-    } else {
-      console.warn(
-        '⚠️ Missing taskSid or workspaceSid — task will not be completed',
-      )
-    }
+    const dialCallStatus = normalizeDialCallStatus(
+      rawDialCallStatus,
+      durationSeconds,
+    )
+    const taskAttributes = await fetchAndCompleteMissedTask(
+      client,
+      workspaceSid,
+      taskSid,
+      dialCallStatus,
+    )
 
     // This Sales Rep's Call Attempt did not result in a genuine answer →
     // record it as Missed (idempotent; suppressed if the rep just rejected).
@@ -232,20 +311,19 @@ export async function POST(req: Request) {
     // ── canceled or no-answer → reset worker, then re-enqueue or overflow ─────
     if (dialCallStatus === 'canceled' || dialCallStatus === 'no-answer') {
       // Reset worker to back of queue since they missed the call
-      await resetWorkerToBack()
+      await resetWorkerToBack(client, workspaceSid, workerSid, activitySids)
 
       if (routing.shouldOverflow) {
         console.log(
           `📤 Sales Rep attempts exhausted (count=${routing.attemptCount}, directFallback=${routing.directFallbackOffered}) — routing to overflow`,
         )
-        return new Response(
+        return twimlResponse(
           buildOverflowRedirectTwiml(appUrl, {
             taskSid,
             workspaceSid,
             callSid,
             callerFrom,
           }),
-          { status: 200, headers: { 'Content-Type': 'text/xml' } },
         )
       }
 
@@ -254,9 +332,8 @@ export async function POST(req: Request) {
         routing.excludedWorkers,
       )
 
-      return new Response(
+      return twimlResponse(
         buildRequeueTwiml(appUrl, routing.nextTaskAttributes),
-        { status: 200, headers: { 'Content-Type': 'text/xml' } },
       )
     }
 
@@ -264,20 +341,16 @@ export async function POST(req: Request) {
     console.log(
       `📤 DialCallStatus="${dialCallStatus}" — redirecting to overflow`,
     )
-    return new Response(
+    return twimlResponse(
       buildOverflowRedirectTwiml(appUrl, {
         taskSid,
         workspaceSid,
         callSid,
         callerFrom,
       }),
-      { status: 200, headers: { 'Content-Type': 'text/xml' } },
     )
   } catch (error) {
     console.error('❌ Simultaneous dial complete handler error:', error)
-    return new Response(HANGUP_TWIML, {
-      status: 200,
-      headers: { 'Content-Type': 'text/xml' },
-    })
+    return twimlResponse(HANGUP_TWIML)
   }
 }
