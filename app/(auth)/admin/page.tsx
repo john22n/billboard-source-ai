@@ -3,6 +3,7 @@ import {
   getUserCosts,
   getNutshellLeadStats,
   getMainCallsTotal,
+  getCurrentOpenAICostRange,
 } from '@/lib/dal'
 import { getSession } from '@/lib/auth'
 import { redirect } from 'next/navigation'
@@ -21,9 +22,10 @@ export default async function AdminPage() {
   }
 
   try {
+    const userCostRange = getCurrentOpenAICostRange()
     const [users, userCosts, leadStats, mainCallsTotal] = await Promise.all([
       getAllUsers(),
-      getUserCosts(),
+      getUserCosts(userCostRange),
       getNutshellLeadStats().catch(() => null),
       getMainCallsTotal().catch(() => 0),
     ])
@@ -36,6 +38,8 @@ export default async function AdminPage() {
         mainCallsTotal={mainCallsTotal}
         sessionEmail={session.email}
         sessionIssuedAt={session.issuedAt}
+        userCostStartDate={userCostRange.startDate.toISOString().split('T')[0]}
+        userCostEndDate={userCostRange.endDate.toISOString().split('T')[0]}
       />
     )
   } catch (error) {
@@ -49,6 +53,8 @@ export default async function AdminPage() {
         mainCallsTotal={0}
         sessionEmail={session.email}
         sessionIssuedAt={session.issuedAt}
+        userCostStartDate={new Date().toISOString().split('T')[0]}
+        userCostEndDate={new Date().toISOString().split('T')[0]}
       />
     )
   }

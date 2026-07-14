@@ -5,6 +5,7 @@ import { sql } from 'drizzle-orm'
 import { generateText } from 'ai'
 import { createOpenAI } from '@ai-sdk/openai'
 import { getSession } from '@/lib/auth'
+import { logOpenAIEmbeddingUsage, logOpenAITokenUsage } from '@/lib/dal'
 import OpenAI from 'openai'
 import {
   configErrorResponseBody,
@@ -43,7 +44,7 @@ export async function POST(req: NextRequest) {
     })
 
     // Extract location information from transcript using AI
-    const { text: extractedLocation } = await generateText({
+    const locationResult = await generateText({
       model: openaiProvider('gpt-4o-mini'),
       prompt: `Extract the geographic location from this conversation transcript.
 
@@ -62,6 +63,13 @@ Return ONLY the location in "City, ST" format. Nothing else.
 
 Transcript: ${transcript}`,
     })
+    await logOpenAITokenUsage({
+      userId: session.userId,
+      model: 'gpt-4o-mini',
+      usage: locationResult.usage,
+      sessionId: 'billboard-pricing:location',
+    })
+    const extractedLocation = locationResult.text
 
     console.log('📍 Extracted location:', extractedLocation)
 
@@ -83,6 +91,12 @@ Transcript: ${transcript}`,
       model: 'text-embedding-3-small',
       input: extractedLocation,
       dimensions: 512,
+    })
+    await logOpenAIEmbeddingUsage({
+      userId: session.userId,
+      model: embeddingResponse.model,
+      promptTokens: embeddingResponse.usage.prompt_tokens,
+      sessionId: 'billboard-pricing:embedding',
     })
     const embedding = embeddingResponse.data[0].embedding
     // ✅ STRICT HYBRID SEARCH: Require both city AND state to match

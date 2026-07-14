@@ -3,6 +3,7 @@
 import { useRef, useState, useCallback } from 'react'
 import { Call } from '@twilio/voice-sdk'
 import type { TranscriptItem } from '@/types/sales-call'
+import { REALTIME_TRANSCRIPTION_MODEL } from '@/lib/openai-pricing'
 
 interface UseOpenAITranscriptionOptions {
   onStatusChange?: (status: string) => void
@@ -14,12 +15,70 @@ interface TranscriptionSession {
   speaker: 'agent' | 'caller'
 }
 
+interface CostLog {
+  logId: number
+  model: string
+  startedAt: number
+}
+
+interface TranscriptionToken {
+  value: string
+  logId?: number
+  model?: string
+}
+
+interface AudioSource {
+  stream: MediaStream | null | undefined
+  speaker: 'agent' | 'caller'
+}
+
+async function fetchTranscriptionToken(
+  speaker: 'agent' | 'caller',
+): Promise<TranscriptionToken | null> {
+  const response = await fetch('/api/token')
+  const data = (await response.json()) as Partial<TranscriptionToken>
+  if (!response.ok || !data.value) {
+    console.error(`${speaker} token fetch failed:`, data)
+    return null
+  }
+  return data as TranscriptionToken
+}
+
+function getTokenModel(model: unknown) {
+  return typeof model === 'string' ? model : REALTIME_TRANSCRIPTION_MODEL
+}
+
+function describeStream(stream: MediaStream | null | undefined) {
+  return stream ? 'available' : 'not available'
+}
+
+function getTranscriptionStatus(sessionCount: number) {
+  return sessionCount > 0
+    ? 'Transcribing call...'
+    : 'Could not start transcription'
+}
+
+async function createAvailableSessions(
+  sources: AudioSource[],
+  createSession: (
+    stream: MediaStream,
+    speaker: 'agent' | 'caller',
+  ) => Promise<TranscriptionSession | null>,
+) {
+  const newSessions: TranscriptionSession[] = []
+  for (const { stream, speaker } of sources) {
+    if (!stream) continue
+    const session = await createSession(stream, speaker)
+    if (session) newSessions.push(session)
+  }
+  return newSessions
+}
+
 export function useOpenAITranscription(
   options: UseOpenAITranscriptionOptions = {},
 ) {
   const sessions = useRef<TranscriptionSession[]>([])
-  const sessionStartTime = useRef<number | null>(null)
-  const logId = useRef<number | null>(null)
+  const costLogs = useRef<CostLog[]>([])
 
   const [transcripts, setTranscripts] = useState<TranscriptItem[]>([])
   const [interimTranscript, setInterimTranscript] = useState('')
@@ -34,225 +93,191 @@ export function useOpenAITranscription(
     [options],
   )
 
-  const createTranscriptionSession = async (
-    stream: MediaStream,
-    speaker: 'agent' | 'caller',
-    ephemeralKey: string,
-  ): Promise<TranscriptionSession | null> => {
-    try {
-      const pc = new RTCPeerConnection()
-      const audioTrack = stream.getAudioTracks()[0]
+  const createTranscriptionSession = useCallback(
+    async (
+      stream: MediaStream,
+      speaker: 'agent' | 'caller',
+      ephemeralKey: string,
+    ): Promise<TranscriptionSession | null> => {
+      try {
+        const pc = new RTCPeerConnection()
+        const audioTrack = stream.getAudioTracks()[0]
 
-      if (!audioTrack) {
-        console.error(`No audio track for ${speaker}`)
-        return null
-      }
+        if (!audioTrack) {
+          console.error(`No audio track for ${speaker}`)
+          return null
+        }
 
-      pc.addTrack(audioTrack, stream)
-      console.log(`Added ${speaker} audio track`)
+        pc.addTrack(audioTrack, stream)
+        console.log(`Added ${speaker} audio track`)
 
-      const dc = pc.createDataChannel('oai-events')
+        const dc = pc.createDataChannel('oai-events')
 
-      dc.onopen = () => {
-        console.log(`${speaker} data channel opened`)
+        dc.onopen = () => {
+          console.log(`${speaker} data channel opened`)
 
-        const sessionConfig = {
-          type: 'session.update',
-          session: {
-            type: 'transcription',
-            audio: {
-              input: {
-                format: { type: 'audio/pcm', rate: 24000 },
-                transcription: {
-                  model: 'whisper-1',
-                  language: 'en',
-                  prompt:
-                    'Billboard, billboard advertising, bulletin, poster, digital billboard, static bulletin, out-of-home, OOH, CPM, impressions, DEC, daily effective circulation, vinyl, trivision, LED, Nutshell, Billboard Source',
-                },
-                turn_detection: {
-                  type: 'server_vad',
-                  threshold: 0.5,
-                  prefix_padding_ms: 500,
-                  silence_duration_ms: 1000,
+          const sessionConfig = {
+            type: 'session.update',
+            session: {
+              type: 'transcription',
+              audio: {
+                input: {
+                  format: { type: 'audio/pcm', rate: 24000 },
+                  transcription: {
+                    model: 'whisper-1',
+                    language: 'en',
+                    prompt:
+                      'Billboard, billboard advertising, bulletin, poster, digital billboard, static bulletin, out-of-home, OOH, CPM, impressions, DEC, daily effective circulation, vinyl, trivision, LED, Nutshell, Billboard Source',
+                  },
+                  turn_detection: {
+                    type: 'server_vad',
+                    threshold: 0.5,
+                    prefix_padding_ms: 500,
+                    silence_duration_ms: 1000,
+                  },
                 },
               },
             },
-          },
-        }
-
-        dc.send(JSON.stringify(sessionConfig))
-      }
-
-      dc.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data)
-
-          if (
-            message.type === 'conversation.item.input_audio_transcription.delta'
-          ) {
-            setInterimTranscript((prev) => prev + message.delta)
-            setInterimSpeaker(speaker)
           }
 
-          if (
-            message.type ===
-            'conversation.item.input_audio_transcription.completed'
-          ) {
-            const newTranscript: TranscriptItem = {
-              id: message.item_id,
-              text: message.transcript,
-              isFinal: true,
-              timestamp: Date.now(),
-              speaker,
+          dc.send(JSON.stringify(sessionConfig))
+        }
+
+        dc.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data)
+
+            if (
+              message.type ===
+              'conversation.item.input_audio_transcription.delta'
+            ) {
+              setInterimTranscript((prev) => prev + message.delta)
+              setInterimSpeaker(speaker)
             }
-            setTranscripts((prev) => [...prev, newTranscript])
-            setInterimTranscript('')
-            setInterimSpeaker(null)
-          }
 
-          if (message.type === 'error') {
-            console.error(`${speaker} error:`, message)
+            if (
+              message.type ===
+              'conversation.item.input_audio_transcription.completed'
+            ) {
+              const newTranscript: TranscriptItem = {
+                id: message.item_id,
+                text: message.transcript,
+                isFinal: true,
+                timestamp: Date.now(),
+                speaker,
+              }
+              setTranscripts((prev) => [...prev, newTranscript])
+              setInterimTranscript('')
+              setInterimSpeaker(null)
+            }
+
+            if (message.type === 'error') {
+              console.error(`${speaker} error:`, message)
+            }
+          } catch (error) {
+            console.error('Parse error:', error)
           }
-        } catch (error) {
-          console.error('Parse error:', error)
         }
-      }
 
-      const offer = await pc.createOffer()
-      await pc.setLocalDescription(offer)
+        const offer = await pc.createOffer()
+        await pc.setLocalDescription(offer)
 
-      const sdpResponse = await fetch(
-        'https://api.openai.com/v1/realtime/calls',
-        {
-          method: 'POST',
-          body: offer.sdp,
-          headers: {
-            Authorization: `Bearer ${ephemeralKey}`,
-            'Content-Type': 'application/sdp',
+        const sdpResponse = await fetch(
+          'https://api.openai.com/v1/realtime/calls',
+          {
+            method: 'POST',
+            body: offer.sdp,
+            headers: {
+              Authorization: `Bearer ${ephemeralKey}`,
+              'Content-Type': 'application/sdp',
+            },
           },
-        },
-      )
+        )
 
-      if (!sdpResponse.ok) {
-        console.error(`${speaker} API error:`, await sdpResponse.text())
+        if (!sdpResponse.ok) {
+          console.error(`${speaker} API error:`, await sdpResponse.text())
+          return null
+        }
+
+        const answer = {
+          type: 'answer' as RTCSdpType,
+          sdp: await sdpResponse.text(),
+        }
+
+        await pc.setRemoteDescription(answer)
+        console.log(`${speaker} session connected`)
+
+        return { pc, dc, speaker }
+      } catch (error) {
+        console.error(`${speaker} session failed:`, error)
         return null
       }
+    },
+    [],
+  )
 
-      const answer = {
-        type: 'answer' as RTCSdpType,
-        sdp: await sdpResponse.text(),
+  const createTrackedTranscriptionSession = useCallback(
+    async (
+      stream: MediaStream,
+      speaker: 'agent' | 'caller',
+    ): Promise<TranscriptionSession | null> => {
+      setStatus(`Fetching OpenAI token for ${speaker}...`)
+      const token = await fetchTranscriptionToken(speaker)
+      if (!token) return null
+
+      const transcriptionSession = await createTranscriptionSession(
+        stream,
+        speaker,
+        token.value,
+      )
+
+      if (transcriptionSession && typeof token.logId === 'number') {
+        costLogs.current.push({
+          logId: token.logId,
+          model: getTokenModel(token.model),
+          startedAt: Date.now(),
+        })
       }
 
-      await pc.setRemoteDescription(answer)
-      console.log(`${speaker} session connected`)
-
-      return { pc, dc, speaker }
-    } catch (error) {
-      console.error(`${speaker} session failed:`, error)
-      return null
-    }
-  }
+      return transcriptionSession
+    },
+    [createTranscriptionSession, setStatus],
+  )
 
   const startTranscription = useCallback(
     async (call: Call) => {
       try {
-        setStatus('Fetching OpenAI token...')
-        const tokenResponse = await fetch('/api/token')
-        const data = await tokenResponse.json()
-
-        if (!data || !data.value) {
-          console.error('Token fetch failed:', data)
-          setStatus('Token fetch failed')
-          return
-        }
-
-        const EPHEMERAL_KEY = data.value
-        logId.current = data.logId
-        sessionStartTime.current = Date.now()
-
         setStatus('Connecting transcription...')
+        costLogs.current = []
 
         const remoteStream = call.getRemoteStream()
         const localStream = call.getLocalStream()
 
-        console.log(
-          'Remote stream (caller):',
-          remoteStream ? 'available' : 'not available',
+        console.log('Remote stream (caller):', describeStream(remoteStream))
+        console.log('Local stream (agent):', describeStream(localStream))
+
+        const newSessions = await createAvailableSessions(
+          [
+            { stream: remoteStream, speaker: 'caller' },
+            { stream: localStream, speaker: 'agent' },
+          ],
+          createTrackedTranscriptionSession,
         )
-        console.log(
-          'Local stream (agent):',
-          localStream ? 'available' : 'not available',
-        )
-
-        const newSessions: TranscriptionSession[] = []
-
-        // Create separate session for caller audio
-        if (remoteStream) {
-          const callerSession = await createTranscriptionSession(
-            remoteStream,
-            'caller',
-            EPHEMERAL_KEY,
-          )
-          if (callerSession) newSessions.push(callerSession)
-        }
-
-        // Create separate session for agent audio
-        if (localStream) {
-          // Need a second token for agent stream
-          const agentTokenResponse = await fetch('/api/token')
-          const agentData = await agentTokenResponse.json()
-
-          if (agentData?.value) {
-            const agentSession = await createTranscriptionSession(
-              localStream,
-              'agent',
-              agentData.value,
-            )
-            if (agentSession) newSessions.push(agentSession)
-          }
-        }
 
         sessions.current = newSessions
-
-        if (newSessions.length > 0) {
-          setStatus('Transcribing call...')
-        } else {
-          setStatus('Could not start transcription')
-        }
+        setStatus(getTranscriptionStatus(newSessions.length))
       } catch (error) {
         console.error('Setup failed:', error)
         setStatus('Error during setup')
       }
     },
-    [setStatus],
+    [createTrackedTranscriptionSession, setStatus],
   )
 
   const stopTranscription = useCallback(async () => {
-    if (sessionStartTime.current && logId.current) {
-      const durationSeconds = (Date.now() - sessionStartTime.current) / 1000
-      console.log(`Ended - Duration: ${durationSeconds.toFixed(2)}s`)
-
-      try {
-        const costResponse = await fetch('/api/openai/update-cost', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            logId: logId.current,
-            durationSeconds: durationSeconds,
-          }),
-        })
-
-        if (costResponse.ok) {
-          const costData = await costResponse.json()
-          console.log(`Cost: $${costData.cost}`)
-        }
-      } catch (error) {
-        console.error('Cost error:', error)
-      }
-
-      sessionStartTime.current = null
-      logId.current = null
-    }
+    const endedAt = Date.now()
+    const logsToUpdate = costLogs.current
+    costLogs.current = []
 
     // Close all sessions
     sessions.current.forEach((session) => {
@@ -260,6 +285,40 @@ export function useOpenAITranscription(
       session.pc.close()
     })
     sessions.current = []
+
+    if (logsToUpdate.length > 0) {
+      try {
+        await Promise.all(
+          logsToUpdate.map(async (costLog) => {
+            const durationSeconds = Math.max(
+              0,
+              (endedAt - costLog.startedAt) / 1000,
+            )
+            console.log(
+              `Ended log ${costLog.logId} - Duration: ${durationSeconds.toFixed(2)}s`,
+            )
+
+            const costResponse = await fetch('/api/openai/update-cost', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              keepalive: true,
+              body: JSON.stringify({
+                logId: costLog.logId,
+                durationSeconds,
+                model: costLog.model,
+              }),
+            })
+
+            if (costResponse.ok) {
+              const costData = await costResponse.json()
+              console.log(`Cost for log ${costLog.logId}: $${costData.cost}`)
+            }
+          }),
+        )
+      } catch (error) {
+        console.error('Cost error:', error)
+      }
+    }
 
     setInterimTranscript('')
     setInterimSpeaker(null)

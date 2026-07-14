@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { createPendingLog } from '@/lib/dal'
+import { REALTIME_TRANSCRIPTION_MODEL } from '@/lib/openai-pricing'
 import {
   configErrorResponseBody,
   isMissingConfig,
@@ -78,7 +79,11 @@ Your tasks:
     console.log('Extracted sessionId:', sessionId)
 
     // Create pending log entry
-    const logEntry = await createPendingLog(session.userId, sessionId)
+    const logEntry = await createPendingLog(
+      session.userId,
+      sessionId,
+      REALTIME_TRANSCRIPTION_MODEL,
+    )
 
     console.log(
       `📝 Created pending log (id: ${logEntry.id}) for session ${sessionId}`,
@@ -89,6 +94,7 @@ Your tasks:
       value: data.value,
       session_id: sessionId,
       logId: logEntry.id,
+      model: REALTIME_TRANSCRIPTION_MODEL,
       expires_at: data.expires_at,
     })
   } catch (error) {

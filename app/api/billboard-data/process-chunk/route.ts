@@ -7,6 +7,7 @@ import OpenAI from 'openai'
 import { db } from '@/db'
 import { billboardLocations } from '@/db/schema'
 import { getSession } from '@/lib/auth'
+import { logOpenAIEmbeddingUsage } from '@/lib/dal'
 import { sql } from 'drizzle-orm'
 import {
   configErrorResponseBody,
@@ -123,16 +124,20 @@ function createEmbeddingText(record: CSVRow): string {
 }
 
 // ⭐ Helper function to generate embeddings in batches using OpenAI SDK
-async function generateEmbeddings(texts: string[]): Promise<number[][]> {
+async function generateEmbeddings(texts: string[]) {
   const response = await getOpenAIClient().embeddings.create({
     model: 'text-embedding-3-small',
     input: texts,
     dimensions: 512,
   })
 
-  return response.data
-    .sort((a, b) => a.index - b.index)
-    .map((item) => item.embedding)
+  return {
+    embeddings: response.data
+      .sort((a, b) => a.index - b.index)
+      .map((item) => item.embedding),
+    model: response.model,
+    promptTokens: response.usage.prompt_tokens,
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -199,7 +204,14 @@ export async function POST(req: NextRequest) {
         `🤖 Generating ${textsToEmbed.length} embeddings (512 dimensions)...`,
       )
 
-      const embeddings = await generateEmbeddings(textsToEmbed)
+      const { embeddings, model, promptTokens } =
+        await generateEmbeddings(textsToEmbed)
+      await logOpenAIEmbeddingUsage({
+        userId: session.userId,
+        model,
+        promptTokens,
+        sessionId: `billboard-data:chunk-${chunkIndex}:batch-${Math.floor(i / EMBEDDING_BATCH_SIZE)}`,
+      })
 
       const dataWithEmbeddings = batch.map((record, idx) => ({
         city: record.City || '',
@@ -234,8 +246,6 @@ export async function POST(req: NextRequest) {
     // ⭐ UPSERT: Insert new records, update existing ones (based on city+state)
     console.log(`💾 Upserting ${processedData.length} records in batches...`)
     const INSERT_BATCH_SIZE = 100
-    let totalUpdated = 0
-    let totalInserted = 0
 
     for (let k = 0; k < processedData.length; k += INSERT_BATCH_SIZE) {
       const insertBatch = processedData.slice(k, k + INSERT_BATCH_SIZE)

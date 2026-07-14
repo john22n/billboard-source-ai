@@ -5,6 +5,7 @@ import { generateObject } from 'ai'
 import { createOpenAI } from '@ai-sdk/openai'
 import { z } from 'zod'
 import { getSession } from '@/lib/auth'
+import { logOpenAIDurationUsage, logOpenAITokenUsage } from '@/lib/dal'
 import {
   configErrorResponseBody,
   isMissingConfig,
@@ -110,10 +111,16 @@ export async function POST(req: NextRequest) {
     })
 
     const transcript = transcription.text
+    await logOpenAIDurationUsage({
+      userId: session.userId,
+      model: 'whisper-1',
+      durationSeconds: transcription.usage?.seconds ?? transcription.duration,
+      sessionId: 'transcribe-file:audio',
+    })
     console.log('✅ Transcription complete, analyzing...')
 
     // Step 2: Single LLM call for all analysis (4x more efficient than parallel calls)
-    const { object: analysis } = await generateObject({
+    const analysisResult = await generateObject({
       model: openaiProvider('gpt-4o-mini'),
       schema: fullAnalysisSchema,
       system: `You are a sales call analyst. Analyze this sales call transcript and extract all relevant information.
@@ -121,6 +128,13 @@ Be thorough and only include information that was explicitly mentioned. Use null
       prompt: transcript,
       temperature: 0.2,
     })
+    await logOpenAITokenUsage({
+      userId: session.userId,
+      model: 'gpt-4o-mini',
+      usage: analysisResult.usage,
+      sessionId: 'transcribe-file:analysis',
+    })
+    const analysis = analysisResult.object
 
     console.log('✅ Analysis complete')
 

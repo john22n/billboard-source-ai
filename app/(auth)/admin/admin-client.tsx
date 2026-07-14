@@ -140,6 +140,8 @@ interface AdminClientProps {
   mainCallsTotal: number
   sessionEmail: string
   sessionIssuedAt: number
+  userCostStartDate: string
+  userCostEndDate: string
 }
 
 type SetState<T> = Dispatch<SetStateAction<T>>
@@ -402,6 +404,8 @@ function UsersTab({
 interface CostsTabProps {
   initialCosts: UserCost[]
   totalCost: string
+  userCostStartDate: string
+  userCostEndDate: string
   usageLoading: boolean
   usageError: string | null
   openaiUsage: OpenAIUsage | null
@@ -424,7 +428,7 @@ function OpenAIUsageDisplay({
   return (
     <div className="mt-6 p-4 bg-muted rounded-lg border">
       <h3 className="text-sm font-semibold mb-2">
-        OpenAI API Usage (Last 30 Days)
+        OpenAI Organization Usage (Last 30 Days)
       </h3>
       {usageLoading ? (
         <div className="flex items-center gap-2 text-muted-foreground">
@@ -437,7 +441,7 @@ function OpenAIUsageDisplay({
         <div className="space-y-2">
           <div className="flex justify-between items-center">
             <span className="text-sm text-muted-foreground">
-              Total API Cost
+              Actual org API cost
             </span>
             <span className="text-xl font-bold">
               {openaiUsage.totalCostFormatted}
@@ -506,6 +510,8 @@ function TwilioUsageDisplay({
 function CostsTab({
   initialCosts,
   totalCost,
+  userCostStartDate,
+  userCostEndDate,
   usageLoading,
   usageError,
   openaiUsage,
@@ -516,7 +522,11 @@ function CostsTab({
   return (
     <TabsContent value="costs">
       <Table>
-        <TableCaption>OpenAI usage cost per user.</TableCaption>
+        <TableCaption>
+          Estimated OpenAI usage cost per user for {userCostStartDate} to{' '}
+          {userCostEndDate}. The organization total below comes directly from
+          OpenAI.
+        </TableCaption>
         <TableHeader>
           <TableRow>
             <TableHead>ID</TableHead>
@@ -1049,6 +1059,8 @@ export default function AdminClient({
   mainCallsTotal = 0,
   sessionEmail = '',
   sessionIssuedAt,
+  userCostStartDate,
+  userCostEndDate,
 }: AdminClientProps) {
   useAutoLogout(sessionIssuedAt)
 
@@ -1132,6 +1144,8 @@ export default function AdminClient({
           {...{
             initialCosts,
             totalCost,
+            userCostStartDate,
+            userCostEndDate,
             usageLoading,
             usageError,
             openaiUsage,
