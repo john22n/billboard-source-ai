@@ -98,7 +98,15 @@ export async function POST(req: Request) {
 
     let workerSid = currentUser.taskRouterWorkerSid
 
-    // Create worker if doesn't exist
+    // Recover an existing email-linked worker if the database SID is missing.
+    if (!workerSid) {
+      const [existingWorker] = await client.taskrouter.v1
+        .workspaces(workspaceSid)
+        .workers.list({ friendlyName: currentUser.email, limit: 1 })
+      workerSid = existingWorker?.sid
+    }
+
+    // Create the email-linked worker only when neither source has one.
     if (!workerSid) {
       console.log('📋 Creating new TaskRouter worker for:', currentUser.email)
 

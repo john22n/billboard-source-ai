@@ -45,6 +45,7 @@ import {
   showSuccessToast,
   getErrorMessage,
 } from '@/lib/error-handling'
+import { useAutoLogout } from '@/hooks/useAutoLogout'
 
 interface OpenAIUsage {
   totalCost: number
@@ -137,6 +138,7 @@ interface AdminClientProps {
   initialLeadStats: LeadStats | null
   mainCallsTotal: number
   sessionEmail: string
+  sessionIssuedAt: number
 }
 
 export default function AdminClient({
@@ -145,7 +147,10 @@ export default function AdminClient({
   initialLeadStats = null,
   mainCallsTotal = 0,
   sessionEmail = '',
+  sessionIssuedAt,
 }: AdminClientProps) {
+  useAutoLogout(sessionIssuedAt)
+
   const [selectedUsers, setSelectedUsers] = useState<string[]>([])
   const [isPending, startTransition] = useTransition()
   const [phoneEdits, setPhoneEdits] = useState<Record<string, string>>({})

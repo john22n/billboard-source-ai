@@ -12,8 +12,6 @@ import {
 
 export type WorkerActivity = 'available' | 'unavailable' | 'offline'
 
-const POLL_INTERVAL = 10_000 // 10 seconds
-
 interface WorkerStatusContextType {
   status: WorkerActivity
   isLoading: boolean
@@ -51,7 +49,6 @@ export function WorkerStatusProvider({ children }: WorkerStatusProviderProps) {
   const [isSessionExpired, setIsSessionExpired] = useState(false)
   const statusRef = useRef<WorkerActivity>('offline')
   const authFailedRef = useRef(false)
-  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   /* ---------------------------------------------------- */
   /* Set worker offline (used when session expires)       */
@@ -79,15 +76,10 @@ export function WorkerStatusProvider({ children }: WorkerStatusProviderProps) {
     setError('Session expired - please log in again')
     setIsLoading(false)
     setWorkerOffline()
-
-    if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current)
-      pollIntervalRef.current = null
-    }
   }, [setWorkerOffline])
 
   /* ---------------------------------------------------- */
-  /* Poll current status                                  */
+  /* Load current status                                  */
   /* ---------------------------------------------------- */
   const refresh = useCallback(async () => {
     if (authFailedRef.current) return
@@ -170,50 +162,15 @@ export function WorkerStatusProvider({ children }: WorkerStatusProviderProps) {
     setError(null)
     setIsLoading(true)
 
-    // Restart polling
-    if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current)
-    }
-    refresh()
-    pollIntervalRef.current = setInterval(refresh, POLL_INTERVAL)
+    void refresh()
   }, [refresh])
 
   /* ---------------------------------------------------- */
-  /* Start polling on mount                               */
+  /* Load current status once on mount                    */
   /* ---------------------------------------------------- */
   useEffect(() => {
-    refresh()
-    pollIntervalRef.current = setInterval(refresh, POLL_INTERVAL)
-
-    return () => {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current)
-      }
-    }
+    void refresh()
   }, [refresh])
-
-  /* ---------------------------------------------------- */
-  /* Auto-offline on tab close / refresh                  */
-  /* ---------------------------------------------------- */
-  useEffect(() => {
-    const goOffline = () => {
-      if (authFailedRef.current) return
-      if (statusRef.current !== 'offline') {
-        navigator.sendBeacon(
-          '/api/taskrouter/worker-status',
-          JSON.stringify({ status: 'offline' }),
-        )
-      }
-    }
-
-    window.addEventListener('beforeunload', goOffline)
-    window.addEventListener('pagehide', goOffline)
-
-    return () => {
-      window.removeEventListener('beforeunload', goOffline)
-      window.removeEventListener('pagehide', goOffline)
-    }
-  }, [])
 
   const value: WorkerStatusContextType = {
     status,

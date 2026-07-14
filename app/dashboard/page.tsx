@@ -1,16 +1,12 @@
-import { redirect } from "next/navigation"
-import { Suspense } from "react"
-import { AppSidebar } from "@/components/app-sidebar"
-import { SiteHeader } from "@/components/site-header"
-import { SidebarOverlay } from "@/components/SidebarOverlay"
-import {
-  SidebarInset,
-  SidebarProvider,
-} from "@/components/ui/sidebar"
-import SalesCallTranscriber from "@/components/SalesCallTranscriber"
+import { redirect } from 'next/navigation'
+import { Suspense } from 'react'
+import { AppSidebar } from '@/components/app-sidebar'
+import { SiteHeader } from '@/components/site-header'
+import { SidebarOverlay } from '@/components/SidebarOverlay'
+import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
+import SalesCallTranscriber from '@/components/SalesCallTranscriber'
 import { getSession } from '@/lib/auth'
 export const dynamic = 'force-dynamic'
-
 
 function DashboardSkeleton() {
   return (
@@ -33,7 +29,7 @@ function DashboardSkeleton() {
 
 export default async function Page() {
   const session = await getSession()
-  
+
   if (!session) {
     redirect('/login')
   }
@@ -43,8 +39,8 @@ export default async function Page() {
       defaultOpen={false}
       style={
         {
-          "--sidebar-width": "calc(var(--spacing) * 72)",
-          "--header-height": "calc(var(--spacing) * 12)",
+          '--sidebar-width': 'calc(var(--spacing) * 72)',
+          '--header-height': 'calc(var(--spacing) * 12)',
         } as React.CSSProperties
       }
     >
@@ -54,16 +50,15 @@ export default async function Page() {
         user={{
           name: session.email.split('@')[0],
           email: session.email,
-          avatar: "",
-          role: session.role ?? undefined
+          avatar: '',
+          role: session.role ?? undefined,
         }}
       />
       <SidebarInset className="flex flex-col h-dvh min-h-0 overflow-hidden bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
         <SiteHeader />
         <div className="flex-1 min-h-0 overflow-hidden p-0 m-0">
           <Suspense fallback={<DashboardSkeleton />}>
-            {/* Pass session email so useAutoLogout can exempt excluded workers (e.g. McDonald) */}
-            <SalesCallTranscriber sessionEmail={session.email} />
+            <SalesCallTranscriber sessionIssuedAt={session.issuedAt} />
           </Suspense>
         </div>
       </SidebarInset>

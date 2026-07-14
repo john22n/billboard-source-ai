@@ -13,7 +13,7 @@ import type { TranscriptItem } from '@/types/sales-call'
 import { showSuccessToast, showErrorToast } from '@/lib/error-handling'
 import { publicConfig } from '@/lib/public-config'
 import { useFormStore } from '@/stores/formStore'
-import { useAutoLogout } from '@/hooks/useAutoLogout'
+import { isAutoLogoutDue, useAutoLogout } from '@/hooks/useAutoLogout'
 
 // Dynamic imports for heavy map components
 const GoogleMapPanel = dynamic(
@@ -47,12 +47,10 @@ const ArcGISMapPanel = dynamic(
 )
 
 export default function SalesCallTranscriber({
-  sessionEmail,
+  sessionIssuedAt,
 }: {
-  sessionEmail?: string
+  sessionIssuedAt: number
 }) {
-  useAutoLogout(sessionEmail)
-
   if (publicConfig.runtime.isDevelopment) {
     console.log('🔄 Re-render: SalesCallTranscriber')
   }
@@ -121,6 +119,8 @@ export default function SalesCallTranscriber({
     onCallDisconnected,
   } = useTwilioContext()
 
+  useAutoLogout(sessionIssuedAt, callActive)
+
   // ✅ Capture caller's real phone number from the incoming call.
   // For simultaneous-ring workers, the real caller number is passed as a
   // custom parameter "callerFrom" via the <Parameter> tag in the <Client>
@@ -147,6 +147,9 @@ export default function SalesCallTranscriber({
       stopTranscription()
       resetStatus()
 
+      // The deferred 7 PM logout owns the final offline status update.
+      if (isAutoLogoutDue(sessionIssuedAt)) return
+
       fetch('/api/taskrouter/worker-status', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -165,6 +168,7 @@ export default function SalesCallTranscriber({
     startTranscription,
     stopTranscription,
     resetStatus,
+    sessionIssuedAt,
   ])
 
   const {
