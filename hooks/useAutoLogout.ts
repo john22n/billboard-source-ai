@@ -56,12 +56,15 @@ export function useAutoLogout(sessionIssuedAt: number, isCallActive = false) {
     }
 
     try {
-      await fetch('/api/auth/logout', { method: 'POST' })
+      const response = await fetch('/api/auth/logout', { method: 'POST' })
+      if (!response.ok)
+        throw new Error(`Logout API returned ${response.status}`)
+
+      router.replace('/login?reason=auto-logout')
     } catch (error) {
+      hasLoggedOutRef.current = false
       console.error('Logout API call failed:', error)
     }
-
-    router.replace('/login?reason=auto-logout')
   }, [router])
 
   useEffect(() => {
