@@ -205,9 +205,9 @@ export function LeadForm({
           </div>
 
           {/* Lead Type Bar - Full width stack on mobile */}
-          <div className="flex flex-col xl:flex-row gap-3 xl:gap-8 my-4 xl:my-5 xl:-mb-7 px-2 sm:px-4">
+          <div className="my-4 flex flex-col gap-3 px-2 sm:px-4 @min-[1000px]:my-5 @min-[1000px]:-mb-7 @min-[1000px]:flex-row @min-[1000px]:gap-8">
             {/* Left spacer - hidden on mobile */}
-            <div className="hidden xl:block xl:w-60"></div>
+            <div className="hidden @min-[1000px]:block @min-[1000px]:w-60"></div>
 
             {/* Lead Type section - full width on mobile */}
             <div className="flex-1 bg-gray-300 border-2 border-black shadow-sm shadow-black rounded-lg p-2.5 sm:p-3.5">
@@ -323,13 +323,13 @@ export function LeadForm({
           </div>
 
           {/* Market Tabs - Responsive layout */}
-          <div className="flex flex-col xl:flex-row gap-2 xl:gap-5 mt-0 pb-2 px-2 sm:px-4 xl:pl-[calc(1rem+18px)] xl:pr-[calc(1rem+18px)]">
+          <div className="flex flex-col xl:flex-row gap-2 xl:gap-5 mt-0 px-2 sm:px-4 xl:pl-[calc(1rem+18px)] xl:pr-[calc(1rem+18px)]">
             {/* Left spacer - hidden on mobile */}
             <div className="hidden xl:block xl:flex-1 min-w-0"></div>
 
             {/* Market tabs container */}
             <div className="w-full xl:flex-1 flex flex-col sm:flex-row gap-2 sm:gap-5 min-w-0">
-              <div className="flex-1 sm:flex-[3] flex flex-wrap sm:flex-nowrap gap-1 overflow-x-auto pb-1 min-w-0">
+              <div className="flex-1 sm:flex-[3] flex flex-wrap sm:flex-nowrap gap-1 overflow-x-auto min-w-0">
                 <button
                   onClick={() => setActiveMarketIndex(0)}
                   className={`inline-block border-2 ${
@@ -377,7 +377,7 @@ export function LeadForm({
           </div>
 
           {/* Contact Tabs */}
-          <div className="flex flex-wrap gap-1 sm:gap-2 mt-2 px-2 sm:px-4">
+          <div className="flex flex-wrap gap-1 sm:gap-2 px-2 sm:px-4">
             <button
               onClick={() => setActiveContactIndex(0)}
               className={`inline-block border-2 ${

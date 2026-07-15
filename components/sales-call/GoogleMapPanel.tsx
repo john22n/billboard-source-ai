@@ -8,6 +8,7 @@ import { publicConfig } from '@/lib/public-config'
 
 interface GoogleMapPanelProps {
   initialLocation?: string
+  exclusiveView?: boolean
 }
 
 declare global {
@@ -17,7 +18,10 @@ declare global {
   }
 }
 
-export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
+export function GoogleMapPanel({
+  initialLocation,
+  exclusiveView = false,
+}: GoogleMapPanelProps) {
   const googleMapsApiKey = publicConfig.googleMaps.apiKey
   const mapRef = useRef<HTMLDivElement>(null)
   const streetViewRef = useRef<HTMLDivElement>(null)
@@ -296,7 +300,11 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
           size="sm"
           className="whitespace-nowrap"
         >
-          {showStreetView ? 'Hide Street View' : 'Street View'}
+          {showStreetView
+            ? exclusiveView
+              ? 'Map'
+              : 'Hide Street View'
+            : 'Street View'}
         </Button>
       </div>
 
@@ -311,7 +319,9 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
       <div className="flex-1 flex gap-3 min-h-0">
         {/* Map */}
         <div
-          className={`${showStreetView ? 'w-1/2' : 'w-full'} h-full transition-all duration-300`}
+          className={`h-full transition-all duration-300 ${
+            showStreetView ? (exclusiveView ? 'hidden' : 'w-1/2') : 'w-full'
+          }`}
         >
           <div
             ref={mapRef}
@@ -322,7 +332,13 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
 
         {/* Street View - always rendered but hidden when not active */}
         <div
-          className={`w-1/2 h-full transition-all duration-300 ${showStreetView ? 'block' : 'hidden'}`}
+          className={`h-full transition-all duration-300 ${
+            showStreetView
+              ? exclusiveView
+                ? 'block w-full'
+                : 'block w-1/2'
+              : 'hidden'
+          }`}
         >
           <div
             ref={streetViewRef}
