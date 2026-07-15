@@ -896,7 +896,7 @@ export default function SalesCallTranscriber({
 
   return (
     <div className="h-full overflow-hidden flex items-center justify-center m-0 p-0">
-      <div className="max-w-[1800px] xl:max-h-[1250px] w-full h-full flex flex-col px-2 sm:px-0">
+      <div className="max-w-[1800px] w-full h-full flex flex-col px-2 sm:px-0">
         <Card className="shadow-lg border-0 flex flex-col h-full overflow-hidden">
           <CallHeader
             userEmail={twilio.userEmail}
