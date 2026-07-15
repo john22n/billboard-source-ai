@@ -19,7 +19,11 @@ import { useTwilioContext } from '@/components/providers/TwilioProvider'
 import { useOpenAITranscription } from '@/hooks/useOpenAITranscription'
 import { LeadForm, PricingPanel, TranscriptView } from '@/components/sales-call'
 import type { TranscriptItem } from '@/types/sales-call'
-import { showSuccessToast, showErrorToast } from '@/lib/error-handling'
+import {
+  dismissToasts,
+  showSuccessToast,
+  showErrorToast,
+} from '@/lib/error-handling'
 import { publicConfig } from '@/lib/public-config'
 import { useFormStore } from '@/stores/formStore'
 import { isAutoLogoutDue, useAutoLogout } from '@/hooks/useAutoLogout'
@@ -884,6 +888,16 @@ function useNutshellSubmission(fullTranscript: string, clearAll: () => void) {
   >('idle')
   const [nutshellMessage, setNutshellMessage] = useState('')
   const [validationErrors, setValidationErrors] = useState<string[]>([])
+  const resetValidation = useCallback(() => {
+    dismissToasts()
+    setNutshellStatus('idle')
+    setNutshellMessage('')
+    setValidationErrors([])
+  }, [])
+  const clearAllWithValidation = useCallback(() => {
+    resetValidation()
+    clearAll()
+  }, [resetValidation, clearAll])
   useEffect(() => {
     if (nutshellStatus !== 'success') return
     const timer = setTimeout(() => {
@@ -893,6 +907,7 @@ function useNutshellSubmission(fullTranscript: string, clearAll: () => void) {
     return () => clearTimeout(timer)
   }, [nutshellStatus])
   const submit = useCallback(async () => {
+    dismissToasts()
     setIsSubmittingNutshell(true)
     setNutshellStatus('idle')
     setNutshellMessage('')
@@ -933,6 +948,7 @@ function useNutshellSubmission(fullTranscript: string, clearAll: () => void) {
     nutshellMessage,
     validationErrors,
     submit,
+    clearAllWithValidation,
   }
 }
 
@@ -1071,7 +1087,7 @@ export default function SalesCallTranscriber({
             fileInputRef={upload.fileInputRef}
             onFileSelect={upload.handleFileSelect}
             onUploadClick={upload.handleUploadClick}
-            onClearAll={clearAll}
+            onClearAll={nutshell.clearAllWithValidation}
             onHangupCall={twilio.hangupCall}
             onAcceptCall={twilio.acceptCall}
             onRejectCall={twilio.rejectCall}
@@ -1097,7 +1113,7 @@ export default function SalesCallTranscriber({
             nutshellMessage={nutshell.nutshellMessage}
             setIsLoadingBillboard={setIsLoadingBillboard}
             setBillboardContext={setBillboardContext}
-            onClearAll={clearAll}
+            onClearAll={nutshell.clearAllWithValidation}
             currentMarketLocation={currentMarketLocation}
             scrollRef={scrollRef}
             interimTranscript={transcription.interimTranscript}
