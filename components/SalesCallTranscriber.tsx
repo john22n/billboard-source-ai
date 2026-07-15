@@ -576,7 +576,8 @@ function TabbedBody(props: TabbedBodyProps) {
         </TabsList>
         <TabsContent
           value="form"
-          className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col"
+          forceMount
+          className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=inactive]:hidden data-[state=active]:flex data-[state=active]:flex-col"
         >
           <div
             className={`h-full min-h-0 gap-2 overflow-hidden sm:gap-1 ${
@@ -626,7 +627,8 @@ function TabbedBody(props: TabbedBodyProps) {
 
               <TabsContent
                 value="pricing"
-                className="mt-0 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col"
+                forceMount
+                className="mt-0 min-h-0 overflow-hidden data-[state=inactive]:hidden data-[state=active]:flex data-[state=active]:flex-col"
               >
                 <PricingPanel
                   key={`pricing-${resetTrigger}`}
