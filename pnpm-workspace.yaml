@@ -1,0 +1,6 @@
+allowBuilds:
+  '@vaadin/vaadin-usage-statistics': false
+  bcrypt: true
+  esbuild: true
+  sharp: true
+  unrs-resolver: true

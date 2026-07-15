@@ -169,15 +169,6 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
         error: data.error,
       })
 
-      if (response.status === 409) {
-        console.warn('Twilio token was already issued for this login')
-        setStatus('Calling session unavailable')
-        setDeviceError(
-          'This login already started a calling session. Log in again to reconnect calling.',
-        )
-        return false
-      }
-
       if (data.error) {
         console.error('❌ Token error:', data.error)
         setStatus(`Token error: ${data.error}`)

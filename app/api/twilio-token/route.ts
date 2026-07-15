@@ -5,8 +5,7 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
-import { getSession, TWILIO_TOKEN_SESSION_COOKIE } from '@/lib/auth'
+import { getSession } from '@/lib/auth'
 import twilio from 'twilio'
 import {
   configErrorResponseBody,
@@ -16,6 +15,7 @@ import {
 
 const AccessToken = twilio.jwt.AccessToken
 const VoiceGrant = AccessToken.VoiceGrant
+const LOGIN_SESSION_SECONDS = 60 * 60 * 8
 
 export async function GET() {
   // ✅ SECURITY: Require authentication
@@ -37,20 +37,6 @@ export async function GET() {
     )
   }
 
-  const cookieStore = await cookies()
-  if (
-    session.sessionId &&
-    cookieStore.get(TWILIO_TOKEN_SESSION_COOKIE)?.value === session.sessionId
-  ) {
-    return NextResponse.json(
-      {
-        error: 'Twilio session already started. Please log in again.',
-        code: 'TWILIO_TOKEN_ALREADY_ISSUED',
-      },
-      { status: 409 },
-    )
-  }
-
   let credentials: ReturnType<
     typeof serverConfig.twilio.requireVoiceCredentials
   >
@@ -61,6 +47,9 @@ export async function GET() {
     return NextResponse.json(configErrorResponseBody(error), { status: 500 })
   }
 
+  const sessionExpiresAt = session.issuedAt + LOGIN_SESSION_SECONDS
+  const tokenTtl = Math.max(1, Math.floor(sessionExpiresAt - Date.now() / 1000))
+
   // Create access token
   const token = new AccessToken(
     credentials.accountSid,
@@ -68,7 +57,8 @@ export async function GET() {
     credentials.apiKeySecret,
     {
       identity: email, // Use authenticated user's email
-      ttl: 60 * 60 * 8, // Match the app's fixed eight-hour login session
+      // Reloads may issue a replacement token, but it cannot outlive the login.
+      ttl: tokenTtl,
     },
   )
 
@@ -81,17 +71,8 @@ export async function GET() {
 
   console.log(`🔐 Twilio token generated for authenticated user: ${email}`)
 
-  const response = NextResponse.json({
+  return NextResponse.json({
     token: token.toJwt(),
     identity: email,
   })
-  response.cookies.set({
-    name: TWILIO_TOKEN_SESSION_COOKIE,
-    value: session.sessionId,
-    httpOnly: true,
-    secure: serverConfig.auth.secureCookies,
-    path: '/',
-    sameSite: 'lax',
-  })
-  return response
 }

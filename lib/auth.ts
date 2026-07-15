@@ -15,7 +15,6 @@ interface JWTPayload {
 }
 
 const JWT_SECRET = new TextEncoder().encode(serverConfig.auth.jwtSecret)
-export const TWILIO_TOKEN_SESSION_COOKIE = 'twilio_token_session'
 
 // A work session lasts at most eight hours and is never extended.
 const JWT_EXPIRATION = '8h'
@@ -61,7 +60,6 @@ export async function generateJWT(payload: JWTPayload) {
   return await new jose.SignJWT(payload)
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
-    .setJti(nanoid())
     .setExpirationTime(JWT_EXPIRATION)
     .sign(JWT_SECRET)
 }
@@ -94,7 +92,6 @@ export async function verifyJWT(token: string): Promise<JWTPayload | null> {
 // helper to set auth cookie (SESSION COOKIE - no maxAge means it dies when browser closes)
 async function setAuthCookie(token: string) {
   const cookieStore = await cookies()
-  cookieStore.delete(TWILIO_TOKEN_SESSION_COOKIE)
   cookieStore.set({
     name: 'auth_token',
     value: token,
@@ -142,9 +139,6 @@ export const getSession = cache(async () => {
       email: payload.email as string,
       role: (payload.role as string) || 'user',
       issuedAt: payload.iat as number,
-      sessionId:
-        (payload.jti as string | undefined) ||
-        `${payload.userId}:${payload.iat as number}`,
     }
   } catch (error) {
     if (
@@ -168,5 +162,4 @@ export const getSessionWithoutRefresh = getSession
 export async function deleteSession() {
   const cookieStore = await cookies()
   cookieStore.delete('auth_token')
-  cookieStore.delete(TWILIO_TOKEN_SESSION_COOKIE)
 }
