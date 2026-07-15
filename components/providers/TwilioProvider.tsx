@@ -48,6 +48,8 @@ interface TwilioProviderProps {
 export function TwilioProvider({ children }: TwilioProviderProps) {
   const twilioDevice = useRef<Device | null>(null)
   const activeCall = useRef<Call | null>(null)
+  const acceptingCall = useRef<Call | null>(null)
+  const incomingNotification = useRef<Notification | null>(null)
   const isInitializing = useRef(false)
   const hasInitialized = useRef(false)
   const registrationTime = useRef<number>(0)
@@ -72,6 +74,44 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
   const [callActive, setCallActive] = useState(false)
   const [userEmail, setUserEmail] = useState<string>('')
   const [deviceError, setDeviceError] = useState<string | null>(null)
+
+  const closeIncomingNotification = useCallback(() => {
+    incomingNotification.current?.close()
+    incomingNotification.current = null
+  }, [])
+
+  const acceptIncomingCall = useCallback(
+    async (call: Call) => {
+      if (activeCall.current === call || acceptingCall.current === call) return
+
+      try {
+        acceptingCall.current = call
+        closeIncomingNotification()
+        setStatus('Accepting call...')
+
+        call.on('accept', () => {
+          console.log('✅ Call accept event - call is connected')
+          console.log('🎤 Triggering onCallAccepted callback')
+          onCallAcceptedRef.current?.(call)
+        })
+
+        console.log('Calling incomingCall.accept()...')
+        await call.accept()
+        console.log('✅ accept() completed')
+
+        activeCall.current = call
+        setCallActive(true)
+        setIncomingCall(null)
+        console.log('Call active, state updated')
+      } catch (error) {
+        console.error('❌ Error accepting call:', error)
+        setStatus('Failed to accept call')
+      } finally {
+        acceptingCall.current = null
+      }
+    },
+    [closeIncomingNotification],
+  )
 
   const requireNewLogin = useCallback(async (reason: string) => {
     if (isLoggedOut.current) return
@@ -200,31 +240,50 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
         setIncomingCall(call)
         setStatus(`Incoming call from ${call.parameters.From}`)
 
+        if (
+          document.visibilityState !== 'visible' &&
+          'Notification' in window &&
+          Notification.permission === 'granted'
+        ) {
+          closeIncomingNotification()
+          const notification = new Notification('Incoming sales call', {
+            body: `Call from ${call.parameters.From || 'Unknown caller'}. Click to answer.`,
+            icon: '/favicon.ico',
+            tag: 'incoming-sales-call',
+            requireInteraction: true,
+          })
+          incomingNotification.current = notification
+          notification.onclick = () => {
+            window.focus()
+            void acceptIncomingCall(call)
+          }
+        }
+
         call.on('disconnect', () => {
           console.log('📴 Call disconnected')
+          closeIncomingNotification()
           setCallActive(false)
           setIncomingCall(null)
           activeCall.current = null
           onCallDisconnectedRef.current?.()
         })
 
-        call.on('accept', () => {
-          console.log('✅ Call accepted event fired')
-        })
-
         call.on('reject', () => {
           console.log('🚫 Call rejected')
+          closeIncomingNotification()
           setIncomingCall(null)
         })
 
         call.on('cancel', () => {
           console.log('📵 Call canceled (caller hung up)')
+          closeIncomingNotification()
           setIncomingCall(null)
           setStatus('Call canceled')
         })
 
         call.on('error', (error: Error) => {
           console.error('❌ Call error:', error)
+          closeIncomingNotification()
           setIncomingCall(null)
         })
       })
@@ -335,7 +394,13 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
     } finally {
       isInitializing.current = false
     }
-  }, [getReadyStatus, requireNewLogin, setWorkerStatus])
+  }, [
+    acceptIncomingCall,
+    closeIncomingNotification,
+    getReadyStatus,
+    requireNewLogin,
+    setWorkerStatus,
+  ])
 
   useEffect(() => {
     console.log('🎬 TwilioProvider mounted - initializing device')
@@ -405,33 +470,11 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
       return
     }
 
-    try {
-      console.log('═══════════════════════════════════════════')
-      console.log('📞 ACCEPTING CALL')
-      console.log('═══════════════════════════════════════════')
-
-      setStatus('Accepting call...')
-
-      incomingCall.on('accept', () => {
-        console.log('✅ Call accept event - call is connected')
-        console.log('🎤 Triggering onCallAccepted callback')
-        onCallAcceptedRef.current?.(incomingCall)
-      })
-
-      console.log('Calling incomingCall.accept()...')
-      await incomingCall.accept()
-      console.log('✅ accept() completed')
-
-      activeCall.current = incomingCall
-      setCallActive(true)
-      setIncomingCall(null)
-
-      console.log('Call active, state updated')
-    } catch (error) {
-      console.error('❌ Error accepting call:', error)
-      setStatus('Failed to accept call')
-    }
-  }, [incomingCall])
+    console.log('═══════════════════════════════════════════')
+    console.log('📞 ACCEPTING CALL')
+    console.log('═══════════════════════════════════════════')
+    await acceptIncomingCall(incomingCall)
+  }, [acceptIncomingCall, incomingCall])
 
   const rejectCall = useCallback(() => {
     if (incomingCall) {
@@ -446,11 +489,12 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
         console.error('Failed to record rejected call attempt:', err)
       })
 
+      closeIncomingNotification()
       incomingCall.reject()
       setIncomingCall(null)
       setStatus(twilioReady ? getReadyStatus() : 'Idle')
     }
-  }, [incomingCall, twilioReady, getReadyStatus])
+  }, [closeIncomingNotification, incomingCall, twilioReady, getReadyStatus])
 
   const hangupCall = useCallback(() => {
     if (activeCall.current) {
@@ -465,6 +509,7 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
   const destroyDevice = useCallback(() => {
     console.log('🧹 Destroying Twilio device for logout')
     isLoggedOut.current = true
+    closeIncomingNotification()
     if (activeCall.current) {
       activeCall.current.disconnect()
       activeCall.current = null
@@ -479,7 +524,7 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
     setDeviceError(null)
     setStatus('Idle')
     hasInitialized.current = false
-  }, [])
+  }, [closeIncomingNotification])
 
   const updateStatus = useCallback((newStatus: string) => {
     setStatus(newStatus)
