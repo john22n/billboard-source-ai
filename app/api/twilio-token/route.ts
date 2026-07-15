@@ -5,7 +5,8 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { NextResponse } from 'next/server'
-import { getSession } from '@/lib/auth'
+import { cookies } from 'next/headers'
+import { getSession, TWILIO_TOKEN_SESSION_COOKIE } from '@/lib/auth'
 import twilio from 'twilio'
 import {
   configErrorResponseBody,
@@ -36,6 +37,20 @@ export async function GET() {
     )
   }
 
+  const cookieStore = await cookies()
+  if (
+    session.sessionId &&
+    cookieStore.get(TWILIO_TOKEN_SESSION_COOKIE)?.value === session.sessionId
+  ) {
+    return NextResponse.json(
+      {
+        error: 'Twilio session already started. Please log in again.',
+        code: 'TWILIO_TOKEN_ALREADY_ISSUED',
+      },
+      { status: 409 },
+    )
+  }
+
   let credentials: ReturnType<
     typeof serverConfig.twilio.requireVoiceCredentials
   >
@@ -53,7 +68,7 @@ export async function GET() {
     credentials.apiKeySecret,
     {
       identity: email, // Use authenticated user's email
-      ttl: 3600, // Token valid for 1 hour
+      ttl: 60 * 60 * 8, // Match the app's fixed eight-hour login session
     },
   )
 
@@ -66,8 +81,17 @@ export async function GET() {
 
   console.log(`🔐 Twilio token generated for authenticated user: ${email}`)
 
-  return NextResponse.json({
+  const response = NextResponse.json({
     token: token.toJwt(),
     identity: email,
   })
+  response.cookies.set({
+    name: TWILIO_TOKEN_SESSION_COOKIE,
+    value: session.sessionId,
+    httpOnly: true,
+    secure: serverConfig.auth.secureCookies,
+    path: '/',
+    sameSite: 'lax',
+  })
+  return response
 }

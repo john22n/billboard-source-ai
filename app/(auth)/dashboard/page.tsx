@@ -6,6 +6,7 @@ import { SidebarOverlay } from '@/components/SidebarOverlay'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import SalesCallTranscriber from '@/components/SalesCallTranscriber'
 import { getSession } from '@/lib/auth'
+
 export const dynamic = 'force-dynamic'
 
 function DashboardSkeleton() {

@@ -166,11 +166,14 @@ export function WorkerStatusProvider({ children }: WorkerStatusProviderProps) {
   }, [refresh])
 
   /* ---------------------------------------------------- */
-  /* Load current status once on mount                    */
+  /* A new dashboard session starts offline. The rep must */
+  /* explicitly choose Available before receiving calls.  */
   /* ---------------------------------------------------- */
   useEffect(() => {
-    void refresh()
-  }, [refresh])
+    void setStatus('offline').catch(() => {
+      // setStatus exposes the error through context.
+    })
+  }, [setStatus])
 
   const value: WorkerStatusContextType = {
     status,
