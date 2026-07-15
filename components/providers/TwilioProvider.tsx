@@ -45,17 +45,11 @@ interface TwilioProviderProps {
   children: ReactNode
 }
 
-const INCOMING_CALL_NOTIFICATION_TAG = 'incoming-sales-call'
-type ActionNotificationOptions = NotificationOptions & {
-  actions: Array<{ action: string; title: string }>
-}
-
 export function TwilioProvider({ children }: TwilioProviderProps) {
   const twilioDevice = useRef<Device | null>(null)
   const activeCall = useRef<Call | null>(null)
   const acceptingCall = useRef<Call | null>(null)
   const incomingNotification = useRef<Notification | null>(null)
-  const notificationWorker = useRef<ServiceWorkerRegistration | null>(null)
   const isInitializing = useRef(false)
   const hasInitialized = useRef(false)
   const registrationTime = useRef<number>(0)
@@ -84,11 +78,6 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
   const closeIncomingNotification = useCallback(() => {
     incomingNotification.current?.close()
     incomingNotification.current = null
-    void notificationWorker.current
-      ?.getNotifications({ tag: INCOMING_CALL_NOTIFICATION_TAG })
-      .then((notifications) => {
-        notifications.forEach((notification) => notification.close())
-      })
   }, [])
 
   const acceptIncomingCall = useCallback(
@@ -122,46 +111,6 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
       }
     },
     [closeIncomingNotification],
-  )
-
-  const showIncomingNotification = useCallback(
-    async (call: Call) => {
-      closeIncomingNotification()
-      const caller = call.parameters.From || 'Unknown caller'
-      const registration = notificationWorker.current
-      const maxActions = (
-        Notification as typeof Notification & { readonly maxActions?: number }
-      ).maxActions
-
-      if (registration && maxActions && maxActions >= 2) {
-        const options: ActionNotificationOptions = {
-          body: `Call from ${caller}`,
-          icon: '/favicon.ico',
-          tag: INCOMING_CALL_NOTIFICATION_TAG,
-          requireInteraction: true,
-          data: { callSid: call.parameters.CallSid },
-          actions: [
-            { action: 'accept', title: 'Accept' },
-            { action: 'reject', title: 'Reject' },
-          ],
-        }
-        await registration.showNotification('Incoming sales call', options)
-        return
-      }
-
-      const notification = new Notification('Incoming sales call', {
-        body: `Call from ${caller}. Click to answer.`,
-        icon: '/favicon.ico',
-        tag: INCOMING_CALL_NOTIFICATION_TAG,
-        requireInteraction: true,
-      })
-      incomingNotification.current = notification
-      notification.onclick = () => {
-        window.focus()
-        void acceptIncomingCall(call)
-      }
-    },
-    [acceptIncomingCall, closeIncomingNotification],
   )
 
   const requireNewLogin = useCallback(async (reason: string) => {
@@ -296,9 +245,18 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
           'Notification' in window &&
           Notification.permission === 'granted'
         ) {
-          void showIncomingNotification(call).catch((error) => {
-            console.error('Failed to show incoming call notification:', error)
+          closeIncomingNotification()
+          const notification = new Notification('Incoming sales call', {
+            body: `Call from ${call.parameters.From || 'Unknown caller'}. Click to answer.`,
+            icon: '/favicon.ico',
+            tag: 'incoming-sales-call',
+            requireInteraction: true,
           })
+          incomingNotification.current = notification
+          notification.onclick = () => {
+            window.focus()
+            void acceptIncomingCall(call)
+          }
         }
 
         call.on('disconnect', () => {
@@ -442,7 +400,6 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
     getReadyStatus,
     requireNewLogin,
     setWorkerStatus,
-    showIncomingNotification,
   ])
 
   useEffect(() => {
@@ -455,19 +412,6 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
     // NO cleanup - device should persist for the lifetime of the app
     // Only destroy when user logs out explicitly
   }, [initTwilio])
-
-  useEffect(() => {
-    if (!('serviceWorker' in navigator)) return
-
-    navigator.serviceWorker
-      .register('/call-notifications-sw.js', { scope: '/' })
-      .then((registration) => {
-        notificationWorker.current = registration
-      })
-      .catch((error) => {
-        console.error('Failed to register call notification worker:', error)
-      })
-  }, [])
 
   useEffect(() => {
     const checkInterval = setInterval(() => {
@@ -551,43 +495,6 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
       setStatus(twilioReady ? getReadyStatus() : 'Idle')
     }
   }, [closeIncomingNotification, incomingCall, twilioReady, getReadyStatus])
-
-  useEffect(() => {
-    if (!('serviceWorker' in navigator)) return
-
-    const handleNotificationAction = (event: MessageEvent) => {
-      const message = event.data as {
-        type?: string
-        action?: string
-        callSid?: string
-      }
-      if (
-        message.type !== 'incoming-call-action' ||
-        !incomingCall ||
-        message.callSid !== incomingCall.parameters.CallSid
-      ) {
-        return
-      }
-
-      if (message.action === 'reject') {
-        rejectCall()
-        return
-      }
-
-      window.focus()
-      void acceptIncomingCall(incomingCall)
-    }
-
-    navigator.serviceWorker.addEventListener(
-      'message',
-      handleNotificationAction,
-    )
-    return () =>
-      navigator.serviceWorker.removeEventListener(
-        'message',
-        handleNotificationAction,
-      )
-  }, [acceptIncomingCall, incomingCall, rejectCall])
 
   const hangupCall = useCallback(() => {
     if (activeCall.current) {
