@@ -57,10 +57,12 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
   const onCallDisconnectedRef = useRef<(() => void) | null>(null)
 
   // Get worker status to determine if user is available for calls
-  const { status: workerStatus } = useWorkerStatus()
+  const { status: workerStatus, setStatus: setWorkerStatus } = useWorkerStatus()
+  const workerStatusRef = useRef(workerStatus)
 
   // Debug: Log worker status changes
   useEffect(() => {
+    workerStatusRef.current = workerStatus
     console.log('👷 Worker status in TwilioProvider:', workerStatus)
   }, [workerStatus])
 
@@ -100,14 +102,15 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
 
   // Helper to get appropriate status message based on worker availability
   const getReadyStatus = useCallback(() => {
-    console.log('🔍 getReadyStatus called, workerStatus:', workerStatus)
-    if (workerStatus === 'available') {
+    const currentWorkerStatus = workerStatusRef.current
+    console.log('🔍 getReadyStatus called, workerStatus:', currentWorkerStatus)
+    if (currentWorkerStatus === 'available') {
       console.log('✅ Worker is available, returning "Ready to receive calls"')
       return 'Ready to receive calls'
     }
     console.log('❌ Worker not available, returning "Offline"')
     return 'Offline'
-  }, [workerStatus])
+  }, [])
 
   const initTwilio = useCallback(async () => {
     if (isLoggedOut.current) return false
@@ -267,8 +270,11 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
         console.log('═══════════════════════════════════════════')
 
         setTwilioReady(false)
-        console.warn('Twilio registration ended; requiring a new login')
-        void requireNewLogin('twilio-session-ended')
+        setStatus('Offline - return to this tab to reconnect')
+        console.warn('Twilio registration ended; setting worker offline')
+        void setWorkerStatus('offline').catch((error) => {
+          console.error('Failed to set unregistered worker offline:', error)
+        })
       })
 
       device.on('error', (error: Error) => {
@@ -329,7 +335,7 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
     } finally {
       isInitializing.current = false
     }
-  }, [getReadyStatus, requireNewLogin])
+  }, [getReadyStatus, requireNewLogin, setWorkerStatus])
 
   useEffect(() => {
     console.log('🎬 TwilioProvider mounted - initializing device')
@@ -351,6 +357,24 @@ export function TwilioProvider({ children }: TwilioProviderProps) {
         if (state === 'destroyed' && hasInitialized.current) {
           console.error('⚠️ DEVICE WAS DESTROYED!')
           void requireNewLogin('twilio-session-ended')
+        }
+
+        if (
+          document.visibilityState === 'visible' &&
+          state === 'unregistered' &&
+          hasInitialized.current &&
+          !isInitializing.current
+        ) {
+          console.log('🔄 Re-registering existing Twilio device')
+          isInitializing.current = true
+          twilioDevice.current
+            .register()
+            .catch((error) => {
+              console.error('Failed to re-register Twilio device:', error)
+            })
+            .finally(() => {
+              isInitializing.current = false
+            })
         }
       }
     }, 2000)
