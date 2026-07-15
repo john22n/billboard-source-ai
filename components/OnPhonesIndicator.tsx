@@ -2,7 +2,35 @@
 
 import { Phone } from 'lucide-react'
 import { useAvailableWorkers } from '@/hooks/useAvailableWorkers'
+import type { WorkerEntry } from '@/hooks/useAvailableWorkers'
 import { cn } from '@/lib/utils'
+
+function WorkerStatus({
+  worker,
+  index,
+}: {
+  worker: WorkerEntry
+  index: number
+}) {
+  if (worker.status === 'busy') {
+    return (
+      <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-50 text-green-700 border border-green-200">
+        <span className="inline-block size-1.5 rounded-full bg-green-500 animate-pulse shrink-0" />
+        {worker.name}
+      </span>
+    )
+  }
+
+  return (
+    <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-background border border-border">
+      <span className="text-muted-foreground/60 text-xs">{index + 1}</span>
+      {worker.name}
+      {index === 0 && (
+        <span className="text-indigo-500 text-xs font-medium">next</span>
+      )}
+    </span>
+  )
+}
 
 export function OnPhonesIndicator() {
   const { workers, isLoading, error } = useAvailableWorkers()
@@ -31,28 +59,19 @@ export function OnPhonesIndicator() {
       <span className="flex items-center gap-1 min-w-0">
         {active ? (
           workers.map((worker, i) => (
-            <span key={worker.name} className="flex items-center gap-1">
+            <span key={worker.id} className="flex items-center gap-1">
               {i > 0 && (
-                <span className="text-muted-foreground/50 select-none text-xs">·</span>
-              )}
-              {worker.status === 'on_call' ? (
-                <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-50 text-green-700 border border-green-200">
-                  <span className="inline-block size-1.5 rounded-full bg-green-500 animate-pulse shrink-0" />
-                  {worker.name}
-                </span>
-              ) : (
-                <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-background border border-border">
-                  <span className="text-muted-foreground/60 text-[10px]">{i + 1}</span>
-                  {worker.name}
-                  {i === 0 && (
-                    <span className="text-indigo-500 text-[10px] font-medium">next</span>
-                  )}
+                <span className="text-muted-foreground/50 select-none text-xs">
+                  ·
                 </span>
               )}
+              <WorkerStatus worker={worker} index={i} />
             </span>
           ))
         ) : (
-          <span className="text-muted-foreground text-xs px-1">No one on phones</span>
+          <span className="text-muted-foreground text-xs px-1">
+            No one on phones
+          </span>
         )}
       </span>
     </div>
