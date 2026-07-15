@@ -4,21 +4,27 @@ import { useCallback, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 
 const LOGOUT_HOUR = 19
+const SESSION_DURATION_MS = 8 * 60 * 60 * 1000
 
 function getAutoLogoutCutoff(sessionIssuedAt: number) {
   const sessionStartedAt = new Date(sessionIssuedAt * 1000)
-  const sessionCutoff = new Date(sessionStartedAt)
-  sessionCutoff.setHours(LOGOUT_HOUR, 0, 0, 0)
+  const sessionExpiration = new Date(
+    sessionStartedAt.getTime() + SESSION_DURATION_MS,
+  )
+  const dailyCutoff = new Date(sessionStartedAt)
+  dailyCutoff.setHours(LOGOUT_HOUR, 0, 0, 0)
 
-  return sessionStartedAt < sessionCutoff ? sessionCutoff : null
+  return sessionStartedAt < dailyCutoff && dailyCutoff < sessionExpiration
+    ? dailyCutoff
+    : sessionExpiration
 }
 
 export function isAutoLogoutDue(sessionIssuedAt: number, now = new Date()) {
   const sessionCutoff = getAutoLogoutCutoff(sessionIssuedAt)
-  return sessionCutoff !== null && now >= sessionCutoff
+  return now >= sessionCutoff
 }
 
-/** Logs pre-7 PM sessions out at the cutoff after any active call ends. */
+/** Logs out at the earlier of 7 PM or eight hours after login. */
 export function useAutoLogout(sessionIssuedAt: number, isCallActive = false) {
   const router = useRouter()
   const hasLoggedOutRef = useRef(false)
@@ -40,7 +46,7 @@ export function useAutoLogout(sessionIssuedAt: number, isCallActive = false) {
     if (hasLoggedOutRef.current) return
     hasLoggedOutRef.current = true
 
-    console.log('🕖 7 PM auto-logout triggered')
+    console.log('🔒 Session logout cutoff reached')
 
     try {
       const response = await fetch('/api/taskrouter/worker-status', {
@@ -69,7 +75,6 @@ export function useAutoLogout(sessionIssuedAt: number, isCallActive = false) {
 
   useEffect(() => {
     const sessionCutoff = getAutoLogoutCutoff(sessionIssuedAt)
-    if (!sessionCutoff) return
 
     const now = new Date()
 
