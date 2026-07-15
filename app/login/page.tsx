@@ -1,7 +1,7 @@
 'use client'
 
-import { LoginForm } from "@/components/login-form"
-import Spline from "@splinetool/react-spline"
+import { LoginForm } from '@/components/login-form'
+import Spline from '@splinetool/react-spline'
 
 export default function LoginPage() {
   return (
