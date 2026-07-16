@@ -4,13 +4,26 @@ import { useRef, useState, useEffect, useMemo, useCallback } from 'react'
 import dynamic from 'next/dynamic'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useBillboardFormExtraction } from '@/hooks/useBillboardFormExtraction'
 import { useTwilioContext } from '@/components/providers/TwilioProvider'
 import { useOpenAITranscription } from '@/hooks/useOpenAITranscription'
 import { LeadForm, PricingPanel, TranscriptView } from '@/components/sales-call'
 import type { TranscriptItem } from '@/types/sales-call'
-import { showSuccessToast, showErrorToast } from '@/lib/error-handling'
+import {
+  dismissToasts,
+  showSuccessToast,
+  showErrorToast,
+} from '@/lib/error-handling'
 import { publicConfig } from '@/lib/public-config'
 import { useFormStore } from '@/stores/formStore'
 import { isAutoLogoutDue, useAutoLogout } from '@/hooks/useAutoLogout'
@@ -405,7 +418,6 @@ type TabbedBodyProps = {
   isSubmittingNutshell: boolean
   nutshellStatus: 'idle' | 'success' | 'error'
   nutshellMessage: string
-  fullTranscript: string
   setIsLoadingBillboard: React.Dispatch<React.SetStateAction<boolean>>
   setBillboardContext: React.Dispatch<React.SetStateAction<string>>
   onClearAll: () => void
@@ -416,7 +428,96 @@ type TabbedBodyProps = {
   twilioReady: boolean
 }
 
+type LeadActionsProps = {
+  onNutshellSubmit: () => Promise<void>
+  isSubmittingNutshell: boolean
+  nutshellStatus: 'idle' | 'success' | 'error'
+  nutshellMessage: string
+  onClearAll: () => void
+}
+
+function LeadActions({
+  onNutshellSubmit,
+  isSubmittingNutshell,
+  nutshellStatus,
+  nutshellMessage,
+  onClearAll,
+}: LeadActionsProps) {
+  const [unqualifiedDialogOpen, setUnqualifiedDialogOpen] = useState(false)
+
+  const handleUnqualifiedDelete = () => {
+    onClearAll()
+    setUnqualifiedDialogOpen(false)
+  }
+
+  return (
+    <div className="mt-auto flex flex-shrink-0 flex-col items-center gap-1 border-t border-slate-200 bg-white pt-2 sm:gap-2">
+      {nutshellStatus !== 'idle' && (
+        <span
+          className={`text-[10px] font-medium sm:text-xs ${
+            nutshellStatus === 'success' ? 'text-green-600' : 'text-red-600'
+          }`}
+        >
+          {nutshellMessage}
+        </span>
+      )}
+      <div className="flex gap-2">
+        <Button
+          onClick={onNutshellSubmit}
+          disabled={isSubmittingNutshell}
+          className="h-7 bg-orange-500 px-3 text-xs font-semibold text-white shadow-lg transition-all duration-200 hover:bg-orange-600 hover:shadow-xl sm:h-9 sm:px-6 sm:text-sm"
+        >
+          {isSubmittingNutshell ? 'Submitting...' : 'Nutshell'}
+        </Button>
+
+        <Dialog
+          open={unqualifiedDialogOpen}
+          onOpenChange={setUnqualifiedDialogOpen}
+        >
+          <DialogTrigger asChild>
+            <Button
+              variant="outline"
+              className="h-7 border-slate-300 px-3 text-xs font-semibold text-slate-700 shadow-sm transition-all duration-200 hover:bg-slate-100 hover:shadow-md sm:h-9 sm:px-6 sm:text-sm"
+            >
+              Unqualified
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="text-lg font-bold text-slate-800">
+                Unqualified Lead
+              </DialogTitle>
+              <DialogDescription asChild>
+                <div className="pt-4">
+                  <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm leading-relaxed text-slate-700">
+                    &quot;I&apos;m with our national office in Dallas. To reach
+                    the local office, just search &quot;Lamar Advertising&quot;
+                    on your phone&apos;s MAP app, and it&apos;ll give you the
+                    actual local number.&quot;
+                  </div>
+                </div>
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="mt-4 sm:justify-center">
+              <Button
+                variant="destructive"
+                onClick={handleUnqualifiedDelete}
+                className="bg-red-500 px-8 font-semibold text-white hover:bg-red-600"
+              >
+                Delete
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </div>
+  )
+}
+
 function TabbedBody(props: TabbedBodyProps) {
+  const [sidePanel, setSidePanel] = useState<
+    'pricing' | 'google-map' | 'bsi-map'
+  >('pricing')
   const {
     resetTrigger,
     callerPhone,
@@ -428,7 +529,6 @@ function TabbedBody(props: TabbedBodyProps) {
     isSubmittingNutshell,
     nutshellStatus,
     nutshellMessage,
-    fullTranscript,
     setIsLoadingBillboard,
     setBillboardContext,
     onClearAll,
@@ -439,12 +539,13 @@ function TabbedBody(props: TabbedBodyProps) {
     twilioReady,
   } = props
   return (
-    <CardContent className="p-1.5 sm:p-2 flex flex-col flex-1 min-h-0 overflow-hidden">
+    <CardContent className="px-1.5 pb-1.5 pt-2 sm:px-2 sm:pb-2 flex flex-col flex-1 min-h-0 overflow-hidden">
       <Tabs
         defaultValue="form"
-        className="w-full flex-1 flex flex-col min-h-0 overflow-hidden"
+        onValueChange={() => setSidePanel('pricing')}
+        className="w-full flex-1 flex flex-col gap-0 min-h-0 overflow-hidden"
       >
-        <TabsList className="grid w-full grid-cols-4 mb-2 sm:mb-4 bg-slate-100 p-0.5 sm:p-1 rounded-lg h-8 sm:h-9 flex-shrink-0">
+        <TabsList className="grid w-full grid-cols-4 mb-2 bg-slate-100 p-0.5 sm:p-1 rounded-lg h-8 sm:h-9 flex-shrink-0">
           <TabsTrigger
             value="form"
             className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs"
@@ -476,29 +577,96 @@ function TabbedBody(props: TabbedBodyProps) {
         </TabsList>
         <TabsContent
           value="form"
-          className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col"
+          forceMount
+          className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=inactive]:hidden data-[state=active]:flex data-[state=active]:flex-col"
         >
-          <div className="flex flex-col xl:flex-row gap-2 sm:gap-1 h-full min-h-0 overflow-hidden">
-            <LeadForm
-              key={resetTrigger}
-              resetTrigger={resetTrigger}
-              inboundPhone={callerPhone}
-              validationErrors={validationErrors}
-            />
-            <PricingPanel
-              key={`pricing-${resetTrigger}`}
-              isLoading={isLoadingBillboard}
-              billboardContext={billboardContext}
-              hasTranscripts={transcripts.length > 0}
-              onNutshellSubmit={onNutshellSubmit}
-              isSubmittingNutshell={isSubmittingNutshell}
-              nutshellStatus={nutshellStatus}
-              nutshellMessage={nutshellMessage}
-              fullTranscript={fullTranscript}
-              setIsLoadingBillboard={setIsLoadingBillboard}
-              setBillboardContext={setBillboardContext}
-              onClearAll={onClearAll}
-            />
+          <div
+            className={`h-full min-h-0 gap-2 overflow-hidden sm:gap-1 ${
+              sidePanel === 'pricing'
+                ? 'flex flex-col xl:flex-row'
+                : 'grid grid-cols-1 xl:grid-cols-[minmax(0,3fr)_minmax(360px,2fr)]'
+            }`}
+          >
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <LeadForm
+                key={resetTrigger}
+                resetTrigger={resetTrigger}
+                inboundPhone={callerPhone}
+                validationErrors={validationErrors}
+              />
+            </div>
+
+            <Tabs
+              value={sidePanel}
+              onValueChange={(value) => setSidePanel(value as typeof sidePanel)}
+              className={`min-h-0 overflow-hidden ${
+                sidePanel === 'pricing'
+                  ? 'w-full xl:w-[400px] xl:flex-shrink-0'
+                  : ''
+              }`}
+            >
+              <TabsList className="mx-auto mb-1 grid h-9 w-full max-w-sm grid-cols-3 rounded-none border-b border-slate-200 bg-transparent p-0">
+                <TabsTrigger
+                  value="pricing"
+                  className="h-9 rounded-none border-x-0 border-t-0 border-b-2 border-transparent bg-transparent text-[10px] font-semibold tracking-wide text-slate-500 shadow-none transition-colors hover:text-slate-900 data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent sm:text-xs"
+                >
+                  Pricing
+                </TabsTrigger>
+                <TabsTrigger
+                  value="google-map"
+                  className="h-9 rounded-none border-x-0 border-t-0 border-b-2 border-transparent bg-transparent text-[10px] font-semibold tracking-wide text-slate-500 shadow-none transition-colors hover:text-slate-900 data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent sm:text-xs"
+                >
+                  Google Map
+                </TabsTrigger>
+                <TabsTrigger
+                  value="bsi-map"
+                  className="h-9 rounded-none border-x-0 border-t-0 border-b-2 border-transparent bg-transparent text-[10px] font-semibold tracking-wide text-slate-500 shadow-none transition-colors hover:text-slate-900 data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent sm:text-xs"
+                >
+                  BSI Map
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent
+                value="pricing"
+                forceMount
+                className="mt-0 min-h-0 overflow-hidden data-[state=inactive]:hidden data-[state=active]:flex data-[state=active]:flex-col"
+              >
+                <PricingPanel
+                  key={`pricing-${resetTrigger}`}
+                  isLoading={isLoadingBillboard}
+                  billboardContext={billboardContext}
+                  setIsLoadingBillboard={setIsLoadingBillboard}
+                  setBillboardContext={setBillboardContext}
+                />
+              </TabsContent>
+              <TabsContent
+                value="google-map"
+                className="mt-0 min-h-0 overflow-hidden data-[state=active]:block"
+              >
+                <GoogleMapPanel
+                  key={`google-map-${resetTrigger}`}
+                  initialLocation={currentMarketLocation}
+                  exclusiveView
+                />
+              </TabsContent>
+              <TabsContent
+                value="bsi-map"
+                className="mt-0 min-h-0 overflow-hidden data-[state=active]:block"
+              >
+                <ArcGISMapPanel
+                  key={`arcgis-map-${resetTrigger}`}
+                  initialLocation={currentMarketLocation}
+                />
+              </TabsContent>
+
+              <LeadActions
+                onNutshellSubmit={onNutshellSubmit}
+                isSubmittingNutshell={isSubmittingNutshell}
+                nutshellStatus={nutshellStatus}
+                nutshellMessage={nutshellMessage}
+                onClearAll={onClearAll}
+              />
+            </Tabs>
           </div>
         </TabsContent>
         <TabsContent
@@ -723,6 +891,16 @@ function useNutshellSubmission(fullTranscript: string, clearAll: () => void) {
   >('idle')
   const [nutshellMessage, setNutshellMessage] = useState('')
   const [validationErrors, setValidationErrors] = useState<string[]>([])
+  const resetValidation = useCallback(() => {
+    dismissToasts()
+    setNutshellStatus('idle')
+    setNutshellMessage('')
+    setValidationErrors([])
+  }, [])
+  const clearAllWithValidation = useCallback(() => {
+    resetValidation()
+    clearAll()
+  }, [resetValidation, clearAll])
   useEffect(() => {
     if (nutshellStatus !== 'success') return
     const timer = setTimeout(() => {
@@ -732,6 +910,7 @@ function useNutshellSubmission(fullTranscript: string, clearAll: () => void) {
     return () => clearTimeout(timer)
   }, [nutshellStatus])
   const submit = useCallback(async () => {
+    dismissToasts()
     setIsSubmittingNutshell(true)
     setNutshellStatus('idle')
     setNutshellMessage('')
@@ -772,6 +951,7 @@ function useNutshellSubmission(fullTranscript: string, clearAll: () => void) {
     nutshellMessage,
     validationErrors,
     submit,
+    clearAllWithValidation,
   }
 }
 
@@ -897,7 +1077,7 @@ export default function SalesCallTranscriber({
   return (
     <div className="h-full overflow-hidden flex items-center justify-center m-0 p-0">
       <div className="max-w-[1800px] w-full h-full flex flex-col px-2 sm:px-0">
-        <Card className="shadow-lg border-0 flex flex-col h-full overflow-hidden">
+        <Card className="shadow-lg border-0 flex flex-col gap-0 h-full overflow-hidden">
           <CallHeader
             userEmail={twilio.userEmail}
             status={twilio.status}
@@ -910,7 +1090,7 @@ export default function SalesCallTranscriber({
             fileInputRef={upload.fileInputRef}
             onFileSelect={upload.handleFileSelect}
             onUploadClick={upload.handleUploadClick}
-            onClearAll={clearAll}
+            onClearAll={nutshell.clearAllWithValidation}
             onHangupCall={twilio.hangupCall}
             onAcceptCall={twilio.acceptCall}
             onRejectCall={twilio.rejectCall}
@@ -934,10 +1114,9 @@ export default function SalesCallTranscriber({
             isSubmittingNutshell={nutshell.isSubmittingNutshell}
             nutshellStatus={nutshell.nutshellStatus}
             nutshellMessage={nutshell.nutshellMessage}
-            fullTranscript={extraction.fullTranscript}
             setIsLoadingBillboard={setIsLoadingBillboard}
             setBillboardContext={setBillboardContext}
-            onClearAll={clearAll}
+            onClearAll={nutshell.clearAllWithValidation}
             currentMarketLocation={currentMarketLocation}
             scrollRef={scrollRef}
             interimTranscript={transcription.interimTranscript}
