@@ -227,7 +227,35 @@ function handleDeviceUnregistered(
     })
 }
 
-function bindDeviceEvents(
+async function refreshExpiringToken(
+  runtime: TwilioRuntime,
+  update: UpdateState,
+  device: Device,
+  setWorkerStatus: SetWorkerStatus,
+) {
+  try {
+    const credentials = await fetchTwilioCredentials(update)
+    if (!credentials || runtime.loggedOut) {
+      await setWorkerStatus('offline')
+      return
+    }
+    if (runtime.device !== device || device.state === 'destroyed') return
+
+    device.updateToken(credentials.token)
+    console.info('Twilio access token refreshed')
+  } catch (error) {
+    console.error('Failed to refresh Twilio access token:', error)
+    update({
+      status: 'Calling token refresh failed',
+      deviceError: `Token refresh failed: ${getErrorMessage(error)}`,
+    })
+    await setWorkerStatus('offline').catch((statusError) => {
+      console.error('Failed to set worker offline:', statusError)
+    })
+  }
+}
+
+export function bindDeviceEvents(
   runtime: TwilioRuntime,
   update: UpdateState,
   device: Device,
@@ -238,7 +266,11 @@ function bindDeviceEvents(
   device.on('unregistered', () =>
     handleDeviceUnregistered(runtime, update, device),
   )
-  device.on('error', (error: Error) => {
+  device.on('error', (error: Error & { code?: number }) => {
+    if (error.code === 20101) {
+      void refreshExpiringToken(runtime, update, device, setWorkerStatus)
+      return
+    }
     console.error('Twilio device error:', error)
     update({
       status: `Twilio error: ${error.message}`,
@@ -246,9 +278,7 @@ function bindDeviceEvents(
     })
   })
   device.on('tokenWillExpire', () => {
-    void setWorkerStatus('offline').catch((error) => {
-      console.error('Failed to set expiring worker offline:', error)
-    })
+    void refreshExpiringToken(runtime, update, device, setWorkerStatus)
   })
 }
 
