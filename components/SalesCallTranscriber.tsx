@@ -996,9 +996,16 @@ function getMarketLocation(
   const market =
     activeMarketIndex === 0 ? primary : additionalMarkets[activeMarketIndex - 1]
   if (!market) return ''
-  return market.targetCity && market.state
-    ? `${market.targetCity}, ${market.state}`
-    : market.targetArea || ''
+
+  const city = market.targetCity?.trim()
+  const state = market.state?.trim()
+  const area = market.targetArea?.trim()
+
+  if (city && state) {
+    return area ? `${area}, ${city}, ${state}` : `${city}, ${state}`
+  }
+
+  return area || ''
 }
 
 function useMarketLocation() {
