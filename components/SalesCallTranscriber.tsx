@@ -542,6 +542,7 @@ function TabbedBody(props: TabbedBodyProps) {
     <CardContent className="px-1.5 pb-1.5 pt-2 sm:px-2 sm:pb-2 flex flex-col flex-1 min-h-0 overflow-hidden">
       <Tabs
         defaultValue="form"
+        onValueChange={() => setSidePanel('pricing')}
         className="w-full flex-1 flex flex-col gap-0 min-h-0 overflow-hidden"
       >
         <TabsList className="grid w-full grid-cols-4 mb-2 bg-slate-100 p-0.5 sm:p-1 rounded-lg h-8 sm:h-9 flex-shrink-0">

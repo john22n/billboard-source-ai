@@ -148,7 +148,13 @@ export function GoogleMapPanel({
   )
 
   const initializeMap = useCallback(() => {
-    if (!mapRef.current || !window.google?.maps?.Map || initCalledRef.current)
+    const mapElement = mapRef.current
+    if (
+      !(mapElement instanceof HTMLElement) ||
+      !mapElement.isConnected ||
+      !window.google?.maps?.Map ||
+      initCalledRef.current
+    )
       return
     initCalledRef.current = true
 
@@ -157,7 +163,7 @@ export function GoogleMapPanel({
     const defaultZoom = 4
 
     // Create map
-    const map = new window.google.maps.Map(mapRef.current, {
+    const map = new window.google.maps.Map(mapElement, {
       center: defaultCenter,
       zoom: defaultZoom,
       mapId: 'billboard-source-map',
@@ -235,6 +241,30 @@ export function GoogleMapPanel({
   useEffect(() => {
     if (window.google?.maps?.Map) {
       setScriptReady(true)
+    }
+  }, [])
+
+  // Release Maps listeners and DOM references before a tab removes this panel.
+  useEffect(() => {
+    return () => {
+      if (window.google?.maps?.event) {
+        if (mapInstanceRef.current) {
+          window.google.maps.event.clearInstanceListeners(
+            mapInstanceRef.current,
+          )
+        }
+        if (streetViewPanoramaRef.current) {
+          window.google.maps.event.clearInstanceListeners(
+            streetViewPanoramaRef.current,
+          )
+        }
+      }
+      if (markerRef.current) {
+        markerRef.current.map = null
+      }
+      mapInstanceRef.current = null
+      markerRef.current = null
+      streetViewPanoramaRef.current = null
     }
   }, [])
 
@@ -356,6 +386,7 @@ export function GoogleMapPanel({
       {/* Google Maps Script - lazy loaded during browser idle time */}
       {googleMapsApiKey && (
         <Script
+          id="google-maps-javascript-api"
           src={`https://maps.googleapis.com/maps/api/js?key=${googleMapsApiKey}&libraries=marker&v=weekly`}
           strategy="lazyOnload"
           async
