@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/clear-openai-logs",
       "schedule": "0 0 1 * *"
+    },
+    {
+      "path": "/api/cron/set-workers-offline",
+      "schedule": "0 0,1 * * *"
     }
   ]
 }
