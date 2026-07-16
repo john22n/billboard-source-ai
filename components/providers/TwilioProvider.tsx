@@ -150,8 +150,7 @@ function showIncomingNotification(
   }
 }
 
-function canShowIncomingNotification() {
-  if (document.visibilityState === 'visible') return false
+export function canShowIncomingNotification() {
   if (!('Notification' in window)) return false
   return Notification.permission === 'granted'
 }
