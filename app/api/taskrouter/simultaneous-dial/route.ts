@@ -39,11 +39,6 @@ export async function POST(req: Request) {
 
     console.log('═══════════════════════════════════════════')
     console.log('📱 SIMULTANEOUS RING')
-    console.log('TaskSid:', taskSid)
-    console.log('WorkerSid:', workerSid)
-    console.log('ClientIdentity:', clientIdentity)
-    console.log('CellPhone:', cellPhone.replace(/\d(?=\d{4})/g, '*'))
-    console.log('CallerFrom:', callerFrom.replace(/\d(?=\d{4})/g, '*'))
     console.log('═══════════════════════════════════════════')
 
     if (!clientIdentity || !cellPhone) {
@@ -115,8 +110,8 @@ export async function POST(req: Request) {
       status: 200,
       headers: { 'Content-Type': 'text/xml' },
     })
-  } catch (error) {
-    console.error('❌ Simultaneous dial TwiML error:', error)
+  } catch {
+    console.error('❌ Simultaneous dial TwiML generation failed')
     return new Response(
       '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>',
       { status: 200, headers: { 'Content-Type': 'text/xml' } },

@@ -19,16 +19,11 @@ export async function POST(req: Request) {
     console.log('═══════════════════════════════════════════')
     console.log('📼 VOICEMAIL HANDLER')
     console.log('═══════════════════════════════════════════')
-    console.log('TaskSid:', taskSid)
-    console.log('WorkspaceSid:', workspaceSid)
 
     // Build callback URLs
     const appUrl = `${url.protocol}//${url.host}`
     const actionUrl = `${appUrl}/api/taskrouter/voicemail-complete?taskSid=${taskSid}&workspaceSid=${workspaceSid}`
     const transcribeCallbackUrl = `${appUrl}/api/taskrouter/voicemail-transcription`
-    console.log('ActionUrl:', actionUrl)
-    console.log('TranscribeCallbackUrl:', transcribeCallbackUrl)
-
     // Helper to escape XML special characters in attribute values
     const escapeXml = (str: string) =>
       str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&apos;')
@@ -57,8 +52,8 @@ export async function POST(req: Request) {
       status: 200,
       headers: { 'Content-Type': 'text/xml' },
     })
-  } catch (error) {
-    console.error('❌ Voicemail handler error:', error)
+  } catch {
+    console.error('❌ Voicemail handler failed')
 
     const errorTwiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>

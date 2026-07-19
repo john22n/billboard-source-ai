@@ -29,6 +29,10 @@ vi.mock('@/lib/config', () => ({
   },
 }))
 
+vi.mock('@/lib/rate-limit', () => ({
+  rateLimit: vi.fn(async () => ({ allowed: true, retryAfterSeconds: 0 })),
+}))
+
 vi.mock('twilio', () => {
   class VoiceGrant {}
   class AccessToken {

@@ -31,8 +31,8 @@ export const getCurrentUser = cache(async () => {
       .from(user)
       .where(eq(user.id, session.userId))
     return result[0] || null
-  } catch (error) {
-    console.error('Error getting user by ID:', error)
+  } catch {
+    console.error('Error getting user by ID')
     return null
   }
 })
@@ -41,8 +41,8 @@ export const getUserByEmail = cache(async (email: string) => {
   try {
     const result = await db.select().from(user).where(eq(user.email, email))
     return result[0] || null
-  } catch (error) {
-    console.error('Error getting user by email', error)
+  } catch {
+    console.error('Error getting user by email')
     return null
   }
 })

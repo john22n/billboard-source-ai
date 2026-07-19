@@ -33,14 +33,7 @@ export async function POST(req: Request) {
 
     console.log('═══════════════════════════════════════════')
     console.log('📼 VOICEMAIL COMPLETE')
-    console.log('TaskSid:', taskSid)
-    console.log('WorkspaceSid:', workspaceSid)
-    console.log('From:', from)
-    console.log('To:', to)
-    console.log('CallSid:', callSid)
     console.log('QueueTime:', queueTime, 'seconds')
-    console.log('RecordingSid:', recordingSid)
-    console.log('RecordingUrl:', recordingUrl)
     console.log('Duration:', durationSeconds, 'seconds')
     console.log('═══════════════════════════════════════════')
 
@@ -57,12 +50,9 @@ export async function POST(req: Request) {
             assignmentStatus: 'completed',
             reason: 'Voicemail recorded',
           })
-        console.log('✅ Task completed:', taskSid)
-      } catch (err) {
-        console.error(
-          '⚠️ Failed to complete task (may already be completed):',
-          err,
-        )
+        console.log('✅ Task completed')
+      } catch {
+        console.error('⚠️ Failed to complete task (may already be completed)')
       }
     }
 
@@ -103,8 +93,8 @@ export async function POST(req: Request) {
       status: 200,
       headers: { 'Content-Type': 'text/xml' },
     })
-  } catch (error) {
-    console.error('❌ Voicemail complete error:', error)
+  } catch {
+    console.error('❌ Voicemail completion failed')
     return new Response(
       '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>',
       { status: 200, headers: { 'Content-Type': 'text/xml' } },

@@ -88,8 +88,10 @@ async function GET() {
       })
 
       if (!recordingsResponse.ok) {
-        const errorText = await recordingsResponse.text()
-        console.error('Failed to fetch recordings:', errorText)
+        console.error(
+          'Failed to fetch recordings with status:',
+          recordingsResponse.status,
+        )
         return NextResponse.json(
           { error: 'Failed to fetch recordings from Twilio' },
           { status: 500 },
@@ -128,8 +130,8 @@ async function GET() {
             const callData = await callResponse.json()
             from = callData.from || 'Unknown'
           }
-        } catch (e) {
-          console.error('Failed to fetch call details:', e)
+        } catch {
+          console.error('Failed to fetch call details')
         }
 
         // Fetch transcription for this recording
@@ -149,8 +151,8 @@ async function GET() {
               transcriptionStatus = transcriptions[0].status
             }
           }
-        } catch (e) {
-          console.error('Failed to fetch transcription:', e)
+        } catch {
+          console.error('Failed to fetch transcription')
         }
 
         return {
@@ -173,8 +175,8 @@ async function GET() {
     )
 
     return NextResponse.json({ voicemails })
-  } catch (error) {
-    console.error('Error fetching voicemails:', error)
+  } catch {
+    console.error('Error fetching voicemails')
     return NextResponse.json(
       { error: 'Failed to fetch voicemails' },
       { status: 500 },

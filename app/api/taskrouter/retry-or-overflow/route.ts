@@ -40,8 +40,6 @@ async function handle(req: Request): Promise<Response> {
 
   console.log('═══════════════════════════════════════════')
   console.log('🔁 RETRY-OR-OVERFLOW')
-  console.log('TaskSid:', taskSid)
-  console.log('WorkerSid:', workerSid)
   console.log('═══════════════════════════════════════════')
 
   // Can't identify the task → fail terminally to overflow rather than strand.

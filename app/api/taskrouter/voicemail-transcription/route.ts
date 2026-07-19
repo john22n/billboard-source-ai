@@ -83,17 +83,12 @@ async function sendVoicemailEmail(
     })
 
     if (response.ok) {
-      console.log('✅ Voicemail email sent to', notificationEmail)
+      console.log('✅ Voicemail email sent')
     } else {
-      const errorText = await response.text()
-      console.error(
-        '❌ Failed to send voicemail email:',
-        response.status,
-        errorText,
-      )
+      console.error('❌ Failed to send voicemail email:', response.status)
     }
-  } catch (error) {
-    console.error('❌ Email send error:', error)
+  } catch {
+    console.error('❌ Email send failed')
   }
 }
 
@@ -112,12 +107,8 @@ export async function POST(req: Request) {
 
     console.log('═══════════════════════════════════════════')
     console.log('📝 VOICEMAIL TRANSCRIPTION CALLBACK')
-    console.log('═══════════════════════════════════════════')
-    console.log('From:', from)
     console.log('Status:', transcriptionStatus)
-    console.log('RecordingUrl:', recordingUrl)
     console.log('Duration:', recordingDuration)
-    console.log('Transcription:', transcriptionText)
     console.log('═══════════════════════════════════════════')
 
     const resendApiKey = serverConfig.email.requireResendApiKey()
@@ -142,7 +133,7 @@ export async function POST(req: Request) {
       )
       return Response.json(responseBody, { status: 500 })
     }
-    console.error('❌ Transcription callback error:', error)
+    console.error('❌ Transcription callback failed')
     return new Response('Error', { status: 500 })
   }
 }

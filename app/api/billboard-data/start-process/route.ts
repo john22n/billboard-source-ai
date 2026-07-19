@@ -78,14 +78,8 @@ export async function POST(req: NextRequest) {
       existingRecords,
       mode: 'upsert', // ⭐ Indicate we're in upsert mode
     })
-  } catch (error) {
-    console.error('Error:', error)
-    return NextResponse.json(
-      {
-        error: 'Failed to start',
-        details: error instanceof Error ? error.message : 'Unknown error',
-      },
-      { status: 500 },
-    )
+  } catch {
+    console.error('Failed to start billboard data processing')
+    return NextResponse.json({ error: 'Failed to start' }, { status: 500 })
   }
 }

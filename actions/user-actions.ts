@@ -96,8 +96,8 @@ export async function updateTwilioPhone(
 
     revalidatePath('/admin')
     return { success: true, message: 'Phone number updated' }
-  } catch (err) {
-    console.error('Update phone error:', err)
+  } catch {
+    console.error('Update phone failed')
     return { success: false, message: 'Failed to update phone number' }
   }
 }

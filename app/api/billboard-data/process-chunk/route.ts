@@ -297,12 +297,9 @@ export async function POST(req: NextRequest) {
     if (isMissingConfig(error)) {
       return NextResponse.json(configErrorResponseBody(error), { status: 500 })
     }
-    console.error('Error:', error)
+    console.error('Failed to process billboard data chunk')
     return NextResponse.json(
-      {
-        error: 'Failed to process chunk',
-        details: error instanceof Error ? error.message : 'Unknown error',
-      },
+      { error: 'Failed to process chunk' },
       { status: 500 },
     )
   }

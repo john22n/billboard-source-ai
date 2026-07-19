@@ -1,20 +1,24 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { startAuthentication, startRegistration, browserSupportsWebAuthn } from '@simplewebauthn/browser'
-import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import {
+  startAuthentication,
+  startRegistration,
+  browserSupportsWebAuthn,
+} from '@simplewebauthn/browser'
+import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { signIn } from '@/actions/auth'
-import { showErrorToast, showSuccessToast, getErrorMessage } from '@/lib/error-handling'
+import {
+  showErrorToast,
+  showSuccessToast,
+  getErrorMessage,
+} from '@/lib/error-handling'
 
 type LoginStep = 'email' | 'passkey' | 'password'
 
-export function LoginForm({
-  className,
-}: {
-  className?: string
-}) {
+export function LoginForm({ className }: { className?: string }) {
   const router = useRouter()
   const [step, setStep] = useState<LoginStep>('email')
   const [email, setEmail] = useState('')
@@ -25,40 +29,7 @@ export function LoginForm({
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
-    setIsLoading(true)
-
-    try {
-      const res = await fetch('/api/auth/check-user', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      })
-
-      const data = await res.json()
-
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to check user')
-      }
-
-      if (!data.exists) {
-        setError('User not found. Please check your email.')
-        setIsLoading(false)
-        return
-      }
-
-      if (data.hasPasskeys && browserSupportsWebAuthn()) {
-        setStep('passkey')
-        await handlePasskeyAuth()
-      } else {
-        setStep('password')
-        setIsLoading(false)
-      }
-    } catch (err) {
-      const message = getErrorMessage(err)
-      setError(message)
-      showErrorToast(message)
-      setIsLoading(false)
-    }
+    setStep('password')
   }
 
   const handlePasskeyAuth = async () => {
@@ -68,7 +39,7 @@ export function LoginForm({
       const optionsRes = await fetch('/api/passkey/auth-options', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({}),
       })
 
       if (!optionsRes.ok) {
@@ -183,7 +154,7 @@ export function LoginForm({
   }
 
   return (
-    <div className={cn("flex flex-col gap-6", className)}>
+    <div className={cn('flex flex-col gap-6', className)}>
       <div className="flex flex-col items-center gap-2 text-center">
         <h1 className="text-2xl font-bold">Login to your account</h1>
         <p className="text-muted-foreground text-sm text-balance">
@@ -207,9 +178,7 @@ export function LoginForm({
               disabled={isLoading}
               className="bg-white"
             />
-            {error && (
-              <p className="text-sm text-red-500">{error}</p>
-            )}
+            {error && <p className="text-sm text-red-500">{error}</p>}
           </div>
           <Button type="submit" className="w-full" disabled={isLoading}>
             {isLoading ? 'Checking...' : 'Continue'}
@@ -285,13 +254,24 @@ export function LoginForm({
               className="bg-white"
               autoFocus
             />
-            {error && (
-              <p className="text-sm text-red-500">{error}</p>
-            )}
+            {error && <p className="text-sm text-red-500">{error}</p>}
           </div>
           <Button type="submit" className="w-full" disabled={isLoading}>
             {isLoading ? 'Signing in...' : 'Login'}
           </Button>
+          {browserSupportsWebAuthn() && (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isLoading}
+              onClick={() => {
+                setStep('passkey')
+                void handlePasskeyAuth()
+              }}
+            >
+              Use a passkey
+            </Button>
+          )}
         </form>
       )}
     </div>

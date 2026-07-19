@@ -10,16 +10,22 @@ import {
 } from '@/lib/auth'
 import { getUserByEmail } from '@/lib/dal'
 import { redirect } from 'next/navigation'
+import {
+  rateLimit,
+  resetRateLimit,
+  unauthenticatedRateLimitIdentities,
+} from '@/lib/rate-limit'
 
 // define zod schema for signin validation
 const SignInSchema = z.object({
   email: z
     .string()
+    .max(64)
     .email({ message: 'Invalid email' })
     .refine((val) => val.endsWith('@billboardsource.com'), {
       message: 'Email is not a company email',
     }),
-  password: z.string().min(6, 'Password is required'),
+  password: z.string().min(6, 'Password is required').max(128),
 })
 
 // define zod for signup validation
@@ -50,6 +56,75 @@ export type ActionResponse = {
   error?: string
 }
 
+const INVALID_CREDENTIALS_RESPONSE: ActionResponse = {
+  success: false,
+  message: 'Invalid email or password',
+  errors: { email: ['Invalid email or password'] },
+}
+
+// Cost-10 sentinel keeps unknown-account and wrong-password paths comparable.
+const DUMMY_PASSWORD_HASH =
+  '$2b$10$vHD9aiVqXpjS7cwiqkJdMeKa0BywYh13fscFrGo5R8YQ6lCK5a8y2'
+
+const RATE_LIMITED_RESPONSE: ActionResponse = {
+  success: false,
+  message: 'Too many attempts. Please try again later.',
+}
+
+class SignInFailure extends Error {
+  constructor(readonly response: ActionResponse) {
+    super(response.message)
+  }
+}
+
+async function enforceSignInSourceLimit() {
+  const { source } = await unauthenticatedRateLimitIdentities()
+  const attempt = await rateLimit('sign-in-source', source, 30, 15 * 60)
+  if (!attempt.allowed) throw new SignInFailure(RATE_LIMITED_RESPONSE)
+}
+
+function parseSignInData(data: unknown): SignInData {
+  const result = SignInSchema.safeParse(data)
+  if (!result.success) {
+    throw new SignInFailure({
+      success: false,
+      message: 'Signin Validation Failed',
+      errors: { email: ['Invalid email or password'] },
+    })
+  }
+  return result.data
+}
+
+async function enforceSignInAccountLimit(email: string) {
+  const { account } = await unauthenticatedRateLimitIdentities(email)
+  const identity = account as string
+  const attempt = await rateLimit('sign-in-account', identity, 5, 15 * 60)
+  if (!attempt.allowed) throw new SignInFailure(RATE_LIMITED_RESPONSE)
+  return identity
+}
+
+async function authenticatePassword(data: SignInData) {
+  const user = await getUserByEmail(data.email)
+  if (!user) {
+    await verifyPassword(data.password, DUMMY_PASSWORD_HASH)
+    return null
+  }
+  if (!user.password) {
+    await verifyPassword(data.password, DUMMY_PASSWORD_HASH)
+    return null
+  }
+  return (await verifyPassword(data.password, user.password)) ? user : null
+}
+
+async function completeSignIn(
+  user: { id: string; email: string; role: string | null },
+  accountIdentity: string,
+): Promise<ActionResponse> {
+  await createSession(user.id, user.email, user.role ?? 'user')
+  await resetRateLimit('sign-in-account', accountIdentity)
+  return { success: true, message: 'Signed in successfully' }
+}
+
 export async function signIn(formData: FormData): Promise<ActionResponse> {
   try {
     // extract data from form
@@ -58,54 +133,19 @@ export async function signIn(formData: FormData): Promise<ActionResponse> {
       password: formData.get('password') as string,
     }
 
-    //validate with zod
-    const validationResult = SignInSchema.safeParse(data)
-    if (!validationResult.success) {
-      return {
-        success: false,
-        message: 'Signin Validation Failed',
-        errors: {
-          email: ['Invalid email or password'],
-        },
-      }
-    }
+    await enforceSignInSourceLimit()
+    const validatedData = parseSignInData(data)
+    const accountIdentity = await enforceSignInAccountLimit(validatedData.email)
 
-    //find user by email
-    const user = await getUserByEmail(data.email)
+    const user = await authenticatePassword(validatedData)
     if (!user) {
-      return {
-        success: false,
-        message: 'Invalid email or password',
-        errors: {
-          email: ['Invalid email or password'],
-        },
-      }
+      return INVALID_CREDENTIALS_RESPONSE
     }
 
-    //verify password
-    if (!user.password) {
-      return {
-        success: false,
-        message: 'Invalid credentials',
-      }
-    }
-
-    const isPasswordValid = await verifyPassword(data.password, user.password)
-    if (!isPasswordValid) {
-      return {
-        success: false,
-        message: 'Invalid credentials',
-      }
-    }
-
-    //create session
-    await createSession(user.id, user.email, user.role ?? 'user')
-    return {
-      success: true,
-      message: 'Signed in successfully',
-    }
+    return completeSignIn(user, accountIdentity)
   } catch (error) {
-    console.error('sign in error:', error)
+    if (error instanceof SignInFailure) return error.response
+    console.error('Sign in failed')
     return {
       success: false,
       message: 'An error occured while signing in ',
@@ -182,8 +222,8 @@ export async function signUp(
       success: true,
       message: 'Account created successfully',
     }
-  } catch (error) {
-    console.error('sign up error:', error)
+  } catch {
+    console.error('Sign up failed')
     return {
       success: false,
       message: 'An error occured while creating your account',

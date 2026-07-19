@@ -49,8 +49,8 @@ async function resetWorkerToBack(workerSid: string, label: string) {
       .workers(workerSid)
       .update({ activitySid: activitySids.available })
     console.log(`✅ Worker ${workerSid} reset to back of queue after ${label}`)
-  } catch (err) {
-    console.error(`❌ Failed to reset worker after ${label}:`, err)
+  } catch {
+    console.error(`❌ Failed to reset worker after ${label}`)
   }
 }
 
@@ -91,8 +91,8 @@ async function handleReservationAccepted(
     const busyActivitySid = serverConfig.taskRouter.requireActivitySid('busy')
     await setWorkerActivity(workerSid, busyActivitySid)
     console.log(`✅ Worker ${workerSid} switched to Busy`)
-  } catch (err) {
-    console.error('❌ Failed to switch worker to Busy:', err)
+  } catch {
+    console.error('❌ Failed to switch worker to Busy')
   }
 }
 
@@ -135,7 +135,7 @@ async function handleWorkerActivityUpdate(
     .update(user)
     .set({ workerActivity: newStatus })
     .where(eq(user.id, currentUser.id))
-  console.log(`   ✅ Updated ${currentUser.email} to ${newStatus}`)
+  console.log(`   ✅ Updated worker activity to ${newStatus}`)
 }
 
 async function handleTaskRouterEvent(formData: FormData) {
@@ -214,8 +214,8 @@ export async function POST(req: Request) {
     await handleTaskRouterEvent(formData)
 
     return new Response(null, { status: 204 })
-  } catch (error) {
-    console.error('❌ TaskRouter event callback error:', error)
+  } catch {
+    console.error('❌ TaskRouter event callback failed')
     return new Response(null, { status: 500 })
   }
 }

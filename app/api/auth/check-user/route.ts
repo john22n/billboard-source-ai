@@ -1,37 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getUserByEmail, getPasskeysByUserId } from '@/lib/passkey'
+import { NextResponse } from 'next/server'
 
-export async function POST(request: NextRequest) {
-  try {
-    const { email } = await request.json()
-
-    if (!email) {
-      return NextResponse.json(
-        { error: 'Email is required' },
-        { status: 400 }
-      )
-    }
-
-    const user = await getUserByEmail(email)
-
-    if (!user) {
-      return NextResponse.json(
-        { exists: false, hasPasskeys: false },
-        { status: 200 }
-      )
-    }
-
-    const passkeys = await getPasskeysByUserId(user.id)
-
-    return NextResponse.json({
-      exists: true,
-      hasPasskeys: passkeys.length > 0,
-    })
-  } catch (error) {
-    console.error('Error checking user:', error)
-    return NextResponse.json(
-      { error: 'Failed to check user' },
-      { status: 500 }
-    )
-  }
+// Account-existence preflights enable user enumeration. Authentication flows
+// now proceed without revealing whether an email or passkey is registered.
+export async function POST() {
+  return NextResponse.json({ error: 'Not found' }, { status: 404 })
 }

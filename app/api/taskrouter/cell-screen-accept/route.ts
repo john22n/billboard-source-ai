@@ -34,8 +34,8 @@ export async function POST(req: Request) {
       '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>',
       { status: 200, headers: { 'Content-Type': 'text/xml' } },
     )
-  } catch (error) {
-    console.error('❌ Cell screen accept error:', error)
+  } catch {
+    console.error('❌ Cell screen acceptance failed')
     return new Response(
       '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>',
       { status: 200, headers: { 'Content-Type': 'text/xml' } },

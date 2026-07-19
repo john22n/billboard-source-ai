@@ -6,6 +6,7 @@ import { user } from '@/db/schema'
 import * as jose from 'jose'
 import { cache } from 'react'
 import { serverConfig } from '@/lib/config'
+import { eq } from 'drizzle-orm'
 
 //JWT types
 interface JWTPayload {
@@ -38,7 +39,6 @@ export async function createUser(
 ) {
   const hashedPassword = await hashPassword(password)
   const id = nanoid()
-  console.log(id)
 
   try {
     await db.insert(user).values({
@@ -49,8 +49,8 @@ export async function createUser(
       twilioPhoneNumber: twilioPhoneNumber || null,
     })
     return { id, email }
-  } catch (error) {
-    console.error('error creating user:', error)
+  } catch {
+    console.error('Error creating user')
     return null
   }
 }
@@ -77,13 +77,9 @@ export async function verifyJWT(token: string): Promise<JWTPayload | null> {
       'code' in error &&
       error.code === 'ERR_JWT_EXPIRED'
     ) {
-      // Extract user email from the expired token's payload
-      const expiredPayload =
-        'payload' in error ? (error.payload as JWTPayload) : null
-      const userEmail = expiredPayload?.email || 'unknown'
-      console.log(`🔒 Token expired for user: ${userEmail} - logging out`)
+      console.log('🔒 Token expired - logging out')
     } else {
-      console.error('JWT verification failed:', error)
+      console.error('JWT verification failed')
     }
     return null
   }
@@ -117,8 +113,8 @@ export async function createSession(
     await setAuthCookie(token)
 
     return true
-  } catch (error) {
-    console.error('Error creating session:', error)
+  } catch {
+    console.error('Error creating session')
     return false
   }
 }
@@ -134,10 +130,17 @@ export const getSession = cache(async () => {
     const payload = await verifyJWT(token)
     if (!payload) return null
 
+    const [currentUser] = await db
+      .select({ email: user.email, role: user.role })
+      .from(user)
+      .where(eq(user.id, payload.userId))
+      .limit(1)
+    if (!currentUser) return null
+
     return {
       userId: payload.userId,
-      email: payload.email as string,
-      role: (payload.role as string) || 'user',
+      email: currentUser.email,
+      role: currentUser.role || 'user',
       issuedAt: payload.iat as number,
     }
   } catch (error) {
@@ -150,7 +153,7 @@ export const getSession = cache(async () => {
       )
       return null
     }
-    console.error('Error getting session:', error)
+    console.error('Error getting session')
     return null
   }
 })

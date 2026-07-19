@@ -33,9 +33,6 @@ export async function POST(req: Request) {
     console.log('═══════════════════════════════════════════')
     console.log('📱 CLIENT STATUS CALLBACK')
     console.log('CallStatus:', callStatus)
-    console.log('CallSid:', callSid)
-    console.log('TaskSid:', taskSid)
-    console.log('CellPhone:', cellPhone?.replace(/\d(?=\d{4})/g, '*'))
     console.log('═══════════════════════════════════════════')
 
     // Only act when the browser leg ended without answering
@@ -67,10 +64,8 @@ export async function POST(req: Request) {
           client
             .calls(call.sid)
             .update({ status: 'canceled' })
-            .then(() => console.log(`   ✅ Canceled cell leg ${call.sid}`))
-            .catch((err: Error) =>
-              console.error(`   ❌ Failed to cancel ${call.sid}:`, err.message),
-            ),
+            .then(() => console.log('   ✅ Canceled cell leg'))
+            .catch(() => console.error('   ❌ Failed to cancel cell leg')),
         ),
       )
     } else {
@@ -79,8 +74,8 @@ export async function POST(req: Request) {
 
     // Always return 204 — Twilio doesn't need TwiML from a statusCallback
     return new Response(null, { status: 204 })
-  } catch (error) {
-    console.error('❌ Client status callback error:', error)
+  } catch {
+    console.error('❌ Client status callback failed')
     return new Response(null, { status: 500 })
   }
 }
