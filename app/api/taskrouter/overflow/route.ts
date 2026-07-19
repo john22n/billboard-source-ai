@@ -1,3 +1,5 @@
+import { isValidTwilioWebhook } from '@/lib/twilio-webhook'
+
 /**
  * Overflow TwiML Handler (Feature 3)
  *
@@ -24,6 +26,9 @@ const escapeXml = (s: string): string =>
     .replace(/>/g, '&gt;')
 
 export async function POST(req: Request) {
+  if (!(await isValidTwilioWebhook(req)))
+    return new Response('Forbidden', { status: 403 })
+
   try {
     const url = new URL(req.url)
     const taskSid = url.searchParams.get('taskSid')

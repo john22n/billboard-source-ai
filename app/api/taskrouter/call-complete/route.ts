@@ -1,3 +1,5 @@
+import { isValidTwilioWebhook } from '@/lib/twilio-webhook'
+
 /**
  * Conference Status Callback
  *
@@ -183,6 +185,9 @@ async function handleConferenceEnd(options: {
 }
 
 export async function POST(req: Request) {
+  if (!(await isValidTwilioWebhook(req)))
+    return new Response('Forbidden', { status: 403 })
+
   try {
     const formData = await req.formData()
     const statusCallbackEvent = formData.get('StatusCallbackEvent') as string

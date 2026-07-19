@@ -9,6 +9,7 @@ import {
   isMissingConfig,
   serverConfig,
 } from '@/lib/config'
+import { getSession } from '@/lib/auth'
 
 interface TwilioRecording {
   sid: string
@@ -31,7 +32,7 @@ interface TwilioTranscription {
   duration: string
 }
 
-export interface Voicemail {
+interface Voicemail {
   sid: string
   callSid: string
   from: string
@@ -42,7 +43,19 @@ export interface Voicemail {
   transcriptionStatus: string | null
 }
 
-export async function GET() {
+async function adminAuthorizationError() {
+  const session = await getSession()
+  if (!session?.userId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  if (session.role !== 'admin') {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  return null
+}
+
+async function GET() {
   let credentials: ReturnType<
     typeof serverConfig.twilio.requireAccountCredentials
   >
@@ -168,3 +181,9 @@ export async function GET() {
     )
   }
 }
+
+async function authorizedGET() {
+  return (await adminAuthorizationError()) ?? GET()
+}
+
+export { authorizedGET as GET }

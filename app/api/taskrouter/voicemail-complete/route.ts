@@ -1,3 +1,5 @@
+import { isValidTwilioWebhook } from '@/lib/twilio-webhook'
+
 /**
  * Voicemail Complete Handler
  *
@@ -9,6 +11,9 @@ import twilio from 'twilio'
 import { serverConfig } from '@/lib/config'
 
 export async function POST(req: Request) {
+  if (!(await isValidTwilioWebhook(req)))
+    return new Response('Forbidden', { status: 403 })
+
   try {
     const url = new URL(req.url)
     const taskSid = url.searchParams.get('taskSid')

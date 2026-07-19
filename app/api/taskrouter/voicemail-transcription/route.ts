@@ -1,3 +1,19 @@
+import { isValidTwilioWebhook } from '@/lib/twilio-webhook'
+
+function escapeHtml(value: string) {
+  return value.replace(
+    /[&<>'"]/g,
+    (character) =>
+      ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        "'": '&#39;',
+        '"': '&quot;',
+      })[character]!,
+  )
+}
+
 /**
  * Voicemail Transcription Callback
  *
@@ -24,21 +40,28 @@ async function sendVoicemailEmail(
   const notificationEmail =
     config?.notificationEmail ??
     serverConfig.voicemail.requireNotificationEmail()
+  const safeFrom = escapeHtml(from)
+  const safeRecordingUrl = escapeHtml(recordingUrl)
+  const safeTranscription = escapeHtml(transcription)
+  const safeDuration = duration ? escapeHtml(duration) : undefined
+  const safeTranscriptionStatus = transcriptionStatus
+    ? escapeHtml(transcriptionStatus)
+    : undefined
 
   const transcriptionNote =
     transcriptionStatus !== 'completed'
-      ? `<p><strong>Transcription Status:</strong> ${transcriptionStatus || 'Unknown'} (may be incomplete)</p>`
+      ? `<p><strong>Transcription Status:</strong> ${safeTranscriptionStatus || 'Unknown'} (may be incomplete)</p>`
       : ''
 
   const emailBody = `
     <h2>New Voicemail Received</h2>
-    <p><strong>From:</strong> ${from}</p>
-    ${duration ? `<p><strong>Duration:</strong> ${duration} seconds</p>` : ''}
-    <p><strong>Recording:</strong> <a href="${recordingUrl}.mp3">Listen to Recording</a></p>
+    <p><strong>From:</strong> ${safeFrom}</p>
+    ${safeDuration ? `<p><strong>Duration:</strong> ${safeDuration} seconds</p>` : ''}
+    <p><strong>Recording:</strong> <a href="${safeRecordingUrl}.mp3">Listen to Recording</a></p>
     ${transcriptionNote}
     <p><strong>Transcription:</strong></p>
     <blockquote style="background: #f5f5f5; padding: 12px; border-left: 4px solid #ccc; margin: 8px 0;">
-      ${transcription || '(Transcription unavailable)'}
+      ${safeTranscription || '(Transcription unavailable)'}
     </blockquote>
     <br/>
     <p>— Billboard Source AI</p>
@@ -75,6 +98,9 @@ async function sendVoicemailEmail(
 }
 
 export async function POST(req: Request) {
+  if (!(await isValidTwilioWebhook(req)))
+    return new Response('Forbidden', { status: 403 })
+
   try {
     const formData = await req.formData()
 

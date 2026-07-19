@@ -14,6 +14,7 @@ import {
   recordMissedAttempt,
 } from '@/lib/call-attempt-outcomes'
 import { serverConfig } from '@/lib/config'
+import { isValidTwilioWebhook } from '@/lib/twilio-webhook'
 
 function getActivityMap(): Record<
   string,
@@ -51,21 +52,6 @@ async function resetWorkerToBack(workerSid: string, label: string) {
   } catch (err) {
     console.error(`❌ Failed to reset worker after ${label}:`, err)
   }
-}
-
-function hasValidTwilioSignature(req: Request, bodyText: string) {
-  const twilioAuthToken = serverConfig.twilio.authToken
-  if (!twilioAuthToken || !serverConfig.runtime.isProductionDeployment) {
-    return true
-  }
-
-  const params = Object.fromEntries(new URLSearchParams(bodyText))
-  return twilio.validateRequest(
-    twilioAuthToken,
-    req.headers.get('X-Twilio-Signature') || '',
-    req.url,
-    params,
-  )
 }
 
 async function setWorkerActivity(workerSid: string, activitySid: string) {
@@ -218,14 +204,12 @@ async function handleTaskRouterEvent(formData: FormData) {
 }
 
 export async function POST(req: Request) {
-  try {
-    const bodyTextPromise = req.clone().text()
-    const formData = await req.formData()
+  if (!(await isValidTwilioWebhook(req))) {
+    return new Response('Forbidden', { status: 403 })
+  }
 
-    if (!hasValidTwilioSignature(req, await bodyTextPromise)) {
-      console.error('❌ Invalid Twilio signature on events callback')
-      return new Response('Forbidden', { status: 403 })
-    }
+  try {
+    const formData = await req.formData()
 
     await handleTaskRouterEvent(formData)
 

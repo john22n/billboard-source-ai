@@ -7,38 +7,15 @@
 
 import twilio from 'twilio'
 import { serverConfig } from '@/lib/config'
+import { isValidTwilioWebhook } from '@/lib/twilio-webhook'
 
 export async function POST(req: Request) {
+  if (!(await isValidTwilioWebhook(req))) {
+    return new Response('Forbidden', { status: 403 })
+  }
+
   try {
-    const clonedReq = req.clone()
-    const bodyText = await clonedReq.text()
     const formData = await req.formData()
-
-    const twilioAuthToken = serverConfig.twilio.authToken
-    if (twilioAuthToken) {
-      const twilioSignature = req.headers.get('X-Twilio-Signature') || ''
-      const url = new URL(req.url)
-      const webhookUrl = url.toString()
-
-      const params: Record<string, string> = {}
-      const searchParams = new URLSearchParams(bodyText)
-      searchParams.forEach((value, key) => {
-        params[key] = value
-      })
-
-      const isValid = twilio.validateRequest(
-        twilioAuthToken,
-        twilioSignature,
-        webhookUrl,
-        params,
-      )
-
-      if (!isValid) {
-        console.error('❌ Invalid Twilio signature on assignment callback')
-        console.error('URL used:', webhookUrl)
-        console.error('Signature:', twilioSignature)
-      }
-    }
 
     const taskSid = formData.get('TaskSid') as string
     const reservationSid = formData.get('ReservationSid') as string

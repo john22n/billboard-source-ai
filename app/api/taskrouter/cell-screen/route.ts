@@ -1,3 +1,5 @@
+import { isValidTwilioWebhook } from '@/lib/twilio-webhook'
+
 /**
  * Cell Screen — Call Screening Prompt
  *
@@ -13,6 +15,9 @@
 import { serverConfig } from '@/lib/config'
 
 export async function POST(req: Request) {
+  if (!(await isValidTwilioWebhook(req)))
+    return new Response('Forbidden', { status: 403 })
+
   try {
     const appUrl = serverConfig.app.baseUrlFromRequest(req.url)
 

@@ -1,6 +1,5 @@
 // app/api/twilio-inbound/route.ts
 // Handles incoming Twilio calls and enqueues them into TaskRouter
-import twilio from 'twilio'
 import { db } from '@/db'
 import { user } from '@/db/schema'
 import { eq } from 'drizzle-orm'
@@ -10,37 +9,71 @@ import {
   isMissingConfig,
   serverConfig,
 } from '@/lib/config'
+import { isValidTwilioWebhook } from '@/lib/twilio-webhook'
 
-export async function POST(req: Request) {
+async function countMainCall(isProduction: boolean) {
+  if (!isProduction) return
+
   try {
-    const clonedReq = req.clone()
-    const bodyText = await clonedReq.text()
-    const formData = await req.formData()
+    await incrementMainCallsTotal()
+  } catch (err) {
+    console.error('❌ incrementMainCallsTotal failed:', err)
+  }
+}
 
-    // Validate Twilio signature — skip on preview deployments
-    const isProduction = serverConfig.runtime.isProductionDeployment
-    const twilioAuthToken = serverConfig.twilio.authToken
+function inboundErrorResponse(err: unknown) {
+  if (isMissingConfig(err)) {
+    return Response.json(configErrorResponseBody(err), { status: 500 })
+  }
+  console.error('Inbound error:', err)
+  return new Response('Error', { status: 500 })
+}
 
-    if (twilioAuthToken && isProduction) {
-      const twilioSignature = req.headers.get('X-Twilio-Signature') || ''
-      const url = new URL(req.url)
-      const params: Record<string, string> = {}
-      const searchParams = new URLSearchParams(bodyText)
-      searchParams.forEach((value, key) => {
-        params[key] = value
-      })
+async function resolveRouting(
+  to: string,
+  companyRoutingNumber: string,
+  isProduction: boolean,
+) {
+  if (to === companyRoutingNumber) {
+    await countMainCall(isProduction)
 
-      const isValid = twilio.validateRequest(
-        twilioAuthToken,
-        twilioSignature,
-        url.toString(),
-        params,
-      )
-
-      if (!isValid) {
-        return new Response('Forbidden', { status: 403 })
-      }
+    return {
+      callType: 'main' as const,
+      phoneNumber: null,
+      primaryOwner: null,
     }
+  }
+
+  const matchedUser = await db
+    .select()
+    .from(user)
+    .where(eq(user.twilioPhoneNumber, to))
+    .limit(1)
+    .then((rows) => rows[0])
+
+  if (!matchedUser) {
+    const errorTwiml = `<?xml version="1.0" encoding="UTF-8"?>
+        <Response>
+          <Say>This number is not configured.</Say>
+          <Hangup/>
+        </Response>`
+    return new Response(errorTwiml, {
+      status: 200,
+      headers: { 'Content-Type': 'text/xml' },
+    })
+  }
+
+  return {
+    callType: 'direct' as const,
+    phoneNumber: to,
+    primaryOwner: matchedUser.email,
+  }
+}
+
+async function POST(req: Request) {
+  try {
+    const formData = await req.formData()
+    const isProduction = serverConfig.runtime.isProductionDeployment
 
     const CallSid = formData.get('CallSid')
     const From = formData.get('From')
@@ -49,52 +82,11 @@ export async function POST(req: Request) {
     const companyRoutingNumber =
       serverConfig.twilio.mainNumber ?? '+18338547126'
 
-    let callType: 'main' | 'direct'
-    let phoneNumber: string | null = null
-    let primaryOwner: string | null = null
-
-    // ─────────────────────────────────────────────
-    // MAIN NUMBER → RANDOM AGENTS
-    // ─────────────────────────────────────────────
-    if (To === companyRoutingNumber) {
-      callType = 'main'
-      // Count every inbound call to the Main Routing Number (Admin Panel
-      // header total). Production only; not gated by business hours.
-      if (isProduction) {
-        try {
-          await incrementMainCallsTotal()
-        } catch (err) {
-          console.error('❌ incrementMainCallsTotal failed:', err)
-        }
-      }
-    } else {
-      // ─────────────────────────────────────────────
-      // DIRECT NUMBER → SINGLE AGENT
-      // ─────────────────────────────────────────────
-      callType = 'direct'
-      phoneNumber = To
-
-      const matchedUser = await db
-        .select()
-        .from(user)
-        .where(eq(user.twilioPhoneNumber, To))
-        .limit(1)
-        .then((rows) => rows[0])
-
-      if (!matchedUser) {
-        const errorTwiml = `<?xml version="1.0" encoding="UTF-8"?>
-        <Response>
-          <Say>This number is not configured.</Say>
-          <Hangup/>
-        </Response>`
-        return new Response(errorTwiml, {
-          status: 200,
-          headers: { 'Content-Type': 'text/xml' },
-        })
-      }
-
-      primaryOwner = matchedUser.email
+    const routing = await resolveRouting(To, companyRoutingNumber, isProduction)
+    if (routing instanceof Response) {
+      return routing
     }
+    const { callType, phoneNumber, primaryOwner } = routing
 
     const taskAttributes = JSON.stringify({
       call_sid: CallSid,
@@ -143,10 +135,16 @@ export async function POST(req: Request) {
       headers: { 'Content-Type': 'text/xml' },
     })
   } catch (err) {
-    if (isMissingConfig(err)) {
-      return Response.json(configErrorResponseBody(err), { status: 500 })
-    }
-    console.error('Inbound error:', err)
-    return new Response('Error', { status: 500 })
+    return inboundErrorResponse(err)
   }
 }
+
+async function securedPOST(req: Request) {
+  if (!(await isValidTwilioWebhook(req))) {
+    return new Response('Forbidden', { status: 403 })
+  }
+
+  return POST(req)
+}
+
+export { securedPOST as POST }

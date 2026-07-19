@@ -7,6 +7,7 @@ import OpenAI from 'openai'
 import { db } from '@/db'
 import { billboardLocations } from '@/db/schema'
 import { getSession } from '@/lib/auth'
+import { fetchVercelBlob } from '@/lib/vercel-blob'
 import { logOpenAIEmbeddingUsage } from '@/lib/dal'
 import { sql } from 'drizzle-orm'
 import {
@@ -157,9 +158,13 @@ export async function POST(req: NextRequest) {
 
     const { blobUrl, chunkIndex, chunkSize } = await req.json()
 
+    if (typeof blobUrl !== 'string') {
+      return NextResponse.json({ error: 'Invalid blob URL' }, { status: 400 })
+    }
+
     console.log(`📥 Processing chunk ${chunkIndex + 1}...`)
 
-    const response = await fetch(blobUrl)
+    const response = await fetchVercelBlob(blobUrl)
     if (!response.ok) throw new Error('Failed to fetch CSV')
 
     const csvContent = await response.text()
