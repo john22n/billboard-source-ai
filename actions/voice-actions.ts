@@ -5,6 +5,59 @@ import { generateText, streamText, generateObject } from 'ai'
 import { z } from 'zod'
 import OpenAI from 'openai'
 import { serverConfig } from '@/lib/config'
+import { getSession } from '@/lib/auth'
+import { rateLimit } from '@/lib/rate-limit'
+
+const MAX_TEXT = 100_000
+const MAX_BASE64_AUDIO = Math.ceil((25 * 1024 * 1024 * 4) / 3) + 4
+const textSchema = z.string().max(MAX_TEXT)
+const audioInputSchema = z.object({
+  audioBase64: z.string().min(1).max(MAX_BASE64_AUDIO).base64(),
+  filename: z.string().min(1).max(255),
+})
+const messagesSchema = z
+  .array(
+    z.object({
+      role: z.enum(['user', 'assistant', 'system']),
+      content: z.string(),
+    }),
+  )
+  .max(100)
+
+function prepareAudioFile(audioBase64: string, filename: string) {
+  const input = audioInputSchema.safeParse({ audioBase64, filename })
+  if (!input.success) return { error: 'Invalid audio input' } as const
+  const buffer = Buffer.from(input.data.audioBase64, 'base64')
+  if (buffer.byteLength > 25 * 1024 * 1024) {
+    return { error: 'Input too large' } as const
+  }
+  return {
+    file: new File([buffer], input.data.filename, { type: 'audio/wav' }),
+  }
+}
+
+function parseMessages(
+  messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
+) {
+  const input = messagesSchema.safeParse(messages)
+  if (!input.success) return null
+  const totalLength = input.data.reduce(
+    (total, message) => total + message.content.length,
+    0,
+  )
+  return totalLength <= MAX_TEXT ? input.data : null
+}
+
+async function authorizeAIAction() {
+  const session = await getSession()
+  if (!session?.userId)
+    return { success: false, error: 'Unauthorized' } as const
+  const attempt = await rateLimit('ai-actions', session.userId, 20, 60)
+  if (!attempt.allowed) {
+    return { success: false, error: 'Rate limit exceeded' } as const
+  }
+  return null
+}
 
 // Initialize OpenAI client for Realtime API (not yet in Vercel AI SDK)
 let openaiClient: OpenAI | null = null
@@ -25,6 +78,8 @@ function getOpenAIProvider() {
 // Create Realtime Session (using native OpenAI client)
 export async function createRealtimeSession() {
   try {
+    const denied = await authorizeAIAction()
+    if (denied) return denied
     const openaiApiKey = serverConfig.openai.requireApiKey()
 
     const response = await fetch(
@@ -56,11 +111,11 @@ export async function createRealtimeSession() {
       token: data.client_secret.value,
       sessionId: data.id,
     }
-  } catch (error) {
-    console.error('Error creating realtime session:', error)
+  } catch {
+    console.error('Error creating realtime session')
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: 'Request failed',
     }
   }
 }
@@ -68,20 +123,24 @@ export async function createRealtimeSession() {
 // Generate text response using Vercel AI SDK
 export async function generateTextResponse(prompt: string) {
   try {
+    const denied = await authorizeAIAction()
+    if (denied) return denied
+    const input = textSchema.safeParse(prompt)
+    if (!input.success) return { success: false, error: 'Input too large' }
     const { text } = await generateText({
       model: getOpenAIProvider()('gpt-4o-mini'),
-      prompt,
+      prompt: input.data,
     })
 
     return {
       success: true,
       text,
     }
-  } catch (error) {
-    console.error('Error generating text:', error)
+  } catch {
+    console.error('Error generating text')
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: 'Request failed',
     }
   }
 }
@@ -89,21 +148,29 @@ export async function generateTextResponse(prompt: string) {
 // Stream text response using Vercel AI SDK
 export async function streamTextResponse(prompt: string) {
   try {
+    const denied = await authorizeAIAction()
+    if (denied) return denied
+    const input = textSchema.safeParse(prompt)
+    if (!input.success) return { success: false, error: 'Input too large' }
     const result = await streamText({
       model: getOpenAIProvider()('gpt-4o-mini'),
-      prompt,
+      prompt: input.data,
     })
 
     return result.toTextStreamResponse()
-  } catch (error) {
-    console.error('Error streaming text:', error)
-    throw error
+  } catch {
+    console.error('Error streaming text')
+    return { success: false, error: 'Request failed' }
   }
 }
 
 // Generate structured output using Vercel AI SDK
 export async function generateStructuredResponse(prompt: string) {
   try {
+    const denied = await authorizeAIAction()
+    if (denied) return denied
+    const input = textSchema.safeParse(prompt)
+    if (!input.success) return { success: false, error: 'Input too large' }
     const { object } = await generateObject({
       model: getOpenAIProvider()('gpt-4o-mini'),
       schema: z.object({
@@ -115,7 +182,7 @@ export async function generateStructuredResponse(prompt: string) {
           .enum(['positive', 'neutral', 'negative'])
           .describe('Overall sentiment'),
       }),
-      prompt,
+      prompt: input.data,
       temperature: 0.2,
     })
 
@@ -123,11 +190,11 @@ export async function generateStructuredResponse(prompt: string) {
       success: true,
       data: object,
     }
-  } catch (error) {
-    console.error('Error generating structured response:', error)
+  } catch {
+    console.error('Error generating structured response')
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: 'Request failed',
     }
   }
 }
@@ -138,12 +205,13 @@ export async function transcribeAudio(
   filename: string = 'audio.wav',
 ) {
   try {
-    // Convert base64 to File-like object
-    const buffer = Buffer.from(audioBase64, 'base64')
-    const file = new File([buffer], filename, { type: 'audio/wav' })
+    const denied = await authorizeAIAction()
+    if (denied) return denied
+    const prepared = prepareAudioFile(audioBase64, filename)
+    if ('error' in prepared) return { success: false, error: prepared.error }
 
     const transcription = await getOpenAIClient().audio.transcriptions.create({
-      file: file,
+      file: prepared.file,
       model: 'whisper-1',
       language: 'en',
     })
@@ -152,11 +220,11 @@ export async function transcribeAudio(
       success: true,
       text: transcription.text,
     }
-  } catch (error) {
-    console.error('Error transcribing audio:', error)
+  } catch {
+    console.error('Error transcribing audio')
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: 'Request failed',
     }
   }
 }
@@ -167,10 +235,14 @@ export async function generateSpeech(
   voice: 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer' = 'alloy',
 ) {
   try {
+    const denied = await authorizeAIAction()
+    if (denied) return denied
+    const input = textSchema.safeParse(text)
+    if (!input.success) return { success: false, error: 'Input too large' }
     const mp3 = await getOpenAIClient().audio.speech.create({
       model: 'tts-1',
       voice: voice,
-      input: text,
+      input: input.data,
       response_format: 'mp3',
     })
 
@@ -180,11 +252,11 @@ export async function generateSpeech(
       audio: buffer.toString('base64'),
       contentType: 'audio/mpeg',
     }
-  } catch (error) {
-    console.error('Error generating speech:', error)
+  } catch {
+    console.error('Error generating speech')
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: 'Request failed',
     }
   }
 }
@@ -194,9 +266,15 @@ export async function chatCompletion(
   messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
 ) {
   try {
+    const denied = await authorizeAIAction()
+    if (denied) return denied
+    const input = parseMessages(messages)
+    if (!input) {
+      return { success: false, error: 'Input too large' }
+    }
     const { text } = await generateText({
       model: getOpenAIProvider()('gpt-4o-mini'),
-      messages: messages.map((msg) => ({
+      messages: input.map((msg) => ({
         role: msg.role,
         content: msg.content,
       })),
@@ -206,11 +284,11 @@ export async function chatCompletion(
       success: true,
       response: text,
     }
-  } catch (error) {
-    console.error('Error in chat completion:', error)
+  } catch {
+    console.error('Error in chat completion')
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: 'Request failed',
     }
   }
 }

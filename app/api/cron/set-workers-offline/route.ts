@@ -69,11 +69,9 @@ async function setHumanWorkersOffline() {
     }),
   )
 
-  const failedWorkers = results.flatMap((result, index) =>
-    result.status === 'rejected'
-      ? [humanWorkers[index].worker.friendlyName]
-      : [],
-  )
+  const failedCount = results.filter(
+    (result) => result.status === 'rejected',
+  ).length
   const updatedCount = results.filter(
     (result) => result.status === 'fulfilled' && result.value,
   ).length
@@ -81,7 +79,7 @@ async function setHumanWorkersOffline() {
   return {
     updatedCount,
     alreadyOfflineCount: humanWorkers.length - updatedCount,
-    failedWorkers,
+    failedCount,
   }
 }
 
@@ -89,18 +87,15 @@ function cronErrorResponse(error: unknown) {
   if (isMissingConfig(error)) {
     return NextResponse.json(configErrorResponseBody(error), { status: 500 })
   }
-  console.error('Failed to set TaskRouter workers offline:', error)
+  console.error('Failed to set TaskRouter workers offline')
   return NextResponse.json({ error: 'Internal error' }, { status: 500 })
 }
 
 function offlineResultResponse(
   result: Awaited<ReturnType<typeof setHumanWorkersOffline>>,
 ) {
-  if (result.failedWorkers.length > 0) {
-    console.error(
-      'Failed to set TaskRouter workers offline:',
-      result.failedWorkers,
-    )
+  if (result.failedCount > 0) {
+    console.error('Failed to set one or more TaskRouter workers offline')
     return NextResponse.json({ success: false, ...result }, { status: 500 })
   }
 

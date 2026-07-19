@@ -136,7 +136,7 @@ export async function POST() {
             if (findResult.error) {
               send({
                 type: 'error',
-                message: findResult.error.message || 'Failed to fetch leads',
+                message: 'Failed to fetch leads',
               })
               controller.close()
               return
@@ -193,8 +193,8 @@ export async function POST() {
                     : null,
                 })
                 synced++
-              } catch (err) {
-                console.error(`Failed to sync lead ${lead.id}:`, err)
+              } catch {
+                console.error('Failed to sync a lead')
                 errors++
               }
 
@@ -209,8 +209,8 @@ export async function POST() {
             synced,
             errors,
           })
-        } catch (error) {
-          console.error('Error syncing Nutshell leads:', error)
+        } catch {
+          console.error('Error syncing Nutshell leads')
           send({ type: 'error', message: 'Failed to sync leads' })
         } finally {
           controller.close()
@@ -225,8 +225,8 @@ export async function POST() {
         Connection: 'keep-alive',
       },
     })
-  } catch (error) {
-    console.error('Error syncing Nutshell leads:', error)
+  } catch {
+    console.error('Error syncing Nutshell leads')
     return new Response(JSON.stringify({ error: 'Failed to sync leads' }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },

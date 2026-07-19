@@ -9,6 +9,7 @@ import {
   isMissingConfig,
   serverConfig,
 } from '@/lib/config'
+import { getSession } from '@/lib/auth'
 
 interface TwilioRecording {
   sid: string
@@ -31,7 +32,7 @@ interface TwilioTranscription {
   duration: string
 }
 
-export interface Voicemail {
+interface Voicemail {
   sid: string
   callSid: string
   from: string
@@ -42,7 +43,19 @@ export interface Voicemail {
   transcriptionStatus: string | null
 }
 
-export async function GET() {
+async function adminAuthorizationError() {
+  const session = await getSession()
+  if (!session?.userId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  if (session.role !== 'admin') {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  return null
+}
+
+async function GET() {
   let credentials: ReturnType<
     typeof serverConfig.twilio.requireAccountCredentials
   >
@@ -75,8 +88,10 @@ export async function GET() {
       })
 
       if (!recordingsResponse.ok) {
-        const errorText = await recordingsResponse.text()
-        console.error('Failed to fetch recordings:', errorText)
+        console.error(
+          'Failed to fetch recordings with status:',
+          recordingsResponse.status,
+        )
         return NextResponse.json(
           { error: 'Failed to fetch recordings from Twilio' },
           { status: 500 },
@@ -115,8 +130,8 @@ export async function GET() {
             const callData = await callResponse.json()
             from = callData.from || 'Unknown'
           }
-        } catch (e) {
-          console.error('Failed to fetch call details:', e)
+        } catch {
+          console.error('Failed to fetch call details')
         }
 
         // Fetch transcription for this recording
@@ -136,8 +151,8 @@ export async function GET() {
               transcriptionStatus = transcriptions[0].status
             }
           }
-        } catch (e) {
-          console.error('Failed to fetch transcription:', e)
+        } catch {
+          console.error('Failed to fetch transcription')
         }
 
         return {
@@ -160,11 +175,17 @@ export async function GET() {
     )
 
     return NextResponse.json({ voicemails })
-  } catch (error) {
-    console.error('Error fetching voicemails:', error)
+  } catch {
+    console.error('Error fetching voicemails')
     return NextResponse.json(
       { error: 'Failed to fetch voicemails' },
       { status: 500 },
     )
   }
 }
+
+async function authorizedGET() {
+  return (await adminAuthorizationError()) ?? GET()
+}
+
+export { authorizedGET as GET }

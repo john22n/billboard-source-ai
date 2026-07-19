@@ -178,9 +178,8 @@ export async function generatePasskeyRegistrationOptions(
       transports: p.transports || undefined,
     })),
     authenticatorSelection: {
-      // Prefer platform authenticators (Face ID, Touch ID, Windows Hello)
-      // but allow security keys too
-      residentKey: 'preferred',
+      // Usernameless login requires a discoverable credential.
+      residentKey: 'required',
       userVerification: 'preferred',
     },
   })

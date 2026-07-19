@@ -18,10 +18,15 @@ import {
   computeMissedAttemptRouting,
 } from '@/lib/taskrouter-retry-routing'
 import { serverConfig } from '@/lib/config'
+import { isValidTwilioWebhook } from '@/lib/twilio-webhook'
 
 const XML_HEADERS = { 'Content-Type': 'text/xml' }
 
 async function handle(req: Request): Promise<Response> {
+  if (!(await isValidTwilioWebhook(req))) {
+    return new Response('Forbidden', { status: 403 })
+  }
+
   const url = new URL(req.url)
   const taskSid = url.searchParams.get('taskSid')
   const workspaceSid =
@@ -35,8 +40,6 @@ async function handle(req: Request): Promise<Response> {
 
   console.log('═══════════════════════════════════════════')
   console.log('🔁 RETRY-OR-OVERFLOW')
-  console.log('TaskSid:', taskSid)
-  console.log('WorkerSid:', workerSid)
   console.log('═══════════════════════════════════════════')
 
   // Can't identify the task → fail terminally to overflow rather than strand.

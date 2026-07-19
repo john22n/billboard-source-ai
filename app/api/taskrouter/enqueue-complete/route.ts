@@ -1,6 +1,10 @@
 import { serverConfig } from '@/lib/config'
+import { isValidTwilioWebhook } from '@/lib/twilio-webhook'
 
 export async function POST(req: Request) {
+  if (!(await isValidTwilioWebhook(req)))
+    return new Response('Forbidden', { status: 403 })
+
   try {
     const formData = await req.formData()
     const queueResult = formData.get('QueueResult') as string
@@ -12,8 +16,6 @@ export async function POST(req: Request) {
     console.log('📞 ENQUEUE COMPLETE')
     console.log('QueueResult:', queueResult)
     console.log('QueueTime:', queueTime, 'seconds')
-    console.log('CallSid:', callSid)
-    console.log('From:', from)
     console.log('═══════════════════════════════════════════')
 
     // ─────────────────────────────────────────────
@@ -74,8 +76,8 @@ export async function POST(req: Request) {
       status: 200,
       headers: { 'Content-Type': 'text/xml' },
     })
-  } catch (error) {
-    console.error('❌ Enqueue complete error:', error)
+  } catch {
+    console.error('❌ Enqueue completion failed')
     return new Response(
       '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>',
       { status: 200, headers: { 'Content-Type': 'text/xml' } },
