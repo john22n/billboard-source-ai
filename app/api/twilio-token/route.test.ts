@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { cookieGet, getSession } = vi.hoisted(() => ({
+const { accessTokenConstructor, cookieGet, getSession } = vi.hoisted(() => ({
+  accessTokenConstructor: vi.fn(),
   cookieGet: vi.fn(),
   getSession: vi.fn(),
 }))
@@ -38,6 +39,10 @@ vi.mock('twilio', () => {
   class AccessToken {
     static VoiceGrant = VoiceGrant
 
+    constructor(...args: unknown[]) {
+      accessTokenConstructor(...args)
+    }
+
     addGrant() {}
 
     toJwt() {
@@ -52,6 +57,7 @@ import { GET } from './route'
 
 describe('GET /api/twilio-token', () => {
   beforeEach(() => {
+    vi.clearAllMocks()
     getSession.mockResolvedValue({
       userId: 'user-1',
       email: 'rep@example.com',
@@ -67,9 +73,32 @@ describe('GET /api/twilio-token', () => {
 
     expect(firstResponse.status).toBe(200)
     expect(reloadResponse.status).toBe(200)
+    expect(reloadResponse.headers.get('Cache-Control')).toBe(
+      'private, no-store, max-age=0',
+    )
     await expect(reloadResponse.json()).resolves.toMatchObject({
       token: 'voice-token',
       identity: 'rep@example.com',
+      expiresAt: expect.any(Number),
     })
+  })
+
+  it('limits the voice token to the remaining login session lifetime', async () => {
+    const now = Math.floor(Date.now() / 1000)
+    getSession.mockResolvedValue({
+      userId: 'user-1',
+      email: 'rep@example.com',
+      issuedAt: now - 60 * 60,
+    })
+
+    await GET()
+
+    const options = accessTokenConstructor.mock.calls[0][3]
+    expect(options).toMatchObject({
+      identity: 'rep@example.com',
+      ttl: expect.any(Number),
+    })
+    expect(options.ttl).toBeGreaterThanOrEqual(7 * 60 * 60 - 2)
+    expect(options.ttl).toBeLessThanOrEqual(7 * 60 * 60)
   })
 })

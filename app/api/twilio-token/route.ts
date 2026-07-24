@@ -80,8 +80,16 @@ export async function GET() {
 
   token.addGrant(voiceGrant)
 
-  return NextResponse.json({
-    token: token.toJwt(),
-    identity: email,
-  })
+  return NextResponse.json(
+    {
+      token: token.toJwt(),
+      identity: email,
+      expiresAt: sessionExpiresAt,
+    },
+    {
+      headers: {
+        'Cache-Control': 'private, no-store, max-age=0',
+      },
+    },
+  )
 }
