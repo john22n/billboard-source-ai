@@ -411,7 +411,6 @@ type TabbedBodyProps = {
   resetTrigger: number
   callerPhone: string
   validationErrors: string[]
-  isLoadingBillboard: boolean
   billboardContext: string
   transcripts: TranscriptionState['transcripts']
   onNutshellSubmit: () => Promise<void>
@@ -1119,7 +1118,6 @@ export default function SalesCallTranscriber({
             resetTrigger={resetTrigger}
             callerPhone={callerPhone}
             validationErrors={nutshell.validationErrors}
-            isLoadingBillboard={isLoadingBillboard}
             billboardContext={billboardContext}
             transcripts={transcription.transcripts}
             onNutshellSubmit={nutshell.submit}
