@@ -145,12 +145,18 @@ export async function transcribeAudioFile(
       timestamp_granularities: ['word', 'segment'],
     })
 
+    const verboseTranscription = transcription as typeof transcription & {
+      segments?: unknown
+      words?: unknown
+      duration?: number
+    }
+
     return {
       success: true,
       text: transcription.text,
-      segments: (transcription as any).segments,
-      words: (transcription as any).words,
-      duration: (transcription as any).duration,
+      segments: verboseTranscription.segments,
+      words: verboseTranscription.words,
+      duration: verboseTranscription.duration,
     }
   } catch {
     console.error('Error transcribing audio file')

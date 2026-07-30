@@ -134,6 +134,8 @@ export function PricingPanel({
   useEffect(() => {
     if (activeMarketIndex === 0 && billboardContext && !marketContexts[0]) {
       console.log('📥 Syncing billboardContext from parent for MKT #1')
+      // Preserve a per-market local cache while accepting the parent's initial value.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setMarketContexts((prev) => ({ ...prev, 0: billboardContext }))
       // Also mark as fetched based on formData location
       const loc = getCurrentLocation()
@@ -167,6 +169,8 @@ export function PricingPanel({
 
     // If no location, clear context for this market
     if (!location) {
+      // A cleared location invalidates this market's cached pricing immediately.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setMarketContexts((prev) => ({ ...prev, [activeMarketIndex]: '' }))
       delete lastFetchedLocations.current[activeMarketIndex]
       return

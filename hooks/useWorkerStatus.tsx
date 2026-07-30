@@ -170,6 +170,8 @@ export function WorkerStatusProvider({ children }: WorkerStatusProviderProps) {
   /* explicitly choose Available before receiving calls.  */
   /* ---------------------------------------------------- */
   useEffect(() => {
+    // Establish the server-side status for each newly mounted dashboard session.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void setStatus('offline').catch(() => {
       // setStatus exposes the error through context.
     })

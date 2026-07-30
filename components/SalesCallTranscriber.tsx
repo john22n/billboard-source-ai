@@ -724,6 +724,8 @@ function useCallerPhone(incomingCall: TwilioState['incomingCall']) {
       from,
       customFrom ? '(custom param)' : '(parameters.From)',
     )
+    // The Twilio call object is external state; preserve the last captured number.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCallerPhone(from)
   }, [incomingCall])
 

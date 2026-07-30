@@ -505,6 +505,8 @@ function useTwilioLifecycle(runtime: TwilioRuntime, update: UpdateState) {
   )
 
   useEffect(() => {
+    // The runtime is an intentionally mutable external Twilio SDK controller.
+    // eslint-disable-next-line react-hooks/immutability
     runtime.loggedOut = false
     void initTwilio()
     return () => disposeTwilioRuntime(runtime)
@@ -603,6 +605,8 @@ function useTwilioController(): TwilioContextType {
   const [state, update] = useReducer(updateTwilioState, initialState)
   const { status: workerStatus } = useWorkerStatus()
   const runtimeRef = useRef<TwilioRuntime>(createRuntime(workerStatus))
+  // The runtime has stable identity and is deliberately kept outside React state.
+  // eslint-disable-next-line react-hooks/refs
   const runtime = runtimeRef.current
 
   useEffect(() => {
