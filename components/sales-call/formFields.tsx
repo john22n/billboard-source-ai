@@ -1,6 +1,6 @@
 'use client'
 
-import { memo, useCallback } from 'react'
+import { memo, useCallback, useMemo } from 'react'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { publicConfig } from '@/lib/public-config'
@@ -740,7 +740,10 @@ export const DurationButtonGroup = memo(function DurationButtonGroup({
   const confirmedSelectionsRaw = useFormStore(
     (s) => s.confirmedDurations[marketIndex],
   )
-  const confirmedSelections = confirmedSelectionsRaw ?? []
+  const confirmedSelections = useMemo(
+    () => confirmedSelectionsRaw ?? [],
+    [confirmedSelectionsRaw],
+  )
 
   const setConfirmedDuration = useFormStore((s) => s.setConfirmedDuration)
   const updateMarketField = useFormStore((s) => s.updateMarketField)
@@ -839,7 +842,10 @@ export const SendOverButtonGroup = memo(function SendOverButtonGroup({
   const confirmedSelectionsRaw = useFormStore(
     (s) => s.confirmedSendOver[contactIndex],
   )
-  const confirmedSelections = confirmedSelectionsRaw ?? []
+  const confirmedSelections = useMemo(
+    () => confirmedSelectionsRaw ?? [],
+    [confirmedSelectionsRaw],
+  )
 
   const setConfirmedSendOver = useFormStore((s) => s.setConfirmedSendOver)
   const updateField = useFormStore((s) => s.updateField)

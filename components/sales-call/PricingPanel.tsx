@@ -1,11 +1,10 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useFormStore } from '@/stores/formStore'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 
 interface PricingPanelProps {
-  isLoading: boolean
   billboardContext: string
   setIsLoadingBillboard: (loading: boolean) => void
   setBillboardContext: (context: string) => void
@@ -23,7 +22,6 @@ interface PricingCard {
 }
 
 export function PricingPanel({
-  isLoading,
   billboardContext,
   setIsLoadingBillboard,
   setBillboardContext,
@@ -54,7 +52,7 @@ export function PricingPanel({
   const fetchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   // Calculate current location from store state
-  const getCurrentLocation = (): string => {
+  const getCurrentLocation = useCallback((): string => {
     if (activeMarketIndex === 0) {
       const city = targetCity?.trim() || ''
       const stateVal = state?.trim() || ''
@@ -68,67 +66,73 @@ export function PricingPanel({
       if (city && stateVal) return `${city}, ${stateVal}`
       return market.targetArea?.trim() || ''
     }
-  }
+  }, [activeMarketIndex, additionalMarkets, state, targetArea, targetCity])
 
   const currentLocation = getCurrentLocation()
   const currentMarketContext = marketContexts[activeMarketIndex] || ''
 
   // ✅ Fetch pricing - completely self-contained
-  const fetchPricingForMarket = async (location: string, marketIdx: number) => {
-    if (!location || location.length < 3) return
+  const fetchPricingForMarket = useCallback(
+    async (location: string, marketIdx: number) => {
+      if (!location || location.length < 3) return
 
-    // Skip if already fetched this location for this market
-    if (lastFetchedLocations.current[marketIdx] === location) {
-      console.log(
-        `✅ Already fetched for Market #${marketIdx + 1}: ${location}`,
-      )
-      return
-    }
+      // Skip if already fetched this location for this market
+      if (lastFetchedLocations.current[marketIdx] === location) {
+        console.log(
+          `✅ Already fetched for Market #${marketIdx + 1}: ${location}`,
+        )
+        return
+      }
 
-    console.log(`🌐 FETCHING for Market #${marketIdx + 1}: ${location}`)
+      console.log(`🌐 FETCHING for Market #${marketIdx + 1}: ${location}`)
 
-    setIsLoadingMarket(true)
-    // Only set parent loading for primary market
-    if (marketIdx === 0) {
-      setIsLoadingBillboard(true)
-    }
+      setIsLoadingMarket(true)
+      // Only set parent loading for primary market
+      if (marketIdx === 0) {
+        setIsLoadingBillboard(true)
+      }
 
-    try {
-      const transcript = `The customer is interested in billboard advertising in ${location}.`
+      try {
+        const transcript = `The customer is interested in billboard advertising in ${location}.`
 
-      const response = await fetch('/api/billboard-pricing', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transcript }),
-      })
+        const response = await fetch('/api/billboard-pricing', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ transcript }),
+        })
 
-      if (response.ok) {
-        const data = await response.json()
-        if (data.context) {
-          console.log(`✅ Got data for Market #${marketIdx + 1}: ${location}`)
+        if (response.ok) {
+          const data = await response.json()
+          if (data.context) {
+            console.log(`✅ Got data for Market #${marketIdx + 1}: ${location}`)
 
-          // Store the context for this market
-          setMarketContexts((prev) => ({ ...prev, [marketIdx]: data.context }))
-          lastFetchedLocations.current[marketIdx] = location
+            // Store the context for this market
+            setMarketContexts((prev) => ({
+              ...prev,
+              [marketIdx]: data.context,
+            }))
+            lastFetchedLocations.current[marketIdx] = location
 
-          // Update parent context only for primary market
-          if (marketIdx === 0) {
-            setBillboardContext(data.context)
+            // Update parent context only for primary market
+            if (marketIdx === 0) {
+              setBillboardContext(data.context)
+            }
+          } else {
+            setMarketContexts((prev) => ({ ...prev, [marketIdx]: '' }))
           }
-        } else {
-          setMarketContexts((prev) => ({ ...prev, [marketIdx]: '' }))
+        }
+      } catch (error) {
+        console.error('Fetch error:', error)
+        setMarketContexts((prev) => ({ ...prev, [marketIdx]: '' }))
+      } finally {
+        setIsLoadingMarket(false)
+        if (marketIdx === 0) {
+          setIsLoadingBillboard(false)
         }
       }
-    } catch (error) {
-      console.error('Fetch error:', error)
-      setMarketContexts((prev) => ({ ...prev, [marketIdx]: '' }))
-    } finally {
-      setIsLoadingMarket(false)
-      if (marketIdx === 0) {
-        setIsLoadingBillboard(false)
-      }
-    }
-  }
+    },
+    [setBillboardContext, setIsLoadingBillboard],
+  )
 
   // ✅ Sync billboardContext from parent ONLY for primary market when we don't have our own
   useEffect(() => {
@@ -143,7 +147,7 @@ export function PricingPanel({
         lastFetchedLocations.current[0] = loc
       }
     }
-  }, [billboardContext, activeMarketIndex])
+  }, [activeMarketIndex, billboardContext, getCurrentLocation, marketContexts])
 
   // ✅ MAIN EFFECT: Watch for location changes and fetch
   const additionalMarketsJson = JSON.stringify(
@@ -171,7 +175,9 @@ export function PricingPanel({
     if (!location) {
       // A cleared location invalidates this market's cached pricing immediately.
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setMarketContexts((prev) => ({ ...prev, [activeMarketIndex]: '' }))
+      setMarketContexts((prev) =>
+        prev[activeMarketIndex] ? { ...prev, [activeMarketIndex]: '' } : prev,
+      )
       delete lastFetchedLocations.current[activeMarketIndex]
       return
     }
@@ -179,11 +185,8 @@ export function PricingPanel({
     // Check if we need to fetch
     const alreadyFetched =
       lastFetchedLocations.current[activeMarketIndex] === location
-    const hasContext = !!marketContexts[activeMarketIndex]
 
-    console.log(
-      `   alreadyFetched: ${alreadyFetched}, hasContext: ${hasContext}`,
-    )
+    console.log(`   alreadyFetched: ${alreadyFetched}`)
 
     if (!alreadyFetched) {
       // Debounce the fetch
@@ -200,7 +203,12 @@ export function PricingPanel({
         clearTimeout(fetchTimeoutRef.current)
       }
     }
-  }, [activeMarketIndex, targetCity, state, targetArea, additionalMarketsJson])
+  }, [
+    activeMarketIndex,
+    additionalMarketsJson,
+    fetchPricingForMarket,
+    getCurrentLocation,
+  ])
 
   // Parse functions
   const parseContextForDetails = (context: string) => {

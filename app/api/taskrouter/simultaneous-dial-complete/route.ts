@@ -55,8 +55,6 @@ function twimlResponse(body: string) {
 function logDialResult(
   dialCallStatus: string | null,
   durationSeconds: number | null,
-  taskSid: string | null,
-  workerSid: string,
 ) {
   console.log('═══════════════════════════════════════════')
   console.log('📱 SIMULTANEOUS DIAL COMPLETE')
@@ -254,7 +252,7 @@ export async function POST(req: Request) {
       ? parseInt(dialCallDuration, 10)
       : null
 
-    logDialResult(rawDialCallStatus, durationSeconds, taskSid, workerSid)
+    logDialResult(rawDialCallStatus, durationSeconds)
 
     const appUrl = serverConfig.app.baseUrlFromRequest(req.url)
     const { accountSid, authToken } =

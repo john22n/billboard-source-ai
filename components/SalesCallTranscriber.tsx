@@ -522,7 +522,6 @@ function TabbedBody(props: TabbedBodyProps) {
     resetTrigger,
     callerPhone,
     validationErrors,
-    isLoadingBillboard,
     billboardContext,
     transcripts,
     onNutshellSubmit,
@@ -590,7 +589,6 @@ function TabbedBody(props: TabbedBodyProps) {
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
               <LeadForm
                 key={resetTrigger}
-                resetTrigger={resetTrigger}
                 inboundPhone={callerPhone}
                 validationErrors={validationErrors}
               />
@@ -633,7 +631,6 @@ function TabbedBody(props: TabbedBodyProps) {
               >
                 <PricingPanel
                   key={`pricing-${resetTrigger}`}
-                  isLoading={isLoadingBillboard}
                   billboardContext={billboardContext}
                   setIsLoadingBillboard={setIsLoadingBillboard}
                   setBillboardContext={setBillboardContext}
@@ -740,11 +737,14 @@ function useCallLifecycle(
   >,
   sessionIssuedAt: number,
 ) {
+  const { onCallAccepted, onCallDisconnected, resetStatus } = twilio
+  const { startTranscription, stopTranscription } = transcription
+
   useEffect(() => {
-    twilio.onCallAccepted((call) => transcription.startTranscription(call))
-    twilio.onCallDisconnected(() => {
-      transcription.stopTranscription()
-      twilio.resetStatus()
+    onCallAccepted((call) => startTranscription(call))
+    onCallDisconnected(() => {
+      stopTranscription()
+      resetStatus()
 
       // The deferred 7 PM logout owns the final offline status update.
       if (isAutoLogoutDue(sessionIssuedAt)) return
@@ -762,11 +762,11 @@ function useCallLifecycle(
         .catch((err) => console.error('❌ Error resetting worker status:', err))
     })
   }, [
-    twilio.onCallAccepted,
-    twilio.onCallDisconnected,
-    transcription.startTranscription,
-    transcription.stopTranscription,
-    twilio.resetStatus,
+    onCallAccepted,
+    onCallDisconnected,
+    startTranscription,
+    stopTranscription,
+    resetStatus,
     sessionIssuedAt,
   ])
 }
@@ -788,6 +788,14 @@ function useTranscriptExtraction(
 ) {
   const updateFromAI = useFormStore((s) => s.updateFromAI)
   const extraction = useBillboardFormExtraction()
+  const {
+    cleanup,
+    clearError,
+    extractFields,
+    extractionCount,
+    formData,
+    isExtracting,
+  } = extraction
   const hasDoneFinalExtractionRef = useRef<boolean>(false)
   const fullTranscriptRef = useRef<string>('')
   const fullTranscript = useMemo(
@@ -796,10 +804,10 @@ function useTranscriptExtraction(
   )
 
   useEffect(() => {
-    if (!extraction.formData) return
-    console.log('🎯 Applying extracted data to form:', extraction.formData)
-    updateFromAI(extraction.formData)
-  }, [extraction.formData, extraction.extractionCount, updateFromAI])
+    if (!formData) return
+    console.log('🎯 Applying extracted data to form:', formData)
+    updateFromAI(formData)
+  }, [formData, extractionCount, updateFromAI])
   useEffect(() => {
     fullTranscriptRef.current = fullTranscript
   }, [fullTranscript])
@@ -811,28 +819,23 @@ function useTranscriptExtraction(
     if (fullTranscriptRef.current.length <= 50) return
     hasDoneFinalExtractionRef.current = true
     console.log('📞 Call ended - running final extraction')
-    extraction.extractFields(fullTranscriptRef.current)
-  }, [callActive, extraction.extractFields])
-  useEffect(() => () => extraction.cleanup(), [extraction.cleanup])
+    extractFields(fullTranscriptRef.current)
+  }, [callActive, extractFields])
+  useEffect(() => () => cleanup(), [cleanup])
   useEffect(() => {
     if (!scrollRef.current) return
     scrollRef.current.scrollTop = scrollRef.current.scrollHeight
   }, [transcripts, interimTranscript, scrollRef])
   useEffect(() => {
-    if (fullTranscript.length > 50 && !extraction.isExtracting && callActive) {
-      extraction.extractFields(fullTranscript)
+    if (fullTranscript.length > 50 && !isExtracting && callActive) {
+      extractFields(fullTranscript)
     }
-  }, [
-    fullTranscript,
-    extraction.extractFields,
-    extraction.isExtracting,
-    callActive,
-  ])
+  }, [fullTranscript, extractFields, isExtracting, callActive])
 
   const retry = useCallback(() => {
-    extraction.clearError()
-    if (fullTranscript.length > 50) extraction.extractFields(fullTranscript)
-  }, [extraction.clearError, extraction.extractFields, fullTranscript])
+    clearError()
+    if (fullTranscript.length > 50) extractFields(fullTranscript)
+  }, [clearError, extractFields, fullTranscript])
   const resetFinalExtraction = useCallback(() => {
     hasDoneFinalExtractionRef.current = false
   }, [])

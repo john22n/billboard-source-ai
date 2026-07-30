@@ -18,18 +18,13 @@ export async function POST(req: Request) {
     const url = new URL(req.url)
     const taskSid = url.searchParams.get('taskSid')
     const workspaceSid = url.searchParams.get('workspaceSid')
-    const from = url.searchParams.get('from')
-    const to = url.searchParams.get('to')
-    const callSid = url.searchParams.get('callSid')
     const queueTime = url.searchParams.get('queueTime')
 
     const formData = await req.formData()
     const recordingSid = formData.get('RecordingSid') as string | null
     const recordingDuration = formData.get('RecordingDuration') as string | null
-    const recordingUrlRaw = formData.get('RecordingUrl') as string | null
 
     const durationSeconds = parseInt(recordingDuration || '0', 10)
-    const recordingUrl = recordingUrlRaw ? `${recordingUrlRaw}.mp3` : null
 
     console.log('═══════════════════════════════════════════')
     console.log('📼 VOICEMAIL COMPLETE')

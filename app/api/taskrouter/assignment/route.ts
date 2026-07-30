@@ -5,7 +5,6 @@
  * Returns instructions to dial the worker's browser client.
  */
 
-import twilio from 'twilio'
 import { serverConfig } from '@/lib/config'
 import { isValidTwilioWebhook } from '@/lib/twilio-webhook'
 
