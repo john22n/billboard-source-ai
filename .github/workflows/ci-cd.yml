@@ -1,4 +1,4 @@
-name: Vercel CI/CD Pipeline
+name: CI
 
 on:
   pull_request:
@@ -16,19 +16,15 @@ concurrency:
 env:
   NODE_VERSION: 22
   PNPM_VERSION: 10.33.2
-  VERCEL_CLI_VERSION: 58.4.0
-  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-  VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
 
 jobs:
-  ci-and-build:
-    name: CI and Vercel deployment
+  quality:
+    name: Lint, typecheck, and test
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
 
     steps:
-      - name: Checkout Code
+      - name: Checkout code
         uses: actions/checkout@v7
 
       - name: Setup pnpm
@@ -42,62 +38,44 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
-      - name: Install Dependencies
+      - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run Linters, Type Checks, and Tests
+      - name: Run quality checks
         run: |
           pnpm lint
           pnpm typecheck
           pnpm exec vitest run
 
-      - name: Install Vercel CLI
-        if: >-
-          github.event_name == 'push' ||
-          github.event.pull_request.head.repo.full_name == github.repository
-        run: npm install --global vercel@${{ env.VERCEL_CLI_VERSION }}
+  security:
+    name: Dependency security
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
 
-      - name: Validate Vercel Credentials
-        if: >-
-          github.event_name == 'push' ||
-          github.event.pull_request.head.repo.full_name == github.repository
-        run: |
-          test -n "$VERCEL_TOKEN" || { echo "Missing GitHub secret: VERCEL_TOKEN"; exit 1; }
-          test -n "$VERCEL_ORG_ID" || { echo "Missing GitHub secret: VERCEL_ORG_ID"; exit 1; }
-          test -n "$VERCEL_PROJECT_ID" || { echo "Missing GitHub secret: VERCEL_PROJECT_ID"; exit 1; }
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
 
-      - name: Pull Vercel Preview Environment Information
-        if: >-
-          github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name == github.repository
-        run: vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
 
-      - name: Pull Vercel Production Environment Information
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
 
-      - name: Build Preview Project Artifacts
-        if: >-
-          github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name == github.repository
-        run: vercel build --token="$VERCEL_TOKEN"
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
-      - name: Build Production Project Artifacts
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: vercel build --prod --token="$VERCEL_TOKEN"
+      - name: Audit dependencies
+        run: pnpm audit --audit-level=critical
 
-      - name: Deploy Preview to Vercel
-        if: >-
-          github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name == github.repository
-        run: |
-          deployment_url=$(vercel deploy --prebuilt --token="$VERCEL_TOKEN")
-          echo "### Preview deployment" >> "$GITHUB_STEP_SUMMARY"
-          echo "$deployment_url" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Deploy Production to Vercel
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          deployment_url=$(vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN")
-          echo "### Production deployment" >> "$GITHUB_STEP_SUMMARY"
-          echo "$deployment_url" >> "$GITHUB_STEP_SUMMARY"
+      - name: Generate dependency SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          artifact-name: billboard-source-ai-sbom.spdx.json
+          format: spdx-json

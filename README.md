@@ -45,18 +45,8 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 
 The GitHub Actions workflow in `.github/workflows/ci-cd.yml`:
 
-- lints, type-checks, tests, and builds every pull request targeting `main`;
-- deploys same-repository pull requests to the Vercel Preview environment after the checks pass; and
-- deploys pushes to `main` to the Vercel Production environment after the checks pass.
+- lints, type-checks, and tests every pull request targeting `main`;
+- audits dependencies for critical vulnerabilities; and
+- publishes an SPDX SBOM.
 
-Application secrets stay in Vercel. The workflow runs `vercel pull` for the target environment before each deployment build, so Preview and Production use their corresponding Vercel environment variables.
-
-Add only these deployment credentials as GitHub Actions repository secrets:
-
-| Secret              | Source                                                                   |
-| ------------------- | ------------------------------------------------------------------------ |
-| `VERCEL_TOKEN`      | A Vercel account or team token with access to the project                |
-| `VERCEL_ORG_ID`     | `orgId` in the local `.vercel/project.json` created by `vercel link`     |
-| `VERCEL_PROJECT_ID` | `projectId` in the local `.vercel/project.json` created by `vercel link` |
-
-Pull requests from forks run the quality checks but skip deployment because GitHub does not expose repository secrets to forked workflows.
+Vercel's native Git integration owns deployments: pull requests receive preview deployments and pushes to `main` produce production deployments. GitHub Actions does not require Vercel credentials and does not build or deploy the application.

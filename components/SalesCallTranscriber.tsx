@@ -734,21 +734,25 @@ function useCallLifecycle(
     'startTranscription' | 'stopTranscription'
   >,
   sessionIssuedAt: number,
-  onCallAccepted: (
+  handleCallAccepted: (
     call: Parameters<TranscriptionState['startTranscription']>[0],
   ) => void,
 ) {
-  const { onCallAccepted, onCallDisconnected, resetStatus } = twilio
+  const {
+    onCallAccepted: registerCallAccepted,
+    onCallDisconnected: registerCallDisconnected,
+    resetStatus,
+  } = twilio
   const { startTranscription, stopTranscription } = transcription
 
   useEffect(() => {
-    twilio.onCallAccepted((call) => {
-      onCallAccepted(call)
-      transcription.startTranscription(call)
+    registerCallAccepted((call) => {
+      handleCallAccepted(call)
+      startTranscription(call)
     })
-    twilio.onCallDisconnected(() => {
-      transcription.stopTranscription()
-      twilio.resetStatus()
+    registerCallDisconnected(() => {
+      stopTranscription()
+      resetStatus()
 
       // A deferred session logout owns the final offline status update.
       if (isAutoLogoutDue(sessionIssuedAt)) return
@@ -766,13 +770,13 @@ function useCallLifecycle(
         .catch((err) => console.error('❌ Error resetting worker status:', err))
     })
   }, [
-    onCallAccepted,
-    onCallDisconnected,
+    registerCallAccepted,
+    registerCallDisconnected,
     startTranscription,
     stopTranscription,
     resetStatus,
     sessionIssuedAt,
-    onCallAccepted,
+    handleCallAccepted,
   ])
 }
 
