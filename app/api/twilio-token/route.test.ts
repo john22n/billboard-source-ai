@@ -98,7 +98,7 @@ describe('GET /api/twilio-token', () => {
       identity: 'rep@example.com',
       ttl: expect.any(Number),
     })
-    expect(options.ttl).toBeGreaterThanOrEqual(7 * 60 * 60 - 2)
-    expect(options.ttl).toBeLessThanOrEqual(7 * 60 * 60)
+    expect(options.ttl).toBeGreaterThanOrEqual(7.5 * 60 * 60 - 2)
+    expect(options.ttl).toBeLessThanOrEqual(7.5 * 60 * 60)
   })
 })

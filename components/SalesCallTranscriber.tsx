@@ -24,7 +24,6 @@ import {
   showSuccessToast,
   showErrorToast,
 } from '@/lib/error-handling'
-import { publicConfig } from '@/lib/public-config'
 import { useFormStore } from '@/stores/formStore'
 import { isAutoLogoutDue, useAutoLogout } from '@/hooks/useAutoLogout'
 
@@ -735,17 +734,23 @@ function useCallLifecycle(
     'startTranscription' | 'stopTranscription'
   >,
   sessionIssuedAt: number,
+  onCallAccepted: (
+    call: Parameters<TranscriptionState['startTranscription']>[0],
+  ) => void,
 ) {
   const { onCallAccepted, onCallDisconnected, resetStatus } = twilio
   const { startTranscription, stopTranscription } = transcription
 
   useEffect(() => {
-    onCallAccepted((call) => startTranscription(call))
-    onCallDisconnected(() => {
-      stopTranscription()
-      resetStatus()
+    twilio.onCallAccepted((call) => {
+      onCallAccepted(call)
+      transcription.startTranscription(call)
+    })
+    twilio.onCallDisconnected(() => {
+      transcription.stopTranscription()
+      twilio.resetStatus()
 
-      // The deferred 7 PM logout owns the final offline status update.
+      // A deferred session logout owns the final offline status update.
       if (isAutoLogoutDue(sessionIssuedAt)) return
 
       fetch('/api/taskrouter/worker-status', {
@@ -767,7 +772,38 @@ function useCallLifecycle(
     stopTranscription,
     resetStatus,
     sessionIssuedAt,
+    onCallAccepted,
   ])
+}
+
+function useCallSessionProtection(
+  sessionIssuedAt: number,
+  twilio: TwilioState,
+  transcription: Pick<
+    TranscriptionState,
+    'startTranscription' | 'stopTranscription'
+  >,
+) {
+  const [hasPendingSubmission, setHasPendingSubmission] = useState(false)
+  const handleCallAccepted = useCallback(
+    (call: { parameters: { CallSid?: string } }) => {
+      setHasPendingSubmission(true)
+      void fetch('/api/auth/extend-for-call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ callSid: call.parameters.CallSid }),
+      }).then(
+        (response) => {
+          if (!response.ok) console.error('Failed to extend session for call')
+        },
+        (error) => console.error('Failed to extend session for call:', error),
+      )
+    },
+    [],
+  )
+  useCallLifecycle(twilio, transcription, sessionIssuedAt, handleCallAccepted)
+  const markSubmitted = useCallback(() => setHasPendingSubmission(false), [])
+  return { hasPendingSubmission, markSubmitted }
 }
 
 function formatTranscript(transcripts: TranscriptionState['transcripts']) {
@@ -885,7 +921,11 @@ function useFileUpload(
   return { fileInputRef, isUploading, handleFileSelect, handleUploadClick }
 }
 
-function useNutshellSubmission(fullTranscript: string, clearAll: () => void) {
+function useNutshellSubmission(
+  fullTranscript: string,
+  clearAll: () => void,
+  onSuccess: () => void,
+) {
   const getFormData = useFormStore((s) => s.getFormData)
   const ballpark = useFormStore((s) => s.ballpark)
   const additionalContacts = useFormStore((s) => s.additionalContacts)
@@ -940,6 +980,7 @@ function useNutshellSubmission(fullTranscript: string, clearAll: () => void) {
         setValidationErrors,
         clearAll,
       })
+      if (response.ok) onSuccess()
     } catch (error) {
       console.error('Error submitting to Nutshell:', error)
       setNutshellStatus('error')
@@ -948,7 +989,14 @@ function useNutshellSubmission(fullTranscript: string, clearAll: () => void) {
     } finally {
       setIsSubmittingNutshell(false)
     }
-  }, [getFormData, ballpark, fullTranscript, additionalContacts, clearAll])
+  }, [
+    getFormData,
+    ballpark,
+    fullTranscript,
+    additionalContacts,
+    clearAll,
+    onSuccess,
+  ])
   return {
     isSubmittingNutshell,
     nutshellStatus,
@@ -1044,47 +1092,39 @@ function isTranscriberProcessing(
   ].some((text) => status.includes(text))
 }
 
-export default function SalesCallTranscriber({
-  sessionIssuedAt,
-}: {
-  sessionIssuedAt: number
-}) {
-  if (publicConfig.runtime.isDevelopment)
-    console.log('🔄 Re-render: SalesCallTranscriber')
-  const scrollRef = useRef<HTMLDivElement | null>(null)
-  const [billboardContext, setBillboardContext] = useState<string>('')
-  const [isLoadingBillboard, setIsLoadingBillboard] = useState(false)
-  const [resetTrigger, setResetTrigger] = useState(0)
-  const twilio = useTwilioContext()
-  useAutoLogout(sessionIssuedAt, twilio.callActive)
-  const transcription = useOpenAITranscription({
-    onStatusChange: twilio.updateStatus,
-  })
-  useCallLifecycle(twilio, transcription, sessionIssuedAt)
-  const { callerPhone, setCallerPhone } = useCallerPhone(twilio.incomingCall)
-  const extraction = useTranscriptExtraction(
-    transcription.transcripts,
-    transcription.interimTranscript,
-    twilio.callActive,
-    scrollRef,
-  )
-  const upload = useFileUpload(transcription.addTranscript, twilio.updateStatus)
-  const clearAll = useClearTranscriber(
-    transcription.clearTranscripts,
-    extraction.reset,
-    extraction.resetFinalExtraction,
-    setCallerPhone,
-    setBillboardContext,
-    setResetTrigger,
-  )
-  const nutshell = useNutshellSubmission(extraction.fullTranscript, clearAll)
-  const isProcessing = isTranscriberProcessing(
-    upload.isUploading,
-    extraction.isExtracting,
-    twilio.status,
-  )
-  const currentMarketLocation = useMarketLocation()
+type TranscriberContentProps = {
+  twilio: ReturnType<typeof useTwilioContext>
+  transcription: ReturnType<typeof useOpenAITranscription>
+  extraction: ReturnType<typeof useTranscriptExtraction>
+  upload: ReturnType<typeof useFileUpload>
+  nutshell: ReturnType<typeof useNutshellSubmission>
+  callerPhone: string
+  isProcessing: boolean
+  isLoadingBillboard: boolean
+  billboardContext: string
+  resetTrigger: number
+  setIsLoadingBillboard: React.Dispatch<React.SetStateAction<boolean>>
+  setBillboardContext: React.Dispatch<React.SetStateAction<string>>
+  currentMarketLocation: ReturnType<typeof useMarketLocation>
+  scrollRef: React.RefObject<HTMLDivElement | null>
+}
 
+function TranscriberContent({
+  twilio,
+  transcription,
+  extraction,
+  upload,
+  nutshell,
+  callerPhone,
+  isProcessing,
+  isLoadingBillboard,
+  billboardContext,
+  resetTrigger,
+  setIsLoadingBillboard,
+  setBillboardContext,
+  currentMarketLocation,
+  scrollRef,
+}: TranscriberContentProps) {
   return (
     <div className="h-full overflow-hidden flex items-center justify-center m-0 p-0">
       <div className="max-w-[1800px] w-full h-full flex flex-col px-2 sm:px-0">
@@ -1136,5 +1176,77 @@ export default function SalesCallTranscriber({
         </Card>
       </div>
     </div>
+  )
+}
+
+export default function SalesCallTranscriber({
+  sessionIssuedAt,
+}: {
+  sessionIssuedAt: number
+}) {
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const [billboardContext, setBillboardContext] = useState<string>('')
+  const [isLoadingBillboard, setIsLoadingBillboard] = useState(false)
+  const [resetTrigger, setResetTrigger] = useState(0)
+  const twilio = useTwilioContext()
+  const transcription = useOpenAITranscription({
+    onStatusChange: twilio.updateStatus,
+  })
+  const callSession = useCallSessionProtection(
+    sessionIssuedAt,
+    twilio,
+    transcription,
+  )
+  const { callerPhone, setCallerPhone } = useCallerPhone(twilio.incomingCall)
+  const extraction = useTranscriptExtraction(
+    transcription.transcripts,
+    transcription.interimTranscript,
+    twilio.callActive,
+    scrollRef,
+  )
+  const upload = useFileUpload(transcription.addTranscript, twilio.updateStatus)
+  const clearAll = useClearTranscriber(
+    transcription.clearTranscripts,
+    extraction.reset,
+    extraction.resetFinalExtraction,
+    setCallerPhone,
+    setBillboardContext,
+    setResetTrigger,
+  )
+  const nutshell = useNutshellSubmission(
+    extraction.fullTranscript,
+    clearAll,
+    callSession.markSubmitted,
+  )
+  useAutoLogout(
+    sessionIssuedAt,
+    twilio.callActive ||
+      callSession.hasPendingSubmission ||
+      nutshell.isSubmittingNutshell,
+  )
+  const isProcessing = isTranscriberProcessing(
+    upload.isUploading,
+    extraction.isExtracting,
+    twilio.status,
+  )
+  const currentMarketLocation = useMarketLocation()
+
+  return (
+    <TranscriberContent
+      twilio={twilio}
+      transcription={transcription}
+      extraction={extraction}
+      upload={upload}
+      nutshell={nutshell}
+      callerPhone={callerPhone}
+      isProcessing={isProcessing}
+      isLoadingBillboard={isLoadingBillboard}
+      billboardContext={billboardContext}
+      resetTrigger={resetTrigger}
+      setIsLoadingBillboard={setIsLoadingBillboard}
+      setBillboardContext={setBillboardContext}
+      currentMarketLocation={currentMarketLocation}
+      scrollRef={scrollRef}
+    />
   )
 }
