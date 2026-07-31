@@ -46,22 +46,7 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 The GitHub Actions workflow in `.github/workflows/ci-cd.yml`:
 
 - lints, type-checks, and tests every pull request targeting `main`;
-- audits dependencies for critical vulnerabilities and publishes an SPDX SBOM;
-- deploys same-repository pull requests to the Vercel Preview environment only after the gates pass; and
-- deploys pushes to `main` to the protected GitHub `production` environment only after the gates pass.
+- audits dependencies for critical vulnerabilities; and
+- publishes an SPDX SBOM.
 
-Application secrets stay in Vercel. The workflow runs `vercel pull` for the target environment, builds once with `vercel build`, and deploys that exact artifact with `vercel deploy --prebuilt`. Preview and Production therefore use their corresponding Vercel environment variables without a second remote build.
-
-This project uses CI-managed deployments so deployment is gated on GitHub checks. Disable automatic deployments for this project in Vercel's Git settings to avoid creating a second deployment for the same commit. If the project returns to Vercel's native Git deployment flow, remove the deploy jobs and keep the quality and security jobs as required checks.
-
-Add only these deployment credentials as GitHub Actions repository secrets:
-
-| Secret              | Source                                                                   |
-| ------------------- | ------------------------------------------------------------------------ |
-| `VERCEL_TOKEN`      | A Vercel account or team token with access to the project                |
-| `VERCEL_ORG_ID`     | `orgId` in the local `.vercel/project.json` created by `vercel link`     |
-| `VERCEL_PROJECT_ID` | `projectId` in the local `.vercel/project.json` created by `vercel link` |
-
-Pull requests from forks run the quality checks but skip deployment because GitHub does not expose repository secrets to forked workflows.
-
-To require a manual production approval, add required reviewers to the `production` environment under **GitHub repository settings → Environments**. The workflow works without reviewers but still scopes production secrets and deployment history to that environment.
+Vercel's native Git integration owns deployments: pull requests receive preview deployments and pushes to `main` produce production deployments. GitHub Actions does not require Vercel credentials and does not build or deploy the application.
