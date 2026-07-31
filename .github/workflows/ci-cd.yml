@@ -1,4 +1,4 @@
-name: Vercel CI/CD Pipeline
+name: CI and Vercel Deployments
 
 on:
   pull_request:
@@ -17,18 +17,15 @@ env:
   NODE_VERSION: 22
   PNPM_VERSION: 10.33.2
   VERCEL_CLI_VERSION: 58.4.0
-  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-  VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
 
 jobs:
-  ci-and-build:
-    name: CI and Vercel deployment
+  quality:
+    name: Lint, typecheck, and test
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
 
     steps:
-      - name: Checkout Code
+      - name: Checkout code
         uses: actions/checkout@v7
 
       - name: Setup pnpm
@@ -42,62 +39,127 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
-      - name: Install Dependencies
+      - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run Linters, Type Checks, and Tests
+      - name: Run quality checks
         run: |
           pnpm lint
           pnpm typecheck
           pnpm exec vitest run
 
+  security:
+    name: Dependency security
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Block newly introduced vulnerable dependencies
+        if: github.event_name == 'pull_request'
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+
+      - name: Generate dependency SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          artifact-name: billboard-source-ai-sbom.spdx.json
+          format: spdx-json
+
+  deploy-preview:
+    name: Deploy Vercel preview
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    needs: [quality, security]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: preview
+      url: ${{ steps.deploy.outputs.url }}
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
       - name: Install Vercel CLI
-        if: >-
-          github.event_name == 'push' ||
-          github.event.pull_request.head.repo.full_name == github.repository
         run: npm install --global vercel@${{ env.VERCEL_CLI_VERSION }}
 
-      - name: Validate Vercel Credentials
-        if: >-
-          github.event_name == 'push' ||
-          github.event.pull_request.head.repo.full_name == github.repository
+      - name: Validate Vercel credentials
         run: |
           test -n "$VERCEL_TOKEN" || { echo "Missing GitHub secret: VERCEL_TOKEN"; exit 1; }
           test -n "$VERCEL_ORG_ID" || { echo "Missing GitHub secret: VERCEL_ORG_ID"; exit 1; }
           test -n "$VERCEL_PROJECT_ID" || { echo "Missing GitHub secret: VERCEL_PROJECT_ID"; exit 1; }
 
-      - name: Pull Vercel Preview Environment Information
-        if: >-
-          github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name == github.repository
+      - name: Pull Vercel preview environment
         run: vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
 
-      - name: Pull Vercel Production Environment Information
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
-
-      - name: Build Preview Project Artifacts
-        if: >-
-          github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name == github.repository
+      - name: Build preview artifact
         run: vercel build --token="$VERCEL_TOKEN"
 
-      - name: Build Production Project Artifacts
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: vercel build --prod --token="$VERCEL_TOKEN"
-
-      - name: Deploy Preview to Vercel
-        if: >-
-          github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name == github.repository
+      - name: Deploy prebuilt preview
+        id: deploy
         run: |
-          deployment_url=$(vercel deploy --prebuilt --token="$VERCEL_TOKEN")
+          deployment_url=$(vercel deploy --prebuilt --yes --token="$VERCEL_TOKEN")
+          echo "url=$deployment_url" >> "$GITHUB_OUTPUT"
           echo "### Preview deployment" >> "$GITHUB_STEP_SUMMARY"
           echo "$deployment_url" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Deploy Production to Vercel
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  deploy-production:
+    name: Deploy Vercel production
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [quality, security]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: production
+      url: ${{ steps.deploy.outputs.url }}
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@${{ env.VERCEL_CLI_VERSION }}
+
+      - name: Validate Vercel credentials
         run: |
-          deployment_url=$(vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN")
+          test -n "$VERCEL_TOKEN" || { echo "Missing GitHub secret: VERCEL_TOKEN"; exit 1; }
+          test -n "$VERCEL_ORG_ID" || { echo "Missing GitHub secret: VERCEL_ORG_ID"; exit 1; }
+          test -n "$VERCEL_PROJECT_ID" || { echo "Missing GitHub secret: VERCEL_PROJECT_ID"; exit 1; }
+
+      - name: Pull Vercel production environment
+        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+
+      - name: Build production artifact
+        run: vercel build --prod --token="$VERCEL_TOKEN"
+
+      - name: Deploy prebuilt production artifact
+        id: deploy
+        run: |
+          deployment_url=$(vercel deploy --prebuilt --prod --yes --token="$VERCEL_TOKEN")
+          echo "url=$deployment_url" >> "$GITHUB_OUTPUT"
           echo "### Production deployment" >> "$GITHUB_STEP_SUMMARY"
           echo "$deployment_url" >> "$GITHUB_STEP_SUMMARY"
