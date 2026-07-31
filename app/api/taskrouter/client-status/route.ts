@@ -24,11 +24,9 @@ export async function POST(req: Request) {
   try {
     const url = new URL(req.url)
     const cellPhone = url.searchParams.get('cellPhone')
-    const taskSid = url.searchParams.get('taskSid')
 
     const formData = await req.formData()
     const callStatus = formData.get('CallStatus') as string | null
-    const callSid = formData.get('CallSid') as string | null
 
     console.log('═══════════════════════════════════════════')
     console.log('📱 CLIENT STATUS CALLBACK')

@@ -1,4 +1,5 @@
 # billboard-source-ai
+
 website: https://www.billboardsource.com/index.html
 
 The offical BillBoard Source Company AI application
@@ -39,3 +40,23 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## CI/CD
+
+The GitHub Actions workflow in `.github/workflows/ci-cd.yml`:
+
+- lints, type-checks, tests, and builds every pull request targeting `main`;
+- deploys same-repository pull requests to the Vercel Preview environment after the checks pass; and
+- deploys pushes to `main` to the Vercel Production environment after the checks pass.
+
+Application secrets stay in Vercel. The workflow runs `vercel pull` for the target environment before each deployment build, so Preview and Production use their corresponding Vercel environment variables.
+
+Add only these deployment credentials as GitHub Actions repository secrets:
+
+| Secret              | Source                                                                   |
+| ------------------- | ------------------------------------------------------------------------ |
+| `VERCEL_TOKEN`      | A Vercel account or team token with access to the project                |
+| `VERCEL_ORG_ID`     | `orgId` in the local `.vercel/project.json` created by `vercel link`     |
+| `VERCEL_PROJECT_ID` | `projectId` in the local `.vercel/project.json` created by `vercel link` |
+
+Pull requests from forks run the quality checks but skip deployment because GitHub does not expose repository secrets to forked workflows.

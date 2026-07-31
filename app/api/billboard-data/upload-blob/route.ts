@@ -58,7 +58,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     console.log('✅ Upload token generated')
     return NextResponse.json(jsonResponse)
-  } catch (error) {
+  } catch {
     console.error('❌ Blob upload failed')
     return NextResponse.json({ error: 'Upload failed' }, { status: 400 })
   }

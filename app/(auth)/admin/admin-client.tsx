@@ -996,6 +996,9 @@ function useLeadSync(initialLeadStats: LeadStats | null) {
   const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null)
 
   useEffect(() => {
+    // Lead stats are refreshed by the server and intentionally mirrored locally
+    // so an in-progress client sync can update the same value.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLeadStats(initialLeadStats)
   }, [initialLeadStats])
 

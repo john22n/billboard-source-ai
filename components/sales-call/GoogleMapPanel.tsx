@@ -193,9 +193,10 @@ export function GoogleMapPanel({
     map.addListener('click', (event: any) => {
       if (event.latLng) {
         const geocoder = new window.google.maps.Geocoder()
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         geocoder.geocode(
           { location: event.latLng },
+          // Google Maps is loaded dynamically and does not expose types here.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           (results: any, status: any) => {
             if (status === 'OK' && results?.[0]) {
               updateMarkerAndStreetView(
@@ -213,9 +214,10 @@ export function GoogleMapPanel({
     // If initial location provided, geocode and show it
     if (initialLocation) {
       const geocoder = new window.google.maps.Geocoder()
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       geocoder.geocode(
         { address: initialLocation },
+        // Google Maps is loaded dynamically and does not expose types here.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (results: any, status: any) => {
           if (status === 'OK' && results?.[0]?.geometry?.location) {
             updateMarkerAndStreetView(
@@ -240,6 +242,8 @@ export function GoogleMapPanel({
   // Check if Google Maps is already loaded (e.g., from another component)
   useEffect(() => {
     if (window.google?.maps?.Map) {
+      // Synchronize with a script that may have loaded before this component.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setScriptReady(true)
     }
   }, [])
@@ -272,11 +276,14 @@ export function GoogleMapPanel({
   useEffect(() => {
     if (!isLoaded || !initialLocation || !window.google?.maps) return
 
+    // Keep the editable query aligned with a location selected by the parent.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSearchQuery(initialLocation)
     const geocoder = new window.google.maps.Geocoder()
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     geocoder.geocode(
       { address: initialLocation },
+      // Google Maps is loaded dynamically and does not expose types here.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (results: any, status: any) => {
         if (status === 'OK' && results?.[0]?.geometry?.location) {
           updateMarkerAndStreetView(

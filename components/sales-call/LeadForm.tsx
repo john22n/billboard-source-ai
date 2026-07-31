@@ -32,7 +32,6 @@ const MAX_ADDITIONAL_CONTACTS = 1
 // ============================================================================
 
 interface LeadFormProps {
-  resetTrigger?: number
   inboundPhone?: string
   validationErrors?: string[]
 }
@@ -42,7 +41,6 @@ interface LeadFormProps {
 // ============================================================================
 
 export function LeadForm({
-  resetTrigger,
   inboundPhone,
   validationErrors = [],
 }: LeadFormProps) {
