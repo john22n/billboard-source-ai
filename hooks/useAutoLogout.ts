@@ -3,20 +3,11 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 
-const LOGOUT_HOUR = 19
-const SESSION_DURATION_MS = 8 * 60 * 60 * 1000
+const SESSION_DURATION_MS = 8.5 * 60 * 60 * 1000
 
 function getAutoLogoutCutoff(sessionIssuedAt: number) {
   const sessionStartedAt = new Date(sessionIssuedAt * 1000)
-  const sessionExpiration = new Date(
-    sessionStartedAt.getTime() + SESSION_DURATION_MS,
-  )
-  const dailyCutoff = new Date(sessionStartedAt)
-  dailyCutoff.setHours(LOGOUT_HOUR, 0, 0, 0)
-
-  return sessionStartedAt < dailyCutoff && dailyCutoff < sessionExpiration
-    ? dailyCutoff
-    : sessionExpiration
+  return new Date(sessionStartedAt.getTime() + SESSION_DURATION_MS)
 }
 
 export function isAutoLogoutDue(sessionIssuedAt: number, now = new Date()) {
@@ -24,8 +15,8 @@ export function isAutoLogoutDue(sessionIssuedAt: number, now = new Date()) {
   return now >= sessionCutoff
 }
 
-/** Logs out at the earlier of 7 PM or eight hours after login. */
-export function useAutoLogout(sessionIssuedAt: number, isCallActive = false) {
+/** Logs out after 8.5 hours unless a call still needs its Nutshell submission. */
+export function useAutoLogout(sessionIssuedAt: number, logoutBlocked = false) {
   const router = useRouter()
   const hasLoggedOutRef = useRef(false)
 
@@ -79,7 +70,7 @@ export function useAutoLogout(sessionIssuedAt: number, isCallActive = false) {
     const now = new Date()
 
     const checkTime = () => {
-      if (new Date() >= sessionCutoff && !isCallActive) void performLogout()
+      if (new Date() >= sessionCutoff && !logoutBlocked) void performLogout()
     }
 
     checkTime()
@@ -97,5 +88,5 @@ export function useAutoLogout(sessionIssuedAt: number, isCallActive = false) {
       clearTimeout(timeout)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [isCallActive, performLogout, sessionIssuedAt])
+  }, [logoutBlocked, performLogout, sessionIssuedAt])
 }
