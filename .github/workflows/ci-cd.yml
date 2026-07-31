@@ -57,11 +57,22 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
-      - name: Block newly introduced vulnerable dependencies
-        if: github.event_name == 'pull_request'
-        uses: actions/dependency-review-action@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
         with:
-          fail-on-severity: high
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Audit dependencies
+        run: pnpm audit --audit-level=critical
 
       - name: Generate dependency SBOM
         uses: anchore/sbom-action@v0

@@ -46,7 +46,7 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 The GitHub Actions workflow in `.github/workflows/ci-cd.yml`:
 
 - lints, type-checks, and tests every pull request targeting `main`;
-- blocks newly introduced high-severity dependency vulnerabilities and publishes an SPDX SBOM;
+- audits dependencies for critical vulnerabilities and publishes an SPDX SBOM;
 - deploys same-repository pull requests to the Vercel Preview environment only after the gates pass; and
 - deploys pushes to `main` to the protected GitHub `production` environment only after the gates pass.
 
