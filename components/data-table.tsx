@@ -50,7 +50,6 @@ import {
   VisibilityState,
 } from '@tanstack/react-table'
 import { Area, AreaChart, CartesianGrid, XAxis } from 'recharts'
-import { toast } from 'sonner'
 import { z } from 'zod'
 
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -200,16 +199,7 @@ const columns: ColumnDef<z.infer<typeof schema>>[] = [
     accessorKey: 'target',
     header: () => <div className="w-full text-right">Target</div>,
     cell: ({ row }) => (
-      <form
-        onSubmit={(e) => {
-          e.preventDefault()
-          toast.promise(new Promise((resolve) => setTimeout(resolve, 1000)), {
-            loading: `Saving ${row.original.header}`,
-            success: 'Done',
-            error: 'Error',
-          })
-        }}
-      >
+      <div>
         <Label htmlFor={`${row.original.id}-target`} className="sr-only">
           Target
         </Label>
@@ -217,24 +207,18 @@ const columns: ColumnDef<z.infer<typeof schema>>[] = [
           className="hover:bg-input/30 focus-visible:bg-background dark:hover:bg-input/30 dark:focus-visible:bg-input/30 h-8 w-16 border-transparent bg-transparent text-right shadow-none focus-visible:border dark:bg-transparent"
           defaultValue={row.original.target}
           id={`${row.original.id}-target`}
+          type="number"
+          min="0"
+          required
         />
-      </form>
+      </div>
     ),
   },
   {
     accessorKey: 'limit',
     header: () => <div className="w-full text-right">Limit</div>,
     cell: ({ row }) => (
-      <form
-        onSubmit={(e) => {
-          e.preventDefault()
-          toast.promise(new Promise((resolve) => setTimeout(resolve, 1000)), {
-            loading: `Saving ${row.original.header}`,
-            success: 'Done',
-            error: 'Error',
-          })
-        }}
-      >
+      <div>
         <Label htmlFor={`${row.original.id}-limit`} className="sr-only">
           Limit
         </Label>
@@ -242,8 +226,11 @@ const columns: ColumnDef<z.infer<typeof schema>>[] = [
           className="hover:bg-input/30 focus-visible:bg-background dark:hover:bg-input/30 dark:focus-visible:bg-input/30 h-8 w-16 border-transparent bg-transparent text-right shadow-none focus-visible:border dark:bg-transparent"
           defaultValue={row.original.limit}
           id={`${row.original.id}-limit`}
+          type="number"
+          min="0"
+          required
         />
-      </form>
+      </div>
     ),
   },
   {
@@ -447,10 +434,10 @@ export function DataTable({
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm">
-                <IconLayoutColumns />
+                <IconLayoutColumns data-icon="inline-start" />
                 <span className="hidden lg:inline">Customize Columns</span>
                 <span className="lg:hidden">Columns</span>
-                <IconChevronDown />
+                <IconChevronDown data-icon="inline-end" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
@@ -478,7 +465,7 @@ export function DataTable({
             </DropdownMenuContent>
           </DropdownMenu>
           <Button variant="outline" size="sm">
-            <IconPlus />
+            <IconPlus data-icon="inline-start" />
             <span className="hidden lg:inline">Add Section</span>
           </Button>
         </div>
@@ -730,7 +717,7 @@ function TableCellViewer({ item }: { item: z.infer<typeof schema> }) {
               <Separator />
             </>
           )}
-          <form className="flex flex-col gap-4">
+          <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-3">
               <Label htmlFor="header">Header</Label>
               <Input id="header" defaultValue={item.header} />
@@ -801,7 +788,7 @@ function TableCellViewer({ item }: { item: z.infer<typeof schema> }) {
                 </SelectContent>
               </Select>
             </div>
-          </form>
+          </div>
         </div>
         <DrawerFooter>
           <Button>Submit</Button>

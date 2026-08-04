@@ -87,8 +87,8 @@ type NutshellResult = {
 }
 
 type NutshellResponseActions = {
-  setStatus: (status: 'success' | 'error') => void
-  setMessage: (message: string) => void
+  updateSubmissionStatus: (status: 'success' | 'error') => void
+  updateSubmissionMessage: (message: string) => void
   setValidationErrors: (errors: string[]) => void
   clearAll: () => void
 }
@@ -99,15 +99,15 @@ function handleNutshellResponse(
   actions: NutshellResponseActions,
 ) {
   if (response.ok) {
-    actions.setStatus('success')
-    actions.setMessage('Lead created')
+    actions.updateSubmissionStatus('success')
+    actions.updateSubmissionMessage('Lead created')
     showSuccessToast('Lead sent to Nutshell')
     actions.clearAll()
     return
   }
 
-  actions.setStatus('error')
-  actions.setMessage(result.error || 'Failed')
+  actions.updateSubmissionStatus('error')
+  actions.updateSubmissionMessage(result.error || 'Failed')
   if (result.missingFields && Array.isArray(result.missingFields)) {
     actions.setValidationErrors(result.missingFields)
   }
@@ -308,7 +308,11 @@ function CallHeader(props: CallHeaderProps) {
               {callActive && (
                 <span className="inline-block w-1.5 h-1.5 sm:w-2 sm:h-2 bg-red-400 rounded-full animate-pulse flex-shrink-0"></span>
               )}
-              <span className="font-medium truncate max-w-[100px] sm:max-w-none">
+              <span
+                role="status"
+                aria-live="polite"
+                className="font-medium truncate max-w-[100px] sm:max-w-none"
+              >
                 {status}
               </span>
             </div>
@@ -334,6 +338,7 @@ function CallHeader(props: CallHeaderProps) {
               <input
                 ref={fileInputRef}
                 type="file"
+                aria-label="Upload an audio recording"
                 accept="audio/*,.mp3,.wav,.m4a,.ogg"
                 onChange={onFileSelect}
                 disabled={isUploading || callActive}
@@ -452,6 +457,8 @@ function LeadActions({
     <div className="mt-auto flex flex-shrink-0 flex-col items-center gap-1 border-t border-slate-200 bg-white pt-2 sm:gap-2">
       {nutshellStatus !== 'idle' && (
         <span
+          role="status"
+          aria-live="polite"
           className={`text-[10px] font-medium sm:text-xs ${
             nutshellStatus === 'success' ? 'text-green-600' : 'text-red-600'
           }`}
@@ -979,8 +986,8 @@ function useNutshellSubmission(
       })
       const result: NutshellResult = await response.json()
       handleNutshellResponse(response, result, {
-        setStatus: setNutshellStatus,
-        setMessage: setNutshellMessage,
+        updateSubmissionStatus: setNutshellStatus,
+        updateSubmissionMessage: setNutshellMessage,
         setValidationErrors,
         clearAll,
       })

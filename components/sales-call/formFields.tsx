@@ -110,6 +110,7 @@ export const FieldInput = memo(function FieldInput({
 
   return (
     <Input
+      aria-label="Lead form field"
       value={value ?? ''}
       onChange={handleChange}
       placeholder={placeholder}
@@ -157,6 +158,7 @@ export const FirstNameInput = memo(function FirstNameInput({
 
   return (
     <Input
+      aria-label="First name"
       value={firstName}
       onChange={handleChange}
       className={`${inputClass} ${className}`}
@@ -193,6 +195,7 @@ export const FieldTextarea = memo(function FieldTextarea({
 
   return (
     <Textarea
+      aria-label="Field details"
       value={value ?? ''}
       onChange={handleChange}
       className={`${inputClass} ${className}`}
@@ -263,6 +266,8 @@ export const PhoneInput = memo(function PhoneInput({
   return (
     <div className={wrapperClass}>
       <Input
+        aria-label="Phone number"
+        autoComplete="tel"
         value={phoneStr}
         onChange={handleChange}
         className={`${baseClassName} ${colorClass} ${className}`}
@@ -335,6 +340,7 @@ export const ContactFieldInput = memo(function ContactFieldInput({
 
   return (
     <Input
+      aria-label="Contact information"
       value={value}
       onChange={handleChange}
       className={`${inputClass} ${className}`}
@@ -384,6 +390,7 @@ export const MarketFieldInput = memo(function MarketFieldInput({
 
   return (
     <Input
+      aria-label="Market location"
       value={value}
       onChange={handleChange}
       placeholder={placeholder}
@@ -430,6 +437,7 @@ export const MarketFieldTextarea = memo(function MarketFieldTextarea({
 
   return (
     <Textarea
+      aria-label="Market area"
       value={value}
       onChange={handleChange}
       className={`${inputClass} ${className}`}
@@ -994,6 +1002,7 @@ export const BallparkInput = memo(function BallparkInput({
 
   return (
     <Input
+      aria-label="Ballpark budget"
       value={ballpark}
       onChange={handleChange}
       placeholder="Manual entry"

@@ -171,14 +171,25 @@ export function LoginForm({ className }: { className?: string }) {
             <Input
               id="email"
               type="email"
+              autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="m@example.com"
               required
               disabled={isLoading}
+              aria-describedby="login-email-error"
+              aria-invalid={Boolean(error)}
               className="bg-white"
             />
-            {error && <p className="text-sm text-red-500">{error}</p>}
+            {error && (
+              <p
+                id="login-email-error"
+                role="alert"
+                className="text-sm text-red-500"
+              >
+                {error}
+              </p>
+            )}
           </div>
           <Button type="submit" className="w-full" disabled={isLoading}>
             {isLoading ? 'Checking...' : 'Continue'}
@@ -247,14 +258,25 @@ export function LoginForm({ className }: { className?: string }) {
             <Input
               id="password"
               type="password"
+              autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
               disabled={isLoading}
+              aria-describedby="login-password-error"
+              aria-invalid={Boolean(error)}
               className="bg-white"
               autoFocus
             />
-            {error && <p className="text-sm text-red-500">{error}</p>}
+            {error && (
+              <p
+                id="login-password-error"
+                role="alert"
+                className="text-sm text-red-500"
+              >
+                {error}
+              </p>
+            )}
           </div>
           <Button type="submit" className="w-full" disabled={isLoading}>
             {isLoading ? 'Signing in...' : 'Login'}

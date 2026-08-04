@@ -341,7 +341,17 @@ export function LeadForm({
                 {additionalMarkets.map((_, index) => (
                   <button
                     key={index + 1}
-                    onClick={() => setActiveMarketIndex(index + 1)}
+                    onClick={(event) => {
+                      if (
+                        (event.target as HTMLElement).closest(
+                          '[data-remove-market]',
+                        )
+                      ) {
+                        removeMarket(index + 1)
+                      } else {
+                        setActiveMarketIndex(index + 1)
+                      }
+                    }}
                     className={`inline-block border-2 ${
                       activeMarketIndex === index + 1
                         ? 'border-t-0 rounded-b-md'
@@ -350,10 +360,7 @@ export function LeadForm({
                   >
                     <span>Mkt #{index + 2}</span>
                     <span
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        removeMarket(index + 1)
-                      }}
+                      data-remove-market
                       className="ml-1 sm:ml-1.5 text-red-600 hover:text-red-800 cursor-pointer"
                     >
                       ×
@@ -389,7 +396,17 @@ export function LeadForm({
             {additionalContacts.map((contact, index) => (
               <button
                 key={contact.id}
-                onClick={() => setActiveContactIndex(index + 1)}
+                onClick={(event) => {
+                  if (
+                    (event.target as HTMLElement).closest(
+                      '[data-remove-contact]',
+                    )
+                  ) {
+                    removeContact(index + 1)
+                  } else {
+                    setActiveContactIndex(index + 1)
+                  }
+                }}
                 className={`inline-block border-2 ${
                   activeContactIndex === index + 1
                     ? 'border-b-0 rounded-t-md bg-gray-300'
@@ -398,10 +415,7 @@ export function LeadForm({
               >
                 <span>CONTACT #{index + 2}</span>
                 <span
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    removeContact(index + 1)
-                  }}
+                  data-remove-contact
                   className="ml-1 sm:ml-1.5 text-red-600 hover:text-red-800 cursor-pointer"
                 >
                   ×

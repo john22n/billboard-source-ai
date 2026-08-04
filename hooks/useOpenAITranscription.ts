@@ -86,7 +86,7 @@ export function useOpenAITranscription(
     'agent' | 'caller' | null
   >(null)
 
-  const setStatus = useCallback(
+  const reportStatus = useCallback(
     (status: string) => {
       options.onStatusChange?.(status)
     },
@@ -221,7 +221,7 @@ export function useOpenAITranscription(
       stream: MediaStream,
       speaker: 'agent' | 'caller',
     ): Promise<TranscriptionSession | null> => {
-      setStatus(`Fetching OpenAI token for ${speaker}...`)
+      reportStatus(`Fetching OpenAI token for ${speaker}...`)
       const token = await fetchTranscriptionToken(speaker)
       if (!token) return null
 
@@ -241,13 +241,13 @@ export function useOpenAITranscription(
 
       return transcriptionSession
     },
-    [createTranscriptionSession, setStatus],
+    [createTranscriptionSession, reportStatus],
   )
 
   const startTranscription = useCallback(
     async (call: Call) => {
       try {
-        setStatus('Connecting transcription...')
+        reportStatus('Connecting transcription...')
         costLogs.current = []
 
         const remoteStream = call.getRemoteStream()
@@ -265,13 +265,13 @@ export function useOpenAITranscription(
         )
 
         sessions.current = newSessions
-        setStatus(getTranscriptionStatus(newSessions.length))
+        reportStatus(getTranscriptionStatus(newSessions.length))
       } catch (error) {
         console.error('Setup failed:', error)
-        setStatus('Error during setup')
+        reportStatus('Error during setup')
       }
     },
-    [createTrackedTranscriptionSession, setStatus],
+    [createTrackedTranscriptionSession, reportStatus],
   )
 
   const stopTranscription = useCallback(async () => {

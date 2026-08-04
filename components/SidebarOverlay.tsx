@@ -14,11 +14,12 @@ export function SidebarOverlay() {
   if (isMobile) return null
 
   return (
-    <div
-      aria-hidden="true"
+    <button
+      type="button"
+      aria-label="Close sidebar"
       onClick={() => setOpen(false)}
       className={cn(
-        'fixed inset-0 z-[9] bg-black/40',
+        'fixed inset-0 z-[9] border-0 bg-black/40 p-0',
         'transition-opacity duration-200 ease-linear',
         open
           ? 'opacity-100 pointer-events-auto'
