@@ -158,7 +158,7 @@ export function PasskeyManager() {
       </div>
 
       {/* Passkey list */}
-      <div className="space-y-2">
+      <div role="status" aria-live="polite" className="space-y-2">
         {isLoading ? (
           <p className="text-sm text-muted-foreground">Loading...</p>
         ) : passkeys.length === 0 ? (
@@ -241,6 +241,7 @@ export function PasskeyManager() {
           disabled={isRegistering}
         >
           <svg
+            data-icon="inline-start"
             className="mr-2 h-4 w-4"
             viewBox="0 0 24 24"
             fill="none"

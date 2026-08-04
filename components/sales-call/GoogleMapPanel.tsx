@@ -316,6 +316,7 @@ export function GoogleMapPanel({
         <Input
           ref={searchInputRef}
           type="text"
+          aria-label="Search for a location"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           onKeyDown={handleKeyDown}

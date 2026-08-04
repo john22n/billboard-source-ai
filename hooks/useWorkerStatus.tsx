@@ -17,7 +17,7 @@ interface WorkerStatusContextType {
   isLoading: boolean
   error: string | null
   isSessionExpired: boolean
-  setStatus: (status: WorkerActivity) => Promise<void>
+  updateStatus: (status: WorkerActivity) => Promise<void>
   refresh: () => Promise<void>
   reconnect: () => void
 }
@@ -114,7 +114,7 @@ export function WorkerStatusProvider({ children }: WorkerStatusProviderProps) {
   /* ---------------------------------------------------- */
   /* Update status                                        */
   /* ---------------------------------------------------- */
-  const setStatus = useCallback(
+  const updateStatus = useCallback(
     async (newStatus: WorkerActivity) => {
       if (authFailedRef.current) {
         throw new Error('Session expired - please log in again')
@@ -172,17 +172,17 @@ export function WorkerStatusProvider({ children }: WorkerStatusProviderProps) {
   useEffect(() => {
     // Establish the server-side status for each newly mounted dashboard session.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    void setStatus('offline').catch(() => {
-      // setStatus exposes the error through context.
+    void updateStatus('offline').catch(() => {
+      // updateStatus exposes the error through context.
     })
-  }, [setStatus])
+  }, [updateStatus])
 
   const value: WorkerStatusContextType = {
     status,
     isLoading,
     error,
     isSessionExpired,
-    setStatus,
+    updateStatus,
     refresh,
     reconnect,
   }

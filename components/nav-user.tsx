@@ -136,7 +136,9 @@ export function NavUser({
 
             <DropdownMenuItem onClick={handleLogout} disabled={isPending}>
               <IconLogout />
-              {isPending ? 'Logging out...' : 'Log out'}
+              <span role="status" aria-live="polite">
+                {isPending ? 'Logging out...' : 'Log out'}
+              </span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

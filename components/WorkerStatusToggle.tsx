@@ -33,7 +33,7 @@ interface WorkerStatusToggleProps {
 }
 
 export function WorkerStatusToggle({ className }: WorkerStatusToggleProps) {
-  const { status, isLoading, error, setStatus } = useWorkerStatus()
+  const { status, isLoading, error, updateStatus } = useWorkerStatus()
 
   const handleChange = async (value: string) => {
     try {
@@ -44,16 +44,21 @@ export function WorkerStatusToggle({ className }: WorkerStatusToggleProps) {
       ) {
         await Notification.requestPermission()
       }
-      await setStatus(value as WorkerActivity)
+      await updateStatus(value as WorkerActivity)
     } catch {
       // Error handled in hook
     }
   }
 
   return (
-    <div className={cn('flex items-center gap-1 sm:gap-2', className)}>
+    <div
+      role="status"
+      aria-live="polite"
+      className={cn('flex items-center gap-1 sm:gap-2', className)}
+    >
       <Select value={status} onValueChange={handleChange} disabled={isLoading}>
         <SelectTrigger
+          aria-label="Worker availability status"
           className={cn(
             'w-[85px] sm:w-[130px] h-7 sm:h-8 text-[10px] sm:text-xs font-medium bg-transparent hover:bg-accent hover:text-accent-foreground',
             isLoading && 'opacity-50',
@@ -99,7 +104,11 @@ export function WorkerStatusToggle({ className }: WorkerStatusToggleProps) {
         </SelectContent>
       </Select>
       {error && (
-        <span className="text-[10px] sm:text-xs text-destructive" title={error}>
+        <span
+          role="alert"
+          className="text-[10px] sm:text-xs text-destructive"
+          title={error}
+        >
           !
         </span>
       )}
