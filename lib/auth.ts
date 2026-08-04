@@ -17,9 +17,9 @@ interface JWTPayload {
 
 const JWT_SECRET = new TextEncoder().encode(serverConfig.auth.jwtSecret)
 
-// A work session lasts eight and a half hours. Calls renew this window when
+// A work session lasts ten hours. Calls renew this window when
 // accepted so their post-call Nutshell submission remains authenticated.
-const JWT_EXPIRATION = '8.5h'
+const JWT_EXPIRATION = '10h'
 
 // hash a password
 export async function hashPassword(password: string) {

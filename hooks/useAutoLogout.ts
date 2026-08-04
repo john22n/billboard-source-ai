@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 
-const SESSION_DURATION_MS = 8.5 * 60 * 60 * 1000
+const SESSION_DURATION_MS = 10 * 60 * 60 * 1000
 
 function getAutoLogoutCutoff(sessionIssuedAt: number) {
   const sessionStartedAt = new Date(sessionIssuedAt * 1000)
@@ -15,7 +15,7 @@ export function isAutoLogoutDue(sessionIssuedAt: number, now = new Date()) {
   return now >= sessionCutoff
 }
 
-/** Logs out after 8.5 hours unless a call still needs its Nutshell submission. */
+/** Logs out after 10 hours unless a call still needs its Nutshell submission. */
 export function useAutoLogout(sessionIssuedAt: number, logoutBlocked = false) {
   const router = useRouter()
   const hasLoggedOutRef = useRef(false)

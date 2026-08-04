@@ -9,12 +9,12 @@ import { isAutoLogoutDue } from './useAutoLogout'
 describe('isAutoLogoutDue', () => {
   const sessionIssuedAt = Date.UTC(2026, 6, 31, 8, 0, 0) / 1000
 
-  it('keeps the session active until eight and a half hours have elapsed', () => {
+  it('keeps the session active until ten hours have elapsed', () => {
     expect(
-      isAutoLogoutDue(sessionIssuedAt, new Date('2026-07-31T16:29:59Z')),
+      isAutoLogoutDue(sessionIssuedAt, new Date('2026-07-31T17:59:59Z')),
     ).toBe(false)
     expect(
-      isAutoLogoutDue(sessionIssuedAt, new Date('2026-07-31T16:30:00Z')),
+      isAutoLogoutDue(sessionIssuedAt, new Date('2026-07-31T18:00:00Z')),
     ).toBe(true)
   })
 

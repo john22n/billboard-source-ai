@@ -107,7 +107,7 @@ Protected admin area for managing the application:
 
 Dual authentication supporting both password-based login and passwordless WebAuthn passkeys.
 
-- **Password auth:** JWT in HTTP-only session cookie; 8.5-hour expiry; clears on browser close
+- **Password auth:** JWT in HTTP-only session cookie; 10-hour expiry; clears on browser close
 - **Call completion:** Accepting a call renews the session window, and an elapsed session does not log the rep out until the call's lead has been submitted successfully to Nutshell
 - **Passkeys:** Full WebAuthn/FIDO2 via `@simplewebauthn/server`; platform and cross-platform authenticators supported
 - **Domain restriction:** Only `@billboardsource.com` email addresses may register or log in

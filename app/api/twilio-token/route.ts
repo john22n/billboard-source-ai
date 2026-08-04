@@ -16,7 +16,7 @@ import { rateLimit } from '@/lib/rate-limit'
 
 const AccessToken = twilio.jwt.AccessToken
 const VoiceGrant = AccessToken.VoiceGrant
-const LOGIN_SESSION_SECONDS = 60 * 60 * 8.5
+const LOGIN_SESSION_SECONDS = 60 * 60 * 10
 
 export async function GET() {
   // ✅ SECURITY: Require authentication
