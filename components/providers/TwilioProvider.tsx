@@ -109,7 +109,7 @@ function getReadyStatus(runtime: TwilioRuntime) {
     : 'Offline'
 }
 
-async function acceptIncomingCall(
+export async function acceptIncomingCall(
   runtime: TwilioRuntime,
   update: UpdateState,
   call: Call,
@@ -123,6 +123,10 @@ async function acceptIncomingCall(
     call.on('accept', () => runtime.onCallAccepted?.(call))
 
     await call.accept()
+    // The remote caller can hang up while this accept is still settling. In
+    // that case the disconnect handler clears acceptingCall; do not resurrect
+    // the already-closed call as active when this promise resumes.
+    if (runtime.acceptingCall !== call) return
     runtime.activeCall = call
     update({ callActive: true, incomingCall: null })
   } catch (error) {
@@ -159,7 +163,7 @@ export function canShowIncomingNotification() {
   return Notification.permission === 'granted'
 }
 
-function handleIncomingCall(
+export function handleIncomingCall(
   runtime: TwilioRuntime,
   update: UpdateState,
   call: Call,
@@ -172,6 +176,7 @@ function handleIncomingCall(
 
   call.on('disconnect', () => {
     closeIncomingNotification(runtime)
+    if (runtime.acceptingCall === call) runtime.acceptingCall = null
     runtime.activeCall = null
     update({ callActive: false, incomingCall: null })
     runtime.onCallDisconnected?.()
