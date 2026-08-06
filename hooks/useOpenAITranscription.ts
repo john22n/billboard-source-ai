@@ -79,6 +79,7 @@ export function useOpenAITranscription(
 ) {
   const sessions = useRef<TranscriptionSession[]>([])
   const costLogs = useRef<CostLog[]>([])
+  const transcriptionGeneration = useRef(0)
 
   const [transcripts, setTranscripts] = useState<TranscriptItem[]>([])
   const [interimTranscript, setInterimTranscript] = useState('')
@@ -246,6 +247,7 @@ export function useOpenAITranscription(
 
   const startTranscription = useCallback(
     async (call: Call) => {
+      const generation = ++transcriptionGeneration.current
       try {
         reportStatus('Connecting transcription...')
         costLogs.current = []
@@ -264,9 +266,21 @@ export function useOpenAITranscription(
           createTrackedTranscriptionSession,
         )
 
+        // A short-lived Twilio leg can disconnect while token/session setup is
+        // in flight. Discard those late sessions instead of reviving a stopped
+        // transcription after the call has already ended.
+        if (generation !== transcriptionGeneration.current) {
+          newSessions.forEach((session) => {
+            session.dc?.close()
+            session.pc.close()
+          })
+          return
+        }
+
         sessions.current = newSessions
         reportStatus(getTranscriptionStatus(newSessions.length))
       } catch (error) {
+        if (generation !== transcriptionGeneration.current) return
         console.error('Setup failed:', error)
         reportStatus('Error during setup')
       }
@@ -275,6 +289,7 @@ export function useOpenAITranscription(
   )
 
   const stopTranscription = useCallback(async () => {
+    transcriptionGeneration.current += 1
     const endedAt = Date.now()
     const logsToUpdate = costLogs.current
     costLogs.current = []

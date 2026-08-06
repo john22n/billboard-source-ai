@@ -5,8 +5,10 @@ vi.mock('@/hooks/useWorkerStatus', () => ({
 }))
 
 import {
+  acceptIncomingCall,
   canShowIncomingNotification,
   disposeTwilioRuntime,
+  handleIncomingCall,
   refreshTwilioToken,
 } from './TwilioProvider'
 
@@ -53,6 +55,45 @@ describe('canShowIncomingNotification', () => {
     vi.stubGlobal('window', {})
 
     expect(canShowIncomingNotification()).toBe(false)
+  })
+})
+
+describe('acceptIncomingCall', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('does not reactivate a call that disconnects while accept is settling', async () => {
+    type IncomingRuntime = Parameters<typeof handleIncomingCall>[0]
+    type IncomingCall = Parameters<typeof handleIncomingCall>[2]
+    const listeners = new Map<string, () => void>()
+    const call = {
+      parameters: { From: '+15555550123' },
+      on: vi.fn((event: string, callback: () => void) => {
+        listeners.set(event, callback)
+      }),
+      accept: vi.fn(async () => {
+        listeners.get('accept')?.()
+        listeners.get('disconnect')?.()
+      }),
+    } as unknown as IncomingCall
+    const runtime = createRefreshRuntime({
+      state: 'registered',
+    } as unknown as RefreshDevice) as IncomingRuntime
+    const update = vi.fn()
+    vi.stubGlobal('window', {})
+
+    handleIncomingCall(runtime, update, call)
+    await acceptIncomingCall(runtime, update, call)
+
+    expect(runtime.activeCall).toBeNull()
+    expect(update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ callActive: true }),
+    )
+    expect(update).toHaveBeenCalledWith({
+      callActive: false,
+      incomingCall: null,
+    })
   })
 })
 
