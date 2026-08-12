@@ -12,6 +12,7 @@ import {
   isMissingConfig,
   serverConfig,
 } from '@/lib/config'
+import { rateLimit } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,10 +31,26 @@ export async function POST(req: NextRequest) {
     if (!session?.userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
+    const attempt = await rateLimit('billboard-pricing', session.userId, 30, 60)
+    if (!attempt.allowed) {
+      return NextResponse.json(
+        { error: 'Too many requests' },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(attempt.retryAfterSeconds) },
+        },
+      )
+    }
 
     const { transcript } = await req.json()
 
-    if (!transcript || transcript.trim().length === 0) {
+    if (typeof transcript !== 'string') {
+      return NextResponse.json({ error: 'Invalid transcript' }, { status: 400 })
+    }
+    if (transcript.length > 100_000) {
+      return NextResponse.json({ error: 'Input too large' }, { status: 400 })
+    }
+    if (transcript.trim().length === 0) {
       return NextResponse.json({ context: '' })
     }
 
@@ -71,8 +88,6 @@ Transcript: ${transcript}`,
     })
     const extractedLocation = locationResult.text
 
-    console.log('📍 Extracted location:', extractedLocation)
-
     if (!extractedLocation || extractedLocation.trim().length === 0) {
       console.log('❌ No location found in transcript')
       return NextResponse.json({ context: '' })
@@ -82,9 +97,6 @@ Transcript: ${transcript}`,
     const locationParts = extractedLocation.split(',').map((s) => s.trim())
     const city = locationParts[0] || ''
     const state = locationParts[1] || ''
-
-    console.log('🏙️ Parsed - City:', city, 'State:', state)
-    console.log('🔍 Location parts array:', locationParts)
 
     // ⭐ Generate 512-dimension embedding using OpenAI SDK directly
     const embeddingResponse = await getOpenAIClient().embeddings.create({
@@ -127,10 +139,6 @@ Transcript: ${transcript}`,
     `)
 
     console.log('📊 Query returned:', results.rows.length, 'results')
-    if (results.rows.length > 0) {
-      console.log('🎯 First result:', results.rows[0])
-    }
-
     if (!results.rows || results.rows.length === 0) {
       console.log('❌ No matching billboard locations found')
       return NextResponse.json({ context: '' })
@@ -138,8 +146,6 @@ Transcript: ${transcript}`,
 
     const topResult = results.rows[0] as unknown as BillboardRow
     console.log(`✅ Found ${results.rows.length} matching locations`)
-    console.log(`🎯 Top match: ${topResult.city}, ${topResult.state}`)
-    console.log(`   - Similarity: ${(topResult.similarity * 100).toFixed(1)}%`)
 
     const formattedContext = formatResults(
       results.rows as unknown as BillboardRow[],
@@ -154,12 +160,9 @@ Transcript: ${transcript}`,
     if (isMissingConfig(error)) {
       return NextResponse.json(configErrorResponseBody(error), { status: 500 })
     }
-    console.error('❌ Billboard pricing error:', error)
+    console.error('❌ Billboard pricing request failed')
     return NextResponse.json(
-      {
-        error: 'Failed to fetch billboard pricing',
-        details: error instanceof Error ? error.message : 'Unknown error',
-      },
+      { error: 'Failed to fetch billboard pricing' },
       { status: 500 },
     )
   }

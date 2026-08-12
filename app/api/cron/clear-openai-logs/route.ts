@@ -5,6 +5,7 @@ import {
   serverConfig,
 } from '@/lib/config'
 import { clearMonthlyOpenAILogs } from '@/lib/dal'
+import { clearExpiredRateLimits } from '@/lib/rate-limit'
 
 export async function GET(request: NextRequest) {
   let cronSecret: string
@@ -22,11 +23,15 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const deletedCount = await clearMonthlyOpenAILogs()
+  const [deletedCount, deletedRateLimitBuckets] = await Promise.all([
+    clearMonthlyOpenAILogs(),
+    clearExpiredRateLimits(),
+  ])
 
   return NextResponse.json({
     success: true,
     deletedCount,
+    deletedRateLimitBuckets,
     clearedBefore: new Date(
       new Date().getFullYear(),
       new Date().getMonth(),

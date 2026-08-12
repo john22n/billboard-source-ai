@@ -1,47 +1,61 @@
-import type { Metadata } from "next";
-import { Theme } from "@radix-ui/themes"
-import { Geist, Geist_Mono } from "next/font/google";
+import type { Metadata } from 'next'
+import { Theme } from '@radix-ui/themes'
+import { Geist, Geist_Mono } from 'next/font/google'
 import { Toaster } from 'react-hot-toast'
-import "./globals.css";
+import { ThemeProvider } from '@/components/theme-provider'
+import './globals.css'
 
 const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-  display: "swap",
+  variable: '--font-geist-sans',
+  subsets: ['latin'],
+  display: 'swap',
   preload: true,
-});
+})
 
 const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-  display: "swap",
+  variable: '--font-geist-mono',
+  subsets: ['latin'],
+  display: 'swap',
   preload: false, // Mono font less critical, load async
-});
+})
+
+const metadataUrl =
+  process.env.NEXT_PUBLIC_APP_URL ??
+  (process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    : 'http://localhost:3000')
 
 export const metadata: Metadata = {
-  title: "Billboard Source AI.",
-  description: "Billboard Source Company application integrated with AI",
+  metadataBase: new URL(metadataUrl),
+  title: 'Billboard Source AI.',
+  description: 'Billboard Source Company application integrated with AI',
   robots: {
     index: false,
-    follow: false
-  }
-};
+    follow: false,
+  },
+}
 
 export default function RootLayout({
   children,
 }: Readonly<{
-  children: React.ReactNode;
+  children: React.ReactNode
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning data-scroll-behavior="smooth">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <Theme accentColor="tomato">
-          <Toaster position="top-center" />
-          {children}
-        </Theme>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="light"
+          enableSystem={false}
+        >
+          <Theme accentColor="tomato">
+            <Toaster position="top-center" />
+            {children}
+          </Theme>
+        </ThemeProvider>
       </body>
     </html>
-  );
+  )
 }

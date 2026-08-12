@@ -1,3 +1,5 @@
+import { isValidTwilioWebhook } from '@/lib/twilio-webhook'
+
 /**
  * Simultaneous Dial Complete Handler
  *
@@ -53,8 +55,6 @@ function twimlResponse(body: string) {
 function logDialResult(
   dialCallStatus: string | null,
   durationSeconds: number | null,
-  taskSid: string | null,
-  workerSid: string,
 ) {
   console.log('═══════════════════════════════════════════')
   console.log('📱 SIMULTANEOUS DIAL COMPLETE')
@@ -63,8 +63,6 @@ function logDialResult(
     'DialCallDuration:',
     durationSeconds != null ? `${durationSeconds}s` : 'n/a',
   )
-  console.log('TaskSid:', taskSid)
-  console.log('WorkerSid:', workerSid)
   console.log('═══════════════════════════════════════════')
 }
 
@@ -88,11 +86,8 @@ async function resetWorkerToBack(
     console.log(
       `✅ Worker ${workerSid} reset to back of queue after missed simultaneous dial`,
     )
-  } catch (err) {
-    console.error(
-      '❌ Failed to reset worker after missed simultaneous dial:',
-      err,
-    )
+  } catch {
+    console.error('❌ Failed to reset worker after missed simultaneous dial')
   }
 }
 
@@ -112,8 +107,8 @@ async function switchWorkerToAvailable(
     console.log(
       `✅ Worker ${workerSid} switched back to Available after genuine answer`,
     )
-  } catch (err) {
-    console.error('❌ Failed to switch worker back to Available:', err)
+  } catch {
+    console.error('❌ Failed to switch worker back to Available')
   }
 }
 
@@ -141,8 +136,8 @@ async function completeAnsweredTask(
       reason: 'Simultaneous dial completed successfully',
     })
     console.log(`✅ Task ${taskSid} completed`)
-  } catch (taskErr) {
-    console.error('❌ Failed to complete task:', taskErr)
+  } catch {
+    console.error('❌ Failed to complete task')
   }
 }
 
@@ -232,16 +227,16 @@ async function fetchAndCompleteMissedTask(
       `✅ Task ${taskSid} completed (DialCallStatus: ${dialCallStatus})`,
     )
     return taskAttributes
-  } catch (taskErr) {
-    console.error(
-      '❌ Failed to fetch/complete simultaneous-dial task:',
-      taskErr,
-    )
+  } catch {
+    console.error('❌ Failed to fetch/complete simultaneous-dial task')
     return {}
   }
 }
 
 export async function POST(req: Request) {
+  if (!(await isValidTwilioWebhook(req)))
+    return new Response('Forbidden', { status: 403 })
+
   try {
     const url = new URL(req.url)
     const taskSid = url.searchParams.get('taskSid')
@@ -257,7 +252,7 @@ export async function POST(req: Request) {
       ? parseInt(dialCallDuration, 10)
       : null
 
-    logDialResult(rawDialCallStatus, durationSeconds, taskSid, workerSid)
+    logDialResult(rawDialCallStatus, durationSeconds)
 
     const appUrl = serverConfig.app.baseUrlFromRequest(req.url)
     const { accountSid, authToken } =
@@ -349,8 +344,8 @@ export async function POST(req: Request) {
         callerFrom,
       }),
     )
-  } catch (error) {
-    console.error('❌ Simultaneous dial complete handler error:', error)
+  } catch {
+    console.error('❌ Simultaneous dial completion failed')
     return twimlResponse(HANGUP_TWIML)
   }
 }

@@ -25,7 +25,8 @@ export function getErrorMessage(error: unknown): string {
 }
 
 export function showErrorToast(error: unknown, fallbackMessage?: string): void {
-  const message = getErrorMessage(error) || fallbackMessage || 'An error occurred'
+  const message =
+    getErrorMessage(error) || fallbackMessage || 'An error occurred'
   toast.error(message)
 }
 
@@ -33,10 +34,15 @@ export function showSuccessToast(message: string): void {
   toast.success(message)
 }
 
+export function dismissToasts(): void {
+  toast.dismiss()
+}
+
 export async function handleApiResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
-    const message = data.error || data.message || `Request failed (${response.status})`
+    const message =
+      data.error || data.message || `Request failed (${response.status})`
     throw new Error(message)
   }
   return response.json()
@@ -44,7 +50,7 @@ export async function handleApiResponse<T>(response: Response): Promise<T> {
 
 export async function fetchWithErrorHandling<T>(
   url: string,
-  options?: RequestInit
+  options?: RequestInit,
 ): Promise<T> {
   try {
     const response = await fetch(url, options)
@@ -58,7 +64,7 @@ export async function fetchWithErrorHandling<T>(
 }
 
 export function createSafeAction<TInput, TOutput>(
-  action: (input: TInput) => Promise<TOutput>
+  action: (input: TInput) => Promise<TOutput>,
 ): (input: TInput) => Promise<{ data?: TOutput; error?: string }> {
   return async (input: TInput) => {
     try {

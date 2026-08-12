@@ -14,6 +14,9 @@ export async function GET() {
   if (!session?.userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+  if (session.role !== 'admin') {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   let credentials: ReturnType<
     typeof serverConfig.twilio.requireAccountCredentials
@@ -62,10 +65,7 @@ export async function GET() {
     )
 
     if (!currentMonthResponse.ok || !lastMonthResponse.ok) {
-      const error = !currentMonthResponse.ok
-        ? await currentMonthResponse.text()
-        : await lastMonthResponse.text()
-      console.error('Twilio Usage API error:', error)
+      console.error('Twilio Usage API request failed')
       return NextResponse.json(
         { error: 'Failed to fetch Twilio usage data' },
         { status: 500 },
@@ -121,8 +121,8 @@ export async function GET() {
       totalCost: currentMonthCost + lastMonthCost,
       totalCostFormatted: `$${(currentMonthCost + lastMonthCost).toFixed(2)}`,
     })
-  } catch (error) {
-    console.error('Error fetching Twilio usage:', error)
+  } catch {
+    console.error('Error fetching Twilio usage')
     return NextResponse.json(
       { error: 'Failed to fetch usage data' },
       { status: 500 },

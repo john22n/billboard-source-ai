@@ -1,11 +1,18 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { startRegistration, browserSupportsWebAuthn } from '@simplewebauthn/browser'
+import {
+  startRegistration,
+  browserSupportsWebAuthn,
+} from '@simplewebauthn/browser'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { showErrorToast, showSuccessToast, getErrorMessage } from '@/lib/error-handling'
+import {
+  showErrorToast,
+  showSuccessToast,
+  getErrorMessage,
+} from '@/lib/error-handling'
 
 interface Passkey {
   id: string
@@ -24,6 +31,8 @@ export function PasskeyManager() {
 
   // Check browser support
   useEffect(() => {
+    // WebAuthn support is only available after the client has mounted.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSupportsPasskeys(browserSupportsWebAuthn())
   }, [])
 
@@ -43,6 +52,8 @@ export function PasskeyManager() {
   }, [])
 
   useEffect(() => {
+    // Initial client-side resource load; fetchPasskeys owns loading state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchPasskeys()
   }, [fetchPasskeys])
 
@@ -140,17 +151,20 @@ export function PasskeyManager() {
         <div>
           <h3 className="text-lg font-medium">Passkeys</h3>
           <p className="text-sm text-muted-foreground">
-            Sign in securely without a password using Face ID, Touch ID, or a security key.
+            Sign in securely without a password using Face ID, Touch ID, or a
+            security key.
           </p>
         </div>
       </div>
 
       {/* Passkey list */}
-      <div className="space-y-2">
+      <div role="status" aria-live="polite" className="space-y-2">
         {isLoading ? (
           <p className="text-sm text-muted-foreground">Loading...</p>
         ) : passkeys.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No passkeys registered yet.</p>
+          <p className="text-sm text-muted-foreground">
+            No passkeys registered yet.
+          </p>
         ) : (
           passkeys.map((pk) => (
             <div
@@ -173,7 +187,9 @@ export function PasskeyManager() {
                 <div>
                   <p className="font-medium">{pk.name}</p>
                   <p className="text-xs text-muted-foreground">
-                    {pk.deviceType === 'singleDevice' ? 'Security Key' : 'Platform Authenticator'}
+                    {pk.deviceType === 'singleDevice'
+                      ? 'Security Key'
+                      : 'Platform Authenticator'}
                     {' · '}
                     Added {new Date(pk.createdAt).toLocaleDateString()}
                   </p>
@@ -225,6 +241,7 @@ export function PasskeyManager() {
           disabled={isRegistering}
         >
           <svg
+            data-icon="inline-start"
             className="mr-2 h-4 w-4"
             viewBox="0 0 24 24"
             fill="none"

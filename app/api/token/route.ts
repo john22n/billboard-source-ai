@@ -7,6 +7,7 @@ import {
   isMissingConfig,
   serverConfig,
 } from '@/lib/config'
+import { rateLimit } from '@/lib/rate-limit'
 
 export async function GET() {
   const instructions = `
@@ -21,8 +22,6 @@ Your tasks:
 `.trim()
 
   try {
-    const openaiApiKey = serverConfig.openai.requireApiKey()
-
     const session = await getSession()
     if (!session?.userId) {
       return NextResponse.json(
@@ -30,6 +29,18 @@ Your tasks:
         { status: 401 },
       )
     }
+    const attempt = await rateLimit('openai-token', session.userId, 10, 60)
+    if (!attempt.allowed) {
+      return NextResponse.json(
+        { error: 'Too many requests' },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(attempt.retryAfterSeconds) },
+        },
+      )
+    }
+
+    const openaiApiKey = serverConfig.openai.requireApiKey()
 
     const response = await fetch(
       'https://api.openai.com/v1/realtime/client_secrets',
@@ -60,33 +71,21 @@ Your tasks:
     )
 
     if (!response.ok) {
-      const errorText = await response.text()
-      console.error('OpenAI error:', errorText)
+      console.error('OpenAI token request failed with status:', response.status)
       return NextResponse.json(
-        { error: 'Failed to generate token', details: errorText },
-        { status: response.status },
+        { error: 'Failed to generate token' },
+        { status: 502 },
       )
     }
 
     const data = await response.json()
-
-    // ✅ CRITICAL: Log the response to see the structure
-    console.log('OpenAI full response:', JSON.stringify(data, null, 2))
-
-    // ✅ CRITICAL: Extract session ID correctly
     const sessionId = data.session?.id || data.id || 'unknown'
-
-    console.log('Extracted sessionId:', sessionId)
 
     // Create pending log entry
     const logEntry = await createPendingLog(
       session.userId,
       sessionId,
       REALTIME_TRANSCRIPTION_MODEL,
-    )
-
-    console.log(
-      `📝 Created pending log (id: ${logEntry.id}) for session ${sessionId}`,
     )
 
     // Return the correct structure
@@ -101,9 +100,9 @@ Your tasks:
     if (isMissingConfig(error)) {
       return NextResponse.json(configErrorResponseBody(error), { status: 500 })
     }
-    console.error('Token generation error:', error)
+    console.error('Token generation failed')
     return NextResponse.json(
-      { error: 'Failed to generate token', details: String(error) },
+      { error: 'Failed to generate token' },
       { status: 500 },
     )
   }

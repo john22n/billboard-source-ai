@@ -42,10 +42,10 @@ export async function POST(req: Request) {
       cost: result.cost,
       durationSeconds,
     })
-  } catch (error) {
-    console.error('Cost update error:', error)
+  } catch {
+    console.error('Cost update failed')
     return NextResponse.json(
-      { error: 'Failed to update cost', details: String(error) },
+      { error: 'Failed to update cost' },
       { status: 500 },
     )
   }

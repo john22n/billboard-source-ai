@@ -17,10 +17,7 @@ export async function POST(request: NextRequest) {
     // Require authentication
     const session = await getSession()
     if (!session) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      )
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     // Get the stored challenge
@@ -30,7 +27,7 @@ export async function POST(request: NextRequest) {
     if (!challenge) {
       return NextResponse.json(
         { error: 'Challenge expired or not found. Please try again.' },
-        { status: 400 }
+        { status: 400 },
       )
     }
 
@@ -44,7 +41,7 @@ export async function POST(request: NextRequest) {
     if (!response) {
       return NextResponse.json(
         { error: 'Missing registration response' },
-        { status: 400 }
+        { status: 400 },
       )
     }
 
@@ -53,7 +50,7 @@ export async function POST(request: NextRequest) {
       session.userId,
       response,
       challenge,
-      name
+      name,
     )
 
     // Clear the challenge cookie
@@ -67,14 +64,14 @@ export async function POST(request: NextRequest) {
     } else {
       return NextResponse.json(
         { error: 'Verification failed' },
-        { status: 400 }
+        { status: 400 },
       )
     }
-  } catch (error) {
-    console.error('Error verifying registration:', error)
+  } catch {
+    console.error('Error verifying registration')
     return NextResponse.json(
       { error: 'Failed to verify registration' },
-      { status: 500 }
+      { status: 500 },
     )
   }
 }

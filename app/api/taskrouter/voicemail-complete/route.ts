@@ -1,3 +1,5 @@
+import { isValidTwilioWebhook } from '@/lib/twilio-webhook'
+
 /**
  * Voicemail Complete Handler
  *
@@ -9,33 +11,24 @@ import twilio from 'twilio'
 import { serverConfig } from '@/lib/config'
 
 export async function POST(req: Request) {
+  if (!(await isValidTwilioWebhook(req)))
+    return new Response('Forbidden', { status: 403 })
+
   try {
     const url = new URL(req.url)
     const taskSid = url.searchParams.get('taskSid')
     const workspaceSid = url.searchParams.get('workspaceSid')
-    const from = url.searchParams.get('from')
-    const to = url.searchParams.get('to')
-    const callSid = url.searchParams.get('callSid')
     const queueTime = url.searchParams.get('queueTime')
 
     const formData = await req.formData()
     const recordingSid = formData.get('RecordingSid') as string | null
     const recordingDuration = formData.get('RecordingDuration') as string | null
-    const recordingUrlRaw = formData.get('RecordingUrl') as string | null
 
     const durationSeconds = parseInt(recordingDuration || '0', 10)
-    const recordingUrl = recordingUrlRaw ? `${recordingUrlRaw}.mp3` : null
 
     console.log('═══════════════════════════════════════════')
     console.log('📼 VOICEMAIL COMPLETE')
-    console.log('TaskSid:', taskSid)
-    console.log('WorkspaceSid:', workspaceSid)
-    console.log('From:', from)
-    console.log('To:', to)
-    console.log('CallSid:', callSid)
     console.log('QueueTime:', queueTime, 'seconds')
-    console.log('RecordingSid:', recordingSid)
-    console.log('RecordingUrl:', recordingUrl)
     console.log('Duration:', durationSeconds, 'seconds')
     console.log('═══════════════════════════════════════════')
 
@@ -52,12 +45,9 @@ export async function POST(req: Request) {
             assignmentStatus: 'completed',
             reason: 'Voicemail recorded',
           })
-        console.log('✅ Task completed:', taskSid)
-      } catch (err) {
-        console.error(
-          '⚠️ Failed to complete task (may already be completed):',
-          err,
-        )
+        console.log('✅ Task completed')
+      } catch {
+        console.error('⚠️ Failed to complete task (may already be completed)')
       }
     }
 
@@ -98,8 +88,8 @@ export async function POST(req: Request) {
       status: 200,
       headers: { 'Content-Type': 'text/xml' },
     })
-  } catch (error) {
-    console.error('❌ Voicemail complete error:', error)
+  } catch {
+    console.error('❌ Voicemail completion failed')
     return new Response(
       '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>',
       { status: 200, headers: { 'Content-Type': 'text/xml' } },

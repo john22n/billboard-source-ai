@@ -1,4 +1,5 @@
 # billboard-source-ai
+
 website: https://www.billboardsource.com/index.html
 
 The offical BillBoard Source Company AI application
@@ -39,3 +40,13 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## CI/CD
+
+The GitHub Actions workflow in `.github/workflows/ci-cd.yml`:
+
+- lints, type-checks, and tests every pull request targeting `main`;
+- audits dependencies for critical vulnerabilities; and
+- publishes an SPDX SBOM.
+
+Vercel's native Git integration owns deployments: pull requests receive preview deployments and pushes to `main` produce production deployments. GitHub Actions does not require Vercel credentials and does not build or deploy the application.

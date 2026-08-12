@@ -1,3 +1,5 @@
+import { isValidTwilioWebhook } from '@/lib/twilio-webhook'
+
 /**
  * Cell Screen — Call Screening Prompt
  *
@@ -13,6 +15,9 @@
 import { serverConfig } from '@/lib/config'
 
 export async function POST(req: Request) {
+  if (!(await isValidTwilioWebhook(req)))
+    return new Response('Forbidden', { status: 403 })
+
   try {
     const appUrl = serverConfig.app.baseUrlFromRequest(req.url)
 
@@ -37,8 +42,8 @@ export async function POST(req: Request) {
       status: 200,
       headers: { 'Content-Type': 'text/xml' },
     })
-  } catch (error) {
-    console.error('❌ Cell screen error:', error)
+  } catch {
+    console.error('❌ Cell screen failed')
     return new Response(
       '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>',
       { status: 200, headers: { 'Content-Type': 'text/xml' } },

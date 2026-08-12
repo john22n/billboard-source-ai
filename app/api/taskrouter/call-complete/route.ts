@@ -1,3 +1,5 @@
+import { isValidTwilioWebhook } from '@/lib/twilio-webhook'
+
 /**
  * Conference Status Callback
  *
@@ -22,12 +24,7 @@ function logConferenceEvent(details: {
 }) {
   console.log('═══════════════════════════════════════════')
   console.log('📞 CONFERENCE STATUS CALLBACK')
-  console.log('═══════════════════════════════════════════')
   console.log('StatusCallbackEvent:', details.statusCallbackEvent)
-  console.log('ConferenceSid:', details.conferenceSid)
-  console.log('CallSid:', details.callSid)
-  console.log('TaskSid:', details.taskSid)
-  console.log('WorkerSid:', details.workerSid)
   console.log('═══════════════════════════════════════════')
 }
 
@@ -53,12 +50,9 @@ async function redirectActiveCaller(
       url: retryUrl.toString(),
       method: 'POST',
     })
-    console.log(`✅ Caller ${callerCallSid} redirected to retry-or-overflow`)
-  } catch (redirectErr) {
-    console.error(
-      '❌ Failed to redirect caller to retry-or-overflow:',
-      redirectErr,
-    )
+    console.log('✅ Caller redirected to retry-or-overflow')
+  } catch {
+    console.error('❌ Failed to redirect caller to retry-or-overflow')
   }
 }
 
@@ -177,12 +171,15 @@ async function handleConferenceEnd(options: {
       callerFrom: taskAttributes.from as string | undefined,
     })
     await redirectActiveCaller(client, callerCallSid, retryUrl)
-  } catch (error) {
-    console.error('❌ Failed to handle conference-end:', error)
+  } catch {
+    console.error('❌ Failed to handle conference-end')
   }
 }
 
 export async function POST(req: Request) {
+  if (!(await isValidTwilioWebhook(req)))
+    return new Response('Forbidden', { status: 403 })
+
   try {
     const formData = await req.formData()
     const statusCallbackEvent = formData.get('StatusCallbackEvent') as string
@@ -230,8 +227,8 @@ export async function POST(req: Request) {
     }
 
     return new Response('OK', { status: 200 })
-  } catch (error) {
-    console.error('❌ Conference status callback error:', error)
+  } catch {
+    console.error('❌ Conference status callback failed')
     return new Response('Error', { status: 500 })
   }
 }

@@ -28,7 +28,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     serverConfig.blob.requireReadWriteToken()
   } catch (error) {
     if (!isMissingConfig(error)) throw error
-    console.error('❌ Blob storage config error:', error.message)
+    console.error('❌ Blob storage configuration unavailable')
     return NextResponse.json(configErrorResponseBody(error), { status: 500 })
   }
 
@@ -56,14 +56,10 @@ export async function POST(request: Request): Promise<NextResponse> {
       // REMOVED onUploadCompleted - this was causing the 401
     })
 
-    console.log('✅ Upload successful:', jsonResponse)
+    console.log('✅ Upload token generated')
     return NextResponse.json(jsonResponse)
-  } catch (error) {
-    console.error('❌ Blob upload error:', error)
-    const errorMessage =
-      error instanceof Error ? error.message : 'Unknown error'
-    console.error('Error details:', errorMessage)
-
-    return NextResponse.json({ error: errorMessage }, { status: 400 })
+  } catch {
+    console.error('❌ Blob upload failed')
+    return NextResponse.json({ error: 'Upload failed' }, { status: 400 })
   }
 }

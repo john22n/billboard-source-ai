@@ -1,3 +1,5 @@
+import { isValidTwilioWebhook } from '@/lib/twilio-webhook'
+
 /**
  * TaskRouter Wait URL
  *
@@ -8,13 +10,16 @@
  * including any re-enqueue cycles when a worker rejects the call.
  */
 export async function POST(req: Request) {
+  if (!(await isValidTwilioWebhook(req)))
+    return new Response('Forbidden', { status: 403 })
+
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Play loop="0">https://com.twilio.sounds.music.s3.amazonaws.com/ClockworkWaltz.mp3</Play>
-</Response>`;
+</Response>`
 
   return new Response(twiml, {
     status: 200,
     headers: { 'Content-Type': 'text/xml' },
-  });
+  })
 }

@@ -27,6 +27,7 @@ import { signOut } from '@/actions/auth'
 import { useTransition, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { PasskeyManager } from '@/components/passkey-manager'
+import { useTwilioContext } from '@/components/providers/TwilioProvider'
 
 export function NavUser({
   user,
@@ -42,6 +43,7 @@ export function NavUser({
   const [isPending, startTransition] = useTransition()
   const [passkeyDialogOpen, setPasskeyDialogOpen] = useState(false)
   const router = useRouter()
+  const { destroyDevice } = useTwilioContext()
 
   const handleLogout = () => {
     startTransition(async () => {
@@ -60,17 +62,8 @@ export function NavUser({
         console.error('❌ Failed to set worker status to offline:', error)
       }
 
-      // Clean up Twilio device if it exists (from TwilioProvider)
-      if (typeof window !== 'undefined') {
-        const twilioDeviceRef = (window as any).twilioDevice
-        if (
-          twilioDeviceRef?.current &&
-          twilioDeviceRef.current.state !== 'destroyed'
-        ) {
-          console.log('🧹 Cleaning up Twilio device on logout')
-          twilioDeviceRef.current.destroy()
-        }
-      }
+      // Stop token refreshes and destroy the Voice SDK connection before logout.
+      destroyDevice()
       await signOut()
     })
   }
@@ -143,7 +136,9 @@ export function NavUser({
 
             <DropdownMenuItem onClick={handleLogout} disabled={isPending}>
               <IconLogout />
-              {isPending ? 'Logging out...' : 'Log out'}
+              <span role="status" aria-live="polite">
+                {isPending ? 'Logging out...' : 'Log out'}
+              </span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

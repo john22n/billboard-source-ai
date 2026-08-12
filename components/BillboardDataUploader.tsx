@@ -1,24 +1,40 @@
 // components/admin/BillboardDataUploader.tsx
-'use client';
+'use client'
 
-import { useState } from 'react';
-import { Upload, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
-import { upload } from '@vercel/blob/client';
+import { useState, useTransition } from 'react'
+import { Upload, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
+import { upload } from '@vercel/blob/client'
+import { z } from 'zod'
+
+const uploadSchema = z
+  .instanceof(File)
+  .refine(
+    (file) => file.name.toLowerCase().endsWith('.csv'),
+    'Please select a CSV file',
+  )
+  .refine(
+    (file) => file.size <= 500 * 1024 * 1024,
+    'File is too large (max 500MB)',
+  )
 
 export function BillboardDataUploader() {
-  const [uploading, setUploading] = useState(false);
+  const [isPending, startUploadTransition] = useTransition()
   const [status, setStatus] = useState<{
-    type: 'success' | 'error' | 'info' | null;
-    message: string;
-  }>({ type: null, message: '' });
-  const [progress, setProgress] = useState('');
-  const [progressPercent, setProgressPercent] = useState(0);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+    type: 'success' | 'error' | 'info' | null
+    message: string
+  }>({ type: null, message: '' })
+  const [progress, setProgress] = useState('')
+  const [progressPercent, setProgressPercent] = useState(0)
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
 
-  async function processChunks(blobUrl: string, totalChunks: number, chunkSize: number) {
+  async function processChunks(
+    blobUrl: string,
+    totalChunks: number,
+    chunkSize: number,
+  ) {
     for (let i = 0; i < totalChunks; i++) {
-      setProgress(`Processing chunk ${i + 1} of ${totalChunks}...`);
-      setProgressPercent(Math.round(((i + 1) / totalChunks) * 100));
+      setProgress(`Processing chunk ${i + 1} of ${totalChunks}...`)
+      setProgressPercent(Math.round(((i + 1) / totalChunks) * 100))
 
       const response = await fetch('/api/billboard-data/process-chunk', {
         method: 'POST',
@@ -28,105 +44,115 @@ export function BillboardDataUploader() {
           chunkIndex: i,
           chunkSize,
         }),
-      });
+      })
 
-      const result = await response.json();
+      const result = await response.json()
 
       if (!response.ok || !result.success) {
-        throw new Error(`Failed to process chunk ${i + 1}: ${result.error || result.details || 'Unknown error'}`);
+        throw new Error(
+          `Failed to process chunk ${i + 1}: ${result.error || result.details || 'Unknown error'}`,
+        )
       }
 
-      console.log(`✅ Chunk ${i + 1} completed: ${result.recordsProcessed} records`);
+      console.log(
+        `✅ Chunk ${i + 1} completed: ${result.recordsProcessed} records`,
+      )
     }
   }
 
-  async function handleUpload(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setUploading(true);
-    setStatus({ type: 'info', message: 'Starting upload...' });
-    setProgress('');
-    setProgressPercent(0);
+  function handleUpload(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    const form = e.currentTarget
+    startUploadTransition(async () => {
+      setStatus({ type: 'info', message: 'Starting upload...' })
+      setProgress('')
+      setProgressPercent(0)
 
-    const formData = new FormData(e.currentTarget);
-    const file = formData.get('file');
+      const formData = new FormData(form)
+      const parsedFile = uploadSchema.safeParse(formData.get('file'))
 
-    if (!file || !(file instanceof File)) {
-      setStatus({ type: 'error', message: 'Please select a file' });
-      setUploading(false);
-      return;
-    }
-
-    if (!file.name.toLowerCase().endsWith('.csv')) {
-      setStatus({ type: 'error', message: 'Please select a CSV file' });
-      setUploading(false);
-      return;
-    }
-
-    if (file.size > 500 * 1024 * 1024) {
-      setStatus({ type: 'error', message: 'File is too large (max 500MB)' });
-      setUploading(false);
-      return;
-    }
-
-    try {
-      // Step 1: Upload to Blob
-      setProgress('Uploading file to cloud storage...');
-      setStatus({ type: 'info', message: 'Uploading file...' });
-
-      const blob = await upload(file.name, file, {
-        access: 'public',
-        handleUploadUrl: '/api/billboard-data/upload-blob',
-      });
-
-      console.log('✅ File uploaded to blob:', blob.url);
-
-      // Step 2: Start processing
-      setProgress('Analyzing CSV file...');
-      setStatus({ type: 'info', message: 'Analyzing file and preparing to process...' });
-
-      const startResponse = await fetch('/api/billboard-data/start-process', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ blobUrl: blob.url }),
-      });
-
-      const startResult = await startResponse.json();
-
-      if (!startResponse.ok || !startResult.success) {
-        throw new Error(startResult.error || startResult.details || 'Failed to start processing');
+      if (!parsedFile.success) {
+        setStatus({
+          type: 'error',
+          message: parsedFile.error.issues[0].message,
+        })
+        return
       }
+      const file = parsedFile.data
 
-      console.log(`📊 Processing ${startResult.totalRecords} records in ${startResult.totalChunks} chunks`);
+      try {
+        // Step 1: Upload to Blob
+        setProgress('Uploading file to cloud storage...')
+        setStatus({ type: 'info', message: 'Uploading file...' })
 
-      // Step 3: Process chunks
-      setStatus({ 
-        type: 'info', 
-        message: `Processing ${startResult.totalRecords.toLocaleString()} records. This will take about ${Math.round(startResult.totalChunks * 4)} minutes. Keep this page open.` 
-      });
+        const blob = await upload(file.name, file, {
+          access: 'public',
+          handleUploadUrl: '/api/billboard-data/upload-blob',
+        })
 
-      await processChunks(startResult.blobUrl, startResult.totalChunks, startResult.chunkSize);
+        console.log('✅ File uploaded to blob:', blob.url)
 
-      // Success!
-      setStatus({
-        type: 'success',
-        message: `Successfully processed all ${startResult.totalRecords.toLocaleString()} records!`,
-      });
-      setProgress('');
-      setProgressPercent(0);
-      setSelectedFile(null);
-      (e.target as HTMLFormElement).reset();
+        // Step 2: Start processing
+        setProgress('Analyzing CSV file...')
+        setStatus({
+          type: 'info',
+          message: 'Analyzing file and preparing to process...',
+        })
 
-    } catch (error) {
-      console.error('Processing failed:', error);
-      setStatus({
-        type: 'error',
-        message: error instanceof Error ? error.message : 'Processing failed. Please try again.',
-      });
-      setProgress('');
-      setProgressPercent(0);
-    } finally {
-      setUploading(false);
-    }
+        const startResponse = await fetch('/api/billboard-data/start-process', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ blobUrl: blob.url }),
+        })
+
+        const startResult = await startResponse.json()
+
+        if (!startResponse.ok || !startResult.success) {
+          throw new Error(
+            startResult.error ||
+              startResult.details ||
+              'Failed to start processing',
+          )
+        }
+
+        console.log(
+          `📊 Processing ${startResult.totalRecords} records in ${startResult.totalChunks} chunks`,
+        )
+
+        // Step 3: Process chunks
+        setStatus({
+          type: 'info',
+          message: `Processing ${startResult.totalRecords.toLocaleString()} records. This will take about ${Math.round(startResult.totalChunks * 4)} minutes. Keep this page open.`,
+        })
+
+        await processChunks(
+          startResult.blobUrl,
+          startResult.totalChunks,
+          startResult.chunkSize,
+        )
+
+        // Success!
+        setStatus({
+          type: 'success',
+          message: `Successfully processed all ${startResult.totalRecords.toLocaleString()} records!`,
+        })
+        setProgress('')
+        setProgressPercent(0)
+        setSelectedFile(null)
+        form.reset()
+      } catch (error) {
+        console.error('Processing failed:', error)
+        setStatus({
+          type: 'error',
+          message:
+            error instanceof Error
+              ? error.message
+              : 'Processing failed. Please try again.',
+        })
+        setProgress('')
+        setProgressPercent(0)
+      }
+    })
   }
 
   return (
@@ -136,7 +162,8 @@ export function BillboardDataUploader() {
           Billboard Pricing Database
         </h2>
         <p className="text-gray-600">
-          Upload your billboard pricing CSV to process all records with embeddings.
+          Upload your billboard pricing CSV to process all records with
+          embeddings.
         </p>
       </div>
 
@@ -148,16 +175,20 @@ export function BillboardDataUploader() {
           >
             Select Billboard Pricing CSV
           </label>
-          <div className={`mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-dashed rounded-lg transition-colors ${
-            selectedFile
-              ? 'border-green-400 bg-green-50'
-              : 'border-gray-300 hover:border-gray-400'
-          }`}>
+          <div
+            className={`mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-dashed rounded-lg transition-colors ${
+              selectedFile
+                ? 'border-green-400 bg-green-50'
+                : 'border-gray-300 hover:border-gray-400'
+            }`}
+          >
             <div className="space-y-1 text-center">
               {selectedFile ? (
                 <>
                   <CheckCircle2 className="mx-auto h-12 w-12 text-green-500" />
-                  <p className="text-sm font-medium text-green-700">{selectedFile.name}</p>
+                  <p className="text-sm font-medium text-green-700">
+                    {selectedFile.name}
+                  </p>
                   <p className="text-xs text-green-600">
                     {(selectedFile.size / (1024 * 1024)).toFixed(2)} MB
                   </p>
@@ -183,27 +214,35 @@ export function BillboardDataUploader() {
                 type="file"
                 accept=".csv,text/csv"
                 className="sr-only"
-                disabled={uploading}
+                disabled={isPending}
                 required
+                onInvalid={() => {
+                  setStatus({
+                    type: 'error',
+                    message: 'Please select a CSV file',
+                  })
+                }}
                 onChange={(e) => {
-                  const file = e.target.files?.[0];
+                  const file = e.target.files?.[0]
                   if (file && !file.name.toLowerCase().endsWith('.csv')) {
-                    e.target.value = '';
-                    setSelectedFile(null);
+                    e.target.value = ''
+                    setSelectedFile(null)
                     setStatus({
                       type: 'error',
-                      message: 'Please select a CSV file'
-                    });
+                      message: 'Please select a CSV file',
+                    })
                   } else {
-                    setSelectedFile(file || null);
-                    setStatus({ type: null, message: '' });
+                    setSelectedFile(file || null)
+                    setStatus({ type: null, message: '' })
                   }
                 }}
               />
               <label
                 htmlFor="file-upload"
                 className={`inline-block mt-2 cursor-pointer text-xs font-medium ${
-                  selectedFile ? 'text-green-600 hover:text-green-700' : 'text-blue-600 hover:text-blue-500'
+                  selectedFile
+                    ? 'text-green-600 hover:text-green-700'
+                    : 'text-blue-600 hover:text-blue-500'
                 }`}
               >
                 {selectedFile ? 'Change file' : ''}
@@ -231,12 +270,14 @@ export function BillboardDataUploader() {
 
         {status.type && (
           <div
+            role={status.type === 'error' ? 'alert' : 'status'}
+            aria-live={status.type === 'error' ? 'assertive' : 'polite'}
             className={`p-4 rounded-lg flex items-start gap-3 ${
               status.type === 'success'
                 ? 'bg-green-50 text-green-800 border border-green-200'
                 : status.type === 'error'
-                ? 'bg-red-50 text-red-800 border border-red-200'
-                : 'bg-blue-50 text-blue-800 border border-blue-200'
+                  ? 'bg-red-50 text-red-800 border border-red-200'
+                  : 'bg-blue-50 text-blue-800 border border-blue-200'
             }`}
           >
             {status.type === 'success' && (
@@ -254,10 +295,10 @@ export function BillboardDataUploader() {
 
         <button
           type="submit"
-          disabled={uploading}
+          disabled={isPending}
           className="w-full flex justify-center items-center gap-2 px-4 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
-          {uploading ? (
+          {isPending ? (
             <>
               <Loader2 className="h-5 w-5 animate-spin" />
               Processing...
@@ -284,13 +325,15 @@ export function BillboardDataUploader() {
         </ol>
 
         <div className="mt-4 pt-4 border-t border-gray-200">
-          <h4 className="text-xs font-semibold text-gray-900 mb-1">Important:</h4>
+          <h4 className="text-xs font-semibold text-gray-900 mb-1">
+            Important:
+          </h4>
           <p className="text-xs text-gray-600">
-            Keep this page open during processing. For 467,000 records, expect ~6 hours total.
-            Each chunk takes about 4 minutes.
+            Keep this page open during processing. For 467,000 records, expect
+            ~6 hours total. Each chunk takes about 4 minutes.
           </p>
         </div>
       </div>
     </div>
-  );
+  )
 }

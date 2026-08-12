@@ -21,7 +21,7 @@ describe('server config', () => {
     expect(() => config.auth.jwtSecret).toThrow(ConfigError)
 
     try {
-      config.auth.jwtSecret
+      void config.auth.jwtSecret
     } catch (error) {
       expect(String(error)).not.toContain(secret)
       expect(String(error)).toContain('serverConfig.auth.jwtSecret')

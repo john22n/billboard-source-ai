@@ -14,6 +14,7 @@ import {
   recordMissedAttempt,
 } from '@/lib/call-attempt-outcomes'
 import { serverConfig } from '@/lib/config'
+import { isValidTwilioWebhook } from '@/lib/twilio-webhook'
 
 function getActivityMap(): Record<
   string,
@@ -48,24 +49,9 @@ async function resetWorkerToBack(workerSid: string, label: string) {
       .workers(workerSid)
       .update({ activitySid: activitySids.available })
     console.log(`✅ Worker ${workerSid} reset to back of queue after ${label}`)
-  } catch (err) {
-    console.error(`❌ Failed to reset worker after ${label}:`, err)
+  } catch {
+    console.error(`❌ Failed to reset worker after ${label}`)
   }
-}
-
-function hasValidTwilioSignature(req: Request, bodyText: string) {
-  const twilioAuthToken = serverConfig.twilio.authToken
-  if (!twilioAuthToken || !serverConfig.runtime.isProductionDeployment) {
-    return true
-  }
-
-  const params = Object.fromEntries(new URLSearchParams(bodyText))
-  return twilio.validateRequest(
-    twilioAuthToken,
-    req.headers.get('X-Twilio-Signature') || '',
-    req.url,
-    params,
-  )
 }
 
 async function setWorkerActivity(workerSid: string, activitySid: string) {
@@ -105,8 +91,8 @@ async function handleReservationAccepted(
     const busyActivitySid = serverConfig.taskRouter.requireActivitySid('busy')
     await setWorkerActivity(workerSid, busyActivitySid)
     console.log(`✅ Worker ${workerSid} switched to Busy`)
-  } catch (err) {
-    console.error('❌ Failed to switch worker to Busy:', err)
+  } catch {
+    console.error('❌ Failed to switch worker to Busy')
   }
 }
 
@@ -149,7 +135,7 @@ async function handleWorkerActivityUpdate(
     .update(user)
     .set({ workerActivity: newStatus })
     .where(eq(user.id, currentUser.id))
-  console.log(`   ✅ Updated ${currentUser.email} to ${newStatus}`)
+  console.log(`   ✅ Updated worker activity to ${newStatus}`)
 }
 
 async function handleTaskRouterEvent(formData: FormData) {
@@ -218,20 +204,18 @@ async function handleTaskRouterEvent(formData: FormData) {
 }
 
 export async function POST(req: Request) {
-  try {
-    const bodyTextPromise = req.clone().text()
-    const formData = await req.formData()
+  if (!(await isValidTwilioWebhook(req))) {
+    return new Response('Forbidden', { status: 403 })
+  }
 
-    if (!hasValidTwilioSignature(req, await bodyTextPromise)) {
-      console.error('❌ Invalid Twilio signature on events callback')
-      return new Response('Forbidden', { status: 403 })
-    }
+  try {
+    const formData = await req.formData()
 
     await handleTaskRouterEvent(formData)
 
     return new Response(null, { status: 204 })
-  } catch (error) {
-    console.error('❌ TaskRouter event callback error:', error)
+  } catch {
+    console.error('❌ TaskRouter event callback failed')
     return new Response(null, { status: 500 })
   }
 }
