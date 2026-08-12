@@ -59,7 +59,7 @@ export default async function Page() {
         <SiteHeader />
         <div className="flex-1 min-h-0 overflow-hidden p-0 m-0">
           <Suspense fallback={<DashboardSkeleton />}>
-            <SalesCallTranscriber sessionIssuedAt={session.sessionStartedAt} />
+            <SalesCallTranscriber sessionIssuedAt={session.issuedAt} />
           </Suspense>
         </div>
       </SidebarInset>
