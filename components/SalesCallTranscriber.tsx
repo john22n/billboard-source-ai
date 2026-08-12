@@ -789,13 +789,16 @@ function useCallLifecycle(
 
 function useCallSessionProtection(
   sessionIssuedAt: number,
+  initialHasPendingSubmission: boolean,
   twilio: TwilioState,
   transcription: Pick<
     TranscriptionState,
     'startTranscription' | 'stopTranscription'
   >,
 ) {
-  const [hasPendingSubmission, setHasPendingSubmission] = useState(false)
+  const [hasPendingSubmission, setHasPendingSubmission] = useState(
+    initialHasPendingSubmission,
+  )
   const handleCallAccepted = useCallback(
     (call: { parameters: { CallSid?: string } }) => {
       setHasPendingSubmission(true)
@@ -1192,8 +1195,10 @@ function TranscriberContent({
 
 export default function SalesCallTranscriber({
   sessionIssuedAt,
+  initialHasPendingSubmission,
 }: {
   sessionIssuedAt: number
+  initialHasPendingSubmission: boolean
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const [billboardContext, setBillboardContext] = useState<string>('')
@@ -1205,6 +1210,7 @@ export default function SalesCallTranscriber({
   })
   const callSession = useCallSessionProtection(
     sessionIssuedAt,
+    initialHasPendingSubmission,
     twilio,
     transcription,
   )

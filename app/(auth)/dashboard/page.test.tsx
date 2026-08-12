@@ -33,7 +33,7 @@ function findElement(node: ReactNode, type: unknown): ReactNode {
 }
 
 describe('dashboard call-session protection', () => {
-  it('uses the renewed session time after a call extends the JWT', async () => {
+  it('preserves the original logout cutoff and pending lead after renewal', async () => {
     getSession.mockResolvedValue({
       userId: 'user-1',
       email: 'rep@example.com',
@@ -48,8 +48,17 @@ describe('dashboard call-session protection', () => {
 
     expect(transcriber).not.toBeNull()
     expect(
-      (transcriber as { props: { sessionIssuedAt: number } }).props
-        .sessionIssuedAt,
-    ).toBe(200)
+      (
+        transcriber as {
+          props: {
+            sessionIssuedAt: number
+            initialHasPendingSubmission: boolean
+          }
+        }
+      ).props,
+    ).toMatchObject({
+      sessionIssuedAt: 100,
+      initialHasPendingSubmission: true,
+    })
   })
 })

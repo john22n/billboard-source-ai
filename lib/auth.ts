@@ -17,9 +17,10 @@ interface JWTPayload {
 
 const JWT_SECRET = new TextEncoder().encode(serverConfig.auth.jwtSecret)
 
-// A work session lasts ten hours. Calls renew this window when
-// accepted so their post-call Nutshell submission remains authenticated.
+// A work session lasts ten hours. Accepted calls temporarily keep the JWT
+// usable for the pending Nutshell submission, but do not move this cutoff.
 const JWT_EXPIRATION = '10h'
+const JWT_EXPIRATION_SECONDS = 10 * 60 * 60
 
 // hash a password
 export async function hashPassword(password: string) {
@@ -57,11 +58,14 @@ export async function createUser(
 }
 
 //generate a jwt token
-export async function generateJWT(payload: JWTPayload) {
+export async function generateJWT(
+  payload: JWTPayload,
+  expiration: string | number = JWT_EXPIRATION,
+) {
   return await new jose.SignJWT(payload)
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
-    .setExpirationTime(JWT_EXPIRATION)
+    .setExpirationTime(expiration)
     .sign(JWT_SECRET)
 }
 
@@ -142,6 +146,30 @@ export async function extendSessionForCall(
     return true
   } catch {
     console.error('Error extending session for call')
+    return false
+  }
+}
+
+export async function endCallSessionProtection(session: {
+  userId: string
+  email: string
+  role: string
+  sessionStartedAt: number
+}) {
+  try {
+    const token = await generateJWT(
+      {
+        userId: session.userId,
+        email: session.email,
+        role: session.role,
+        sessionStartedAt: session.sessionStartedAt,
+      },
+      session.sessionStartedAt + JWT_EXPIRATION_SECONDS,
+    )
+    await setAuthCookie(token)
+    return true
+  } catch {
+    console.error('Error ending call session protection')
     return false
   }
 }

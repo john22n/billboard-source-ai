@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getSession } from '@/lib/auth'
+import { endCallSessionProtection, getSession } from '@/lib/auth'
 import { upsertNutshellLead } from '@/lib/dal'
 import {
   configErrorResponseBody,
@@ -598,7 +598,7 @@ export async function POST(req: NextRequest) {
       sourceId,
       customFields,
     })
-    return await createLeadAndPersist({
+    const response = await createLeadAndPersist({
       lead,
       description,
       noteParts,
@@ -608,6 +608,10 @@ export async function POST(req: NextRequest) {
       contactIds,
       accountId,
     })
+    if (response.ok && session.activeCallSid) {
+      await endCallSessionProtection(session)
+    }
+    return response
   } catch (error) {
     console.error('Error creating Nutshell lead:', error)
     return NextResponse.json(
