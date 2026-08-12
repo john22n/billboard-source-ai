@@ -8,6 +8,7 @@ import { publicConfig } from '@/lib/public-config'
 
 interface GoogleMapPanelProps {
   initialLocation?: string
+  exclusiveView?: boolean
 }
 
 declare global {
@@ -17,7 +18,10 @@ declare global {
   }
 }
 
-export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
+export function GoogleMapPanel({
+  initialLocation,
+  exclusiveView = false,
+}: GoogleMapPanelProps) {
   const googleMapsApiKey = publicConfig.googleMaps.apiKey
   const mapRef = useRef<HTMLDivElement>(null)
   const streetViewRef = useRef<HTMLDivElement>(null)
@@ -144,7 +148,13 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
   )
 
   const initializeMap = useCallback(() => {
-    if (!mapRef.current || !window.google?.maps?.Map || initCalledRef.current)
+    const mapElement = mapRef.current
+    if (
+      !(mapElement instanceof HTMLElement) ||
+      !mapElement.isConnected ||
+      !window.google?.maps?.Map ||
+      initCalledRef.current
+    )
       return
     initCalledRef.current = true
 
@@ -153,7 +163,7 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
     const defaultZoom = 4
 
     // Create map
-    const map = new window.google.maps.Map(mapRef.current, {
+    const map = new window.google.maps.Map(mapElement, {
       center: defaultCenter,
       zoom: defaultZoom,
       mapId: 'billboard-source-map',
@@ -183,9 +193,10 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
     map.addListener('click', (event: any) => {
       if (event.latLng) {
         const geocoder = new window.google.maps.Geocoder()
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         geocoder.geocode(
           { location: event.latLng },
+          // Google Maps is loaded dynamically and does not expose types here.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           (results: any, status: any) => {
             if (status === 'OK' && results?.[0]) {
               updateMarkerAndStreetView(
@@ -203,9 +214,10 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
     // If initial location provided, geocode and show it
     if (initialLocation) {
       const geocoder = new window.google.maps.Geocoder()
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       geocoder.geocode(
         { address: initialLocation },
+        // Google Maps is loaded dynamically and does not expose types here.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (results: any, status: any) => {
           if (status === 'OK' && results?.[0]?.geometry?.location) {
             updateMarkerAndStreetView(
@@ -230,7 +242,33 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
   // Check if Google Maps is already loaded (e.g., from another component)
   useEffect(() => {
     if (window.google?.maps?.Map) {
+      // Synchronize with a script that may have loaded before this component.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setScriptReady(true)
+    }
+  }, [])
+
+  // Release Maps listeners and DOM references before a tab removes this panel.
+  useEffect(() => {
+    return () => {
+      if (window.google?.maps?.event) {
+        if (mapInstanceRef.current) {
+          window.google.maps.event.clearInstanceListeners(
+            mapInstanceRef.current,
+          )
+        }
+        if (streetViewPanoramaRef.current) {
+          window.google.maps.event.clearInstanceListeners(
+            streetViewPanoramaRef.current,
+          )
+        }
+      }
+      if (markerRef.current) {
+        markerRef.current.map = null
+      }
+      mapInstanceRef.current = null
+      markerRef.current = null
+      streetViewPanoramaRef.current = null
     }
   }, [])
 
@@ -238,11 +276,14 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
   useEffect(() => {
     if (!isLoaded || !initialLocation || !window.google?.maps) return
 
+    // Keep the editable query aligned with a location selected by the parent.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSearchQuery(initialLocation)
     const geocoder = new window.google.maps.Geocoder()
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     geocoder.geocode(
       { address: initialLocation },
+      // Google Maps is loaded dynamically and does not expose types here.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (results: any, status: any) => {
         if (status === 'OK' && results?.[0]?.geometry?.location) {
           updateMarkerAndStreetView(
@@ -275,6 +316,7 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
         <Input
           ref={searchInputRef}
           type="text"
+          aria-label="Search for a location"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -296,7 +338,11 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
           size="sm"
           className="whitespace-nowrap"
         >
-          {showStreetView ? 'Hide Street View' : 'Street View'}
+          {showStreetView
+            ? exclusiveView
+              ? 'Map'
+              : 'Hide Street View'
+            : 'Street View'}
         </Button>
       </div>
 
@@ -311,7 +357,9 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
       <div className="flex-1 flex gap-3 min-h-0">
         {/* Map */}
         <div
-          className={`${showStreetView ? 'w-1/2' : 'w-full'} h-full transition-all duration-300`}
+          className={`h-full transition-all duration-300 ${
+            showStreetView ? (exclusiveView ? 'hidden' : 'w-1/2') : 'w-full'
+          }`}
         >
           <div
             ref={mapRef}
@@ -322,7 +370,13 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
 
         {/* Street View - always rendered but hidden when not active */}
         <div
-          className={`w-1/2 h-full transition-all duration-300 ${showStreetView ? 'block' : 'hidden'}`}
+          className={`h-full transition-all duration-300 ${
+            showStreetView
+              ? exclusiveView
+                ? 'block w-full'
+                : 'block w-1/2'
+              : 'hidden'
+          }`}
         >
           <div
             ref={streetViewRef}
@@ -340,6 +394,7 @@ export function GoogleMapPanel({ initialLocation }: GoogleMapPanelProps) {
       {/* Google Maps Script - lazy loaded during browser idle time */}
       {googleMapsApiKey && (
         <Script
+          id="google-maps-javascript-api"
           src={`https://maps.googleapis.com/maps/api/js?key=${googleMapsApiKey}&libraries=marker&v=weekly`}
           strategy="lazyOnload"
           async

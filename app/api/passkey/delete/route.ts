@@ -12,20 +12,14 @@ export async function POST(request: NextRequest) {
   try {
     const session = await getSession()
     if (!session) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      )
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const body = await request.json()
     const { passkeyId } = body as { passkeyId: string }
 
     if (!passkeyId) {
-      return NextResponse.json(
-        { error: 'Missing passkeyId' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'Missing passkeyId' }, { status: 400 })
     }
 
     // Verify the passkey belongs to this user
@@ -33,10 +27,7 @@ export async function POST(request: NextRequest) {
     const passkeyToDelete = userPasskeys.find((p) => p.id === passkeyId)
 
     if (!passkeyToDelete) {
-      return NextResponse.json(
-        { error: 'Passkey not found' },
-        { status: 404 }
-      )
+      return NextResponse.json({ error: 'Passkey not found' }, { status: 404 })
     }
 
     await deletePasskey(passkeyId)
@@ -45,11 +36,11 @@ export async function POST(request: NextRequest) {
       success: true,
       message: 'Passkey deleted successfully',
     })
-  } catch (error) {
-    console.error('Error deleting passkey:', error)
+  } catch {
+    console.error('Error deleting passkey')
     return NextResponse.json(
       { error: 'Failed to delete passkey' },
-      { status: 500 }
+      { status: 500 },
     )
   }
 }

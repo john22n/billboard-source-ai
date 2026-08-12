@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { SignupForm } from '@/components/sign-up'
 import {
@@ -231,7 +231,7 @@ function AdminHeader({
         <Sheet open={signupOpen} onOpenChange={setSignupOpen}>
           <SheetTrigger asChild>
             <Button variant="outline" size="sm">
-              <UserPlus className="mr-2 h-4 w-4" />
+              <UserPlus data-icon="inline-start" className="mr-2 h-4 w-4" />
               Add Employee
             </Button>
           </SheetTrigger>
@@ -259,8 +259,10 @@ function AdminHeader({
           disabled={selectedUsers.length === 0 || isPending}
           onClick={handleDelete}
         >
-          <Trash2 className="mr-2 h-4 w-4" />
-          {isPending ? 'Deleting...' : 'Delete Selected'}
+          <Trash2 data-icon="inline-start" className="mr-2 h-4 w-4" />
+          <span aria-live="polite">
+            {isPending ? 'Deleting...' : 'Delete Selected'}
+          </span>
         </Button>
       </div>
     </div>
@@ -313,7 +315,10 @@ function UsersTab({
                   disabled={isPending}
                   onClick={handleResetCounts}
                 >
-                  <RefreshCw className="mr-2 h-4 w-4" />
+                  <RefreshCw
+                    data-icon="inline-start"
+                    className="mr-2 h-4 w-4"
+                  />
                   Reset
                 </Button>
                 <span>
@@ -340,6 +345,7 @@ function UsersTab({
               <TableRow key={user.id}>
                 <TableCell className="text-center">
                   <Checkbox
+                    aria-label="Select user account"
                     checked={selectedUsers.includes(user.id)}
                     onCheckedChange={() => toggleSelect(user.id)}
                     disabled={isPending}
@@ -351,6 +357,8 @@ function UsersTab({
                 <TableCell>
                   <Input
                     type="tel"
+                    aria-label="Twilio phone number"
+                    autoComplete="tel"
                     className="h-8 w-32"
                     placeholder="+1234567890"
                     value={phoneEdits[user.id] ?? user.twilioPhoneNumber ?? ''}
@@ -688,12 +696,18 @@ function LeadsTab({
               >
                 {syncingLeads ? (
                   <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    <Loader2
+                      data-icon="inline-start"
+                      className="mr-2 h-4 w-4 animate-spin"
+                    />
                     Syncing...
                   </>
                 ) : (
                   <>
-                    <RefreshCw className="mr-2 h-4 w-4" />
+                    <RefreshCw
+                      data-icon="inline-start"
+                      className="mr-2 h-4 w-4"
+                    />
                     Sync from Nutshell
                   </>
                 )}
@@ -897,10 +911,28 @@ function useRemoteAdminData() {
 
 function useUserController() {
   const [selectedUsers, setSelectedUsers] = useState<string[]>([])
-  const [isPending, startTransition] = useTransition()
+  const [isPending, setIsPending] = useState(false)
   const [phoneEdits, setPhoneEdits] = useState<Record<string, string>>({})
   const [signupOpen, setSignupOpen] = useState(false)
   const router = useRouter()
+
+  const runUserAction = (
+    action: Promise<{ success: boolean; message?: string }>,
+    onSuccess?: () => void,
+  ) => {
+    setIsPending(true)
+    void action
+      .then((result) => {
+        if (result.success) {
+          onSuccess?.()
+          router.refresh()
+        } else {
+          showErrorToast('Admin action failed')
+        }
+      })
+      .catch((error) => showErrorToast(getErrorMessage(error)))
+      .finally(() => setIsPending(false))
+  }
 
   const toggleSelect = (id: string) => {
     setSelectedUsers((prev: string[]) =>
@@ -908,17 +940,11 @@ function useUserController() {
     )
   }
 
-  const handleDelete = async () => {
+  const handleDelete = () => {
     if (selectedUsers.length === 0) return
-    startTransition(async () => {
-      const result = await deleteUsers(selectedUsers)
-      if (result.success) {
-        setSelectedUsers([])
-        showSuccessToast('Users deleted successfully')
-        router.refresh()
-      } else {
-        showErrorToast(result.message || 'Failed to delete users')
-      }
+    runUserAction(deleteUsers(selectedUsers), () => {
+      setSelectedUsers([])
+      showSuccessToast('Users deleted successfully')
     })
   }
 
@@ -930,14 +956,8 @@ function useUserController() {
     ) {
       return
     }
-    startTransition(async () => {
-      const result = await resetCallCounts()
-      if (result.success) {
-        showSuccessToast('Call counts reset')
-        router.refresh()
-      } else {
-        showErrorToast(result.message || 'Failed to reset call counts')
-      }
+    runUserAction(resetCallCounts(), () => {
+      showSuccessToast('Call counts reset')
     })
   }
 
@@ -945,26 +965,17 @@ function useUserController() {
     router.push('/dashboard')
   }
 
-  const handlePhoneUpdate = async (
-    userId: string,
-    currentValue: string | null,
-  ) => {
+  const handlePhoneUpdate = (userId: string, currentValue: string | null) => {
     const newValue = phoneEdits[userId]
     if (newValue === undefined || newValue === (currentValue ?? '')) return
 
-    startTransition(async () => {
-      const result = await updateTwilioPhone(userId, newValue)
-      if (result.success) {
-        showSuccessToast(result.message || 'Phone updated')
-        setPhoneEdits((prev) => {
-          const next = { ...prev }
-          delete next[userId]
-          return next
-        })
-        router.refresh()
-      } else {
-        showErrorToast(result.message || 'Failed to update')
-      }
+    runUserAction(updateTwilioPhone(userId, newValue), () => {
+      setPhoneEdits((prev) => {
+        const next = { ...prev }
+        delete next[userId]
+        return next
+      })
+      showSuccessToast('Phone updated')
     })
   }
 
@@ -996,6 +1007,9 @@ function useLeadSync(initialLeadStats: LeadStats | null) {
   const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null)
 
   useEffect(() => {
+    // Lead stats are refreshed by the server and intentionally mirrored locally
+    // so an in-progress client sync can update the same value.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLeadStats(initialLeadStats)
   }, [initialLeadStats])
 
@@ -1102,6 +1116,9 @@ export default function AdminClient({
 
   return (
     <div className="flex flex-col min-h-svh w-full p-4 md:p-8 gap-5 bg-primary-foreground">
+      <span role="status" aria-live="polite" className="sr-only">
+        {isPending ? 'Saving admin changes' : ''}
+      </span>
       <AdminHeader
         {...{
           signupOpen,

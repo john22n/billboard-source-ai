@@ -79,6 +79,7 @@ export function useOpenAITranscription(
 ) {
   const sessions = useRef<TranscriptionSession[]>([])
   const costLogs = useRef<CostLog[]>([])
+  const transcriptionGeneration = useRef(0)
 
   const [transcripts, setTranscripts] = useState<TranscriptItem[]>([])
   const [interimTranscript, setInterimTranscript] = useState('')
@@ -86,7 +87,7 @@ export function useOpenAITranscription(
     'agent' | 'caller' | null
   >(null)
 
-  const setStatus = useCallback(
+  const reportStatus = useCallback(
     (status: string) => {
       options.onStatusChange?.(status)
     },
@@ -221,7 +222,7 @@ export function useOpenAITranscription(
       stream: MediaStream,
       speaker: 'agent' | 'caller',
     ): Promise<TranscriptionSession | null> => {
-      setStatus(`Fetching OpenAI token for ${speaker}...`)
+      reportStatus(`Fetching OpenAI token for ${speaker}...`)
       const token = await fetchTranscriptionToken(speaker)
       if (!token) return null
 
@@ -241,13 +242,14 @@ export function useOpenAITranscription(
 
       return transcriptionSession
     },
-    [createTranscriptionSession, setStatus],
+    [createTranscriptionSession, reportStatus],
   )
 
   const startTranscription = useCallback(
     async (call: Call) => {
+      const generation = ++transcriptionGeneration.current
       try {
-        setStatus('Connecting transcription...')
+        reportStatus('Connecting transcription...')
         costLogs.current = []
 
         const remoteStream = call.getRemoteStream()
@@ -264,17 +266,30 @@ export function useOpenAITranscription(
           createTrackedTranscriptionSession,
         )
 
+        // A short-lived Twilio leg can disconnect while token/session setup is
+        // in flight. Discard those late sessions instead of reviving a stopped
+        // transcription after the call has already ended.
+        if (generation !== transcriptionGeneration.current) {
+          newSessions.forEach((session) => {
+            session.dc?.close()
+            session.pc.close()
+          })
+          return
+        }
+
         sessions.current = newSessions
-        setStatus(getTranscriptionStatus(newSessions.length))
+        reportStatus(getTranscriptionStatus(newSessions.length))
       } catch (error) {
+        if (generation !== transcriptionGeneration.current) return
         console.error('Setup failed:', error)
-        setStatus('Error during setup')
+        reportStatus('Error during setup')
       }
     },
-    [createTrackedTranscriptionSession, setStatus],
+    [createTrackedTranscriptionSession, reportStatus],
   )
 
   const stopTranscription = useCallback(async () => {
+    transcriptionGeneration.current += 1
     const endedAt = Date.now()
     const logsToUpdate = costLogs.current
     costLogs.current = []

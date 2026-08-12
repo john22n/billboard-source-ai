@@ -11,6 +11,9 @@ import {
   isMissingConfig,
   serverConfig,
 } from '@/lib/config'
+import { rateLimit } from '@/lib/rate-limit'
+
+const MAX_AUDIO_BYTES = 25 * 1024 * 1024
 
 let openaiClient: OpenAI | null = null
 
@@ -81,12 +84,30 @@ export async function POST(req: NextRequest) {
         { status: 401 },
       )
     }
+    const attempt = await rateLimit(
+      'transcribe-file',
+      session.userId,
+      5,
+      10 * 60,
+    )
+    if (!attempt.allowed) {
+      return NextResponse.json(
+        { error: 'Too many requests' },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(attempt.retryAfterSeconds) },
+        },
+      )
+    }
 
     const formData = await req.formData()
     const file = formData.get('file') as File
 
     if (!file) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 })
+    }
+    if (file.size > MAX_AUDIO_BYTES || !file.type.startsWith('audio/')) {
+      return NextResponse.json({ error: 'Invalid audio file' }, { status: 400 })
     }
 
     console.log(
@@ -147,11 +168,9 @@ Be thorough and only include information that was explicitly mentioned. Use null
     if (isMissingConfig(error)) {
       return NextResponse.json(configErrorResponseBody(error), { status: 500 })
     }
-    const errorMessage =
-      error instanceof Error ? error.message : 'Unknown error'
-    console.error('❌ Transcription error:', error)
+    console.error('❌ Transcription request failed')
     return NextResponse.json(
-      { error: 'Failed to transcribe file', details: errorMessage },
+      { error: 'Failed to transcribe file' },
       { status: 500 },
     )
   }

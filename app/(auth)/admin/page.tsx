@@ -21,41 +21,39 @@ export default async function AdminPage() {
     redirect('/dashboard')
   }
 
+  let users: Awaited<ReturnType<typeof getAllUsers>> = []
+  let userCosts: Awaited<ReturnType<typeof getUserCosts>> = []
+  let leadStats = null
+  let mainCallsTotal = 0
+  const today = new Date().toISOString().split('T')[0]
+  let userCostStartDate = today
+  let userCostEndDate = today
+
   try {
     const userCostRange = getCurrentOpenAICostRange()
-    const [users, userCosts, leadStats, mainCallsTotal] = await Promise.all([
+    const adminData = await Promise.all([
       getAllUsers(),
       getUserCosts(userCostRange),
       getNutshellLeadStats().catch(() => null),
       getMainCallsTotal().catch(() => 0),
     ])
-
-    return (
-      <AdminClient
-        initialUsers={users || []}
-        initialCosts={userCosts || []}
-        initialLeadStats={leadStats}
-        mainCallsTotal={mainCallsTotal}
-        sessionEmail={session.email}
-        sessionIssuedAt={session.issuedAt}
-        userCostStartDate={userCostRange.startDate.toISOString().split('T')[0]}
-        userCostEndDate={userCostRange.endDate.toISOString().split('T')[0]}
-      />
-    )
+    ;[users, userCosts, leadStats, mainCallsTotal] = adminData
+    userCostStartDate = userCostRange.startDate.toISOString().split('T')[0]
+    userCostEndDate = userCostRange.endDate.toISOString().split('T')[0]
   } catch (error) {
     console.error('Failed to fetch admin data:', error)
-
-    return (
-      <AdminClient
-        initialUsers={[]}
-        initialCosts={[]}
-        initialLeadStats={null}
-        mainCallsTotal={0}
-        sessionEmail={session.email}
-        sessionIssuedAt={session.issuedAt}
-        userCostStartDate={new Date().toISOString().split('T')[0]}
-        userCostEndDate={new Date().toISOString().split('T')[0]}
-      />
-    )
   }
+
+  return (
+    <AdminClient
+      initialUsers={users || []}
+      initialCosts={userCosts || []}
+      initialLeadStats={leadStats}
+      mainCallsTotal={mainCallsTotal}
+      sessionEmail={session.email}
+      sessionIssuedAt={session.issuedAt}
+      userCostStartDate={userCostStartDate}
+      userCostEndDate={userCostEndDate}
+    />
+  )
 }

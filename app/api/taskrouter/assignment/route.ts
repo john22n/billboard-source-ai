@@ -5,40 +5,16 @@
  * Returns instructions to dial the worker's browser client.
  */
 
-import twilio from 'twilio'
 import { serverConfig } from '@/lib/config'
+import { isValidTwilioWebhook } from '@/lib/twilio-webhook'
 
 export async function POST(req: Request) {
+  if (!(await isValidTwilioWebhook(req))) {
+    return new Response('Forbidden', { status: 403 })
+  }
+
   try {
-    const clonedReq = req.clone()
-    const bodyText = await clonedReq.text()
     const formData = await req.formData()
-
-    const twilioAuthToken = serverConfig.twilio.authToken
-    if (twilioAuthToken) {
-      const twilioSignature = req.headers.get('X-Twilio-Signature') || ''
-      const url = new URL(req.url)
-      const webhookUrl = url.toString()
-
-      const params: Record<string, string> = {}
-      const searchParams = new URLSearchParams(bodyText)
-      searchParams.forEach((value, key) => {
-        params[key] = value
-      })
-
-      const isValid = twilio.validateRequest(
-        twilioAuthToken,
-        twilioSignature,
-        webhookUrl,
-        params,
-      )
-
-      if (!isValid) {
-        console.error('❌ Invalid Twilio signature on assignment callback')
-        console.error('URL used:', webhookUrl)
-        console.error('Signature:', twilioSignature)
-      }
-    }
 
     const taskSid = formData.get('TaskSid') as string
     const reservationSid = formData.get('ReservationSid') as string
@@ -49,9 +25,6 @@ export async function POST(req: Request) {
     console.log('═══════════════════════════════════════════')
     console.log('📋 TASKROUTER ASSIGNMENT CALLBACK')
     console.log('═══════════════════════════════════════════')
-    console.log('TaskSid:', taskSid)
-    console.log('ReservationSid:', reservationSid)
-    console.log('WorkerSid:', workerSid)
 
     let workerAttrs: {
       email?: string
@@ -76,8 +49,6 @@ export async function POST(req: Request) {
       console.error('Failed to parse attributes')
     }
 
-    console.log('Worker email:', workerAttrs.email)
-    console.log('Call from:', taskAttrs.from)
     console.log('═══════════════════════════════════════════')
 
     const appUrl = serverConfig.app.baseUrlFromRequest(req.url)
@@ -115,8 +86,6 @@ export async function POST(req: Request) {
         accept: true,
         post_work_activity_sid: availableActivitySid,
       }
-
-      console.log('📞 Redirect instruction:', instruction)
 
       // Note: the /overflow handler completes the task; we do not complete it
       // here so the redirect can fetch attributes if needed.
@@ -159,10 +128,9 @@ export async function POST(req: Request) {
           .workspaces(workspaceSid)
           .tasks(taskSid)
           .update({ attributes: JSON.stringify(updatedTaskAttrs) })
-      } catch (err) {
+      } catch {
         console.error(
-          '⚠️ Failed to update task attributes with attempted worker:',
-          err,
+          '⚠️ Failed to update task attributes with attempted worker',
         )
       }
     }
@@ -202,13 +170,6 @@ export async function POST(req: Request) {
           post_work_activity_sid: availableActivitySid,
         }
 
-        console.log('📞 Simultaneous ring redirect instruction:', {
-          ...simRingInstruction,
-          url: simRingInstruction.url.replace(
-            /cellPhone=[^&]+/,
-            'cellPhone=***',
-          ),
-        })
         return Response.json(simRingInstruction)
       }
     }
@@ -238,11 +199,9 @@ export async function POST(req: Request) {
       reject_pending_reservations: true,
     }
 
-    console.log('📞 Conference instruction:', instruction)
-
     return Response.json(instruction)
-  } catch (error) {
-    console.error('❌ Assignment callback error:', error)
+  } catch {
+    console.error('❌ Assignment callback failed')
     return new Response('Error', { status: 500 })
   }
 }

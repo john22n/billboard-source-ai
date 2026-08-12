@@ -1,4 +1,4 @@
-import { InferSelectModel, relations } from 'drizzle-orm'
+import { InferSelectModel } from 'drizzle-orm'
 import {
   pgTable,
   serial,
@@ -154,3 +154,17 @@ export const appMetrics = pgTable('app_metrics', {
 })
 
 export type AppMetrics = InferSelectModel<typeof appMetrics>
+
+// Fixed-size buckets used for serverless-safe abuse controls. A key is reused
+// across windows so this table grows only with the number of identities/scopes.
+export const rateLimitBuckets = pgTable(
+  'rate_limit_buckets',
+  {
+    key: varchar('key', { length: 160 }).primaryKey(),
+    count: integer('count').notNull(),
+    resetAt: timestamp('reset_at', { withTimezone: true }).notNull(),
+  },
+  (table) => ({
+    resetAtIndex: index('rate_limit_buckets_reset_at_idx').on(table.resetAt),
+  }),
+)

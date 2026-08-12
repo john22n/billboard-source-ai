@@ -90,7 +90,10 @@ async function fetchCostsPage(
   })
 
   if (!response.ok) {
-    console.error('OpenAI Admin API error:', await response.text())
+    console.error(
+      'OpenAI Admin API request failed with status:',
+      response.status,
+    )
     throw new UsageRequestError(
       response.status,
       'Failed to fetch OpenAI usage data. Ensure OPENAI_ADMIN_KEY has organization.costs.read permission.',

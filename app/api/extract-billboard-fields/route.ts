@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { getSession } from '@/lib/auth'
 import { logOpenAITokenUsage } from '@/lib/dal'
 import { LeadSentiment, LeadType, BillboardPurpose } from '@/types/sales-call'
+import { rateLimit } from '@/lib/rate-limit'
 
 // ============================================================================
 // SCHEMA - Descriptions are the primary source of truth for the AI
@@ -263,14 +264,27 @@ export async function POST(req: Request) {
         { status: 401, headers: { 'Content-Type': 'application/json' } },
       )
     }
+    const attempt = await rateLimit('extract-fields', session.userId, 30, 60)
+    if (!attempt.allowed) {
+      return Response.json(
+        { error: 'Too many requests' },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(attempt.retryAfterSeconds) },
+        },
+      )
+    }
 
     const { transcript } = await req.json()
 
-    if (!transcript || transcript.trim().length === 0) {
+    if (typeof transcript !== 'string' || transcript.trim().length === 0) {
       return new Response(JSON.stringify({ error: 'No transcript provided' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       })
+    }
+    if (transcript.length > 100_000) {
+      return Response.json({ error: 'Input too large' }, { status: 400 })
     }
 
     const prompt = `Extract lead information from this sales call transcript:
@@ -293,19 +307,15 @@ Extract all fields according to the schema. Be thorough but accurate.`
             usage,
             sessionId: 'extract-billboard-fields',
           })
-        } catch (logError) {
-          console.error('Failed to log extraction cost:', logError)
+        } catch {
+          console.error('Failed to log extraction cost')
         }
       },
     })
 
     return result.toTextStreamResponse()
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown error'
-    console.error('Billboard field extraction error:', error)
-    return Response.json(
-      { error: 'Field extraction failed', details: message },
-      { status: 500 },
-    )
+  } catch {
+    console.error('Billboard field extraction failed')
+    return Response.json({ error: 'Field extraction failed' }, { status: 500 })
   }
 }

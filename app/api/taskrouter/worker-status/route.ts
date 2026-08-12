@@ -48,8 +48,8 @@ export async function GET() {
         },
       },
     )
-  } catch (error) {
-    console.error('❌ Worker status GET error:', error)
+  } catch {
+    console.error('❌ Worker status lookup failed')
     return Response.json({ error: 'Internal error' }, { status: 500 })
   }
 }
@@ -108,7 +108,7 @@ export async function POST(req: Request) {
 
     // Create the email-linked worker only when neither source has one.
     if (!workerSid) {
-      console.log('📋 Creating new TaskRouter worker for:', currentUser.email)
+      console.log('📋 Creating new TaskRouter worker')
 
       const worker = await client.taskrouter.v1
         .workspaces(workspaceSid)
@@ -147,14 +147,13 @@ export async function POST(req: Request) {
           .workers(workerSid)
           .fetch()
         existingAttrs = JSON.parse(existingWorker.attributes ?? '{}')
-      } catch (fetchErr) {
+      } catch {
         // Non-fatal: if the fetch fails we proceed with standard attributes only.
         // Any custom attrs (simultaneous_ring, cell_phone) will be missing from
         // this update but will remain in Twilio if the update itself succeeds,
         // because we merge via spread below.
         console.warn(
-          '⚠️ Could not fetch existing worker attributes for merge (proceeding with defaults):',
-          fetchErr,
+          '⚠️ Could not fetch existing worker attributes for merge; proceeding with defaults',
         )
       }
 
@@ -184,9 +183,7 @@ export async function POST(req: Request) {
               attributes: JSON.stringify(mergedAttributes),
             })
 
-          console.log(
-            `✅ Worker ${currentUser.email} status updated to: ${effectiveStatus}`,
-          )
+          console.log(`✅ Worker status updated to: ${effectiveStatus}`)
           lastError = null
           break
         } catch (err) {
@@ -232,7 +229,7 @@ export async function POST(req: Request) {
     if (isMissingConfig(error)) {
       return Response.json(configErrorResponseBody(error), { status: 500 })
     }
-    console.error('❌ Worker status POST error:', error)
+    console.error('❌ Worker status update failed')
     return Response.json({ error: 'Internal error' }, { status: 500 })
   }
 }

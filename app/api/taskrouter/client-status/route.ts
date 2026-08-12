@@ -1,3 +1,5 @@
+import { isValidTwilioWebhook } from '@/lib/twilio-webhook'
+
 /**
  * Client Status Callback — Simultaneous Ring
  *
@@ -16,21 +18,19 @@ import twilio from 'twilio'
 import { serverConfig } from '@/lib/config'
 
 export async function POST(req: Request) {
+  if (!(await isValidTwilioWebhook(req)))
+    return new Response('Forbidden', { status: 403 })
+
   try {
     const url = new URL(req.url)
     const cellPhone = url.searchParams.get('cellPhone')
-    const taskSid = url.searchParams.get('taskSid')
 
     const formData = await req.formData()
     const callStatus = formData.get('CallStatus') as string | null
-    const callSid = formData.get('CallSid') as string | null
 
     console.log('═══════════════════════════════════════════')
     console.log('📱 CLIENT STATUS CALLBACK')
     console.log('CallStatus:', callStatus)
-    console.log('CallSid:', callSid)
-    console.log('TaskSid:', taskSid)
-    console.log('CellPhone:', cellPhone?.replace(/\d(?=\d{4})/g, '*'))
     console.log('═══════════════════════════════════════════')
 
     // Only act when the browser leg ended without answering
@@ -62,10 +62,8 @@ export async function POST(req: Request) {
           client
             .calls(call.sid)
             .update({ status: 'canceled' })
-            .then(() => console.log(`   ✅ Canceled cell leg ${call.sid}`))
-            .catch((err: Error) =>
-              console.error(`   ❌ Failed to cancel ${call.sid}:`, err.message),
-            ),
+            .then(() => console.log('   ✅ Canceled cell leg'))
+            .catch(() => console.error('   ❌ Failed to cancel cell leg')),
         ),
       )
     } else {
@@ -74,8 +72,8 @@ export async function POST(req: Request) {
 
     // Always return 204 — Twilio doesn't need TwiML from a statusCallback
     return new Response(null, { status: 204 })
-  } catch (error) {
-    console.error('❌ Client status callback error:', error)
+  } catch {
+    console.error('❌ Client status callback failed')
     return new Response(null, { status: 500 })
   }
 }

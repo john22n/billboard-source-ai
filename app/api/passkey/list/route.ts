@@ -11,10 +11,7 @@ export async function GET() {
   try {
     const session = await getSession()
     if (!session) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      )
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const passkeys = await getPasskeysByUserId(session.userId)
@@ -28,11 +25,11 @@ export async function GET() {
     }))
 
     return NextResponse.json({ passkeys: safePasskeys })
-  } catch (error) {
-    console.error('Error listing passkeys:', error)
+  } catch {
+    console.error('Error listing passkeys')
     return NextResponse.json(
       { error: 'Failed to list passkeys' },
-      { status: 500 }
+      { status: 500 },
     )
   }
 }

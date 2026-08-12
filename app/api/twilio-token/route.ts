@@ -12,10 +12,11 @@ import {
   isMissingConfig,
   serverConfig,
 } from '@/lib/config'
+import { rateLimit } from '@/lib/rate-limit'
 
 const AccessToken = twilio.jwt.AccessToken
 const VoiceGrant = AccessToken.VoiceGrant
-const LOGIN_SESSION_SECONDS = 60 * 60 * 8
+const LOGIN_SESSION_SECONDS = 60 * 60 * 10
 
 export async function GET() {
   // ✅ SECURITY: Require authentication
@@ -24,6 +25,16 @@ export async function GET() {
     return NextResponse.json(
       { error: 'Unauthorized - Please log in' },
       { status: 401 },
+    )
+  }
+  const attempt = await rateLimit('twilio-token', session.userId, 20, 60)
+  if (!attempt.allowed) {
+    return NextResponse.json(
+      { error: 'Too many requests' },
+      {
+        status: 429,
+        headers: { 'Retry-After': String(attempt.retryAfterSeconds) },
+      },
     )
   }
 
@@ -69,10 +80,16 @@ export async function GET() {
 
   token.addGrant(voiceGrant)
 
-  console.log(`🔐 Twilio token generated for authenticated user: ${email}`)
-
-  return NextResponse.json({
-    token: token.toJwt(),
-    identity: email,
-  })
+  return NextResponse.json(
+    {
+      token: token.toJwt(),
+      identity: email,
+      expiresAt: sessionExpiresAt,
+    },
+    {
+      headers: {
+        'Cache-Control': 'private, no-store, max-age=0',
+      },
+    },
+  )
 }

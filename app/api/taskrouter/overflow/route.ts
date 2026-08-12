@@ -1,3 +1,5 @@
+import { isValidTwilioWebhook } from '@/lib/twilio-webhook'
+
 /**
  * Overflow TwiML Handler (Feature 3)
  *
@@ -24,6 +26,9 @@ const escapeXml = (s: string): string =>
     .replace(/>/g, '&gt;')
 
 export async function POST(req: Request) {
+  if (!(await isValidTwilioWebhook(req)))
+    return new Response('Forbidden', { status: 403 })
+
   try {
     const url = new URL(req.url)
     const taskSid = url.searchParams.get('taskSid')
@@ -38,8 +43,6 @@ export async function POST(req: Request) {
 
     console.log('═══════════════════════════════════════════')
     console.log('📤 OVERFLOW HANDOFF')
-    console.log('TaskSid:', taskSid)
-    console.log('OverflowNumber:', overflowNumber?.replace(/\d(?=\d{4})/g, '*'))
     console.log('═══════════════════════════════════════════')
 
     // Complete the TaskRouter task (terminal) and recover the original call_sid
@@ -71,8 +74,8 @@ export async function POST(req: Request) {
               reason: 'Routed to overflow number',
             })
         }
-      } catch (taskErr) {
-        console.error('⚠️ Overflow: failed to complete task:', taskErr)
+      } catch {
+        console.error('⚠️ Overflow: failed to complete task')
       }
     }
 
@@ -99,8 +102,8 @@ export async function POST(req: Request) {
       status: 200,
       headers: { 'Content-Type': 'text/xml' },
     })
-  } catch (error) {
-    console.error('❌ Overflow handler error:', error)
+  } catch {
+    console.error('❌ Overflow handler failed')
     return new Response(
       '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>',
       { status: 200, headers: { 'Content-Type': 'text/xml' } },

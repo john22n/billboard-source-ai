@@ -38,8 +38,8 @@ export async function POST() {
     })
 
     return NextResponse.json(options)
-  } catch (error) {
-    console.error('Error generating registration options:', error)
+  } catch {
+    console.error('Error generating registration options')
     return NextResponse.json(
       { error: 'Failed to generate registration options' },
       { status: 500 },

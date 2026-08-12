@@ -44,6 +44,7 @@ interface TwilioRuntime {
   device: Device | null
   activeCall: Call | null
   acceptingCall: Call | null
+  tokenRefresh: { device: Device; promise: Promise<boolean> } | null
   notification: Notification | null
   initializing: boolean
   initialized: boolean
@@ -56,10 +57,10 @@ interface TwilioRuntime {
 interface TwilioCredentials {
   token: string
   identity: string
+  expiresAt: number
 }
 
 type UpdateState = Dispatch<Partial<TwilioState>>
-type SetWorkerStatus = (status: WorkerActivity) => Promise<void>
 
 const initialState: TwilioState = {
   status: 'Idle',
@@ -71,6 +72,8 @@ const initialState: TwilioState = {
 }
 
 const TwilioContext = createContext<TwilioContextType | null>(null)
+const TOKEN_REFRESH_MS = 60_000
+const TOKEN_REFRESH_RETRY_DELAYS_MS = [1_000, 3_000, 5_000]
 
 function updateTwilioState(
   state: TwilioState,
@@ -84,6 +87,7 @@ function createRuntime(workerStatus: WorkerActivity): TwilioRuntime {
     device: null,
     activeCall: null,
     acceptingCall: null,
+    tokenRefresh: null,
     notification: null,
     initializing: false,
     initialized: false,
@@ -105,7 +109,7 @@ function getReadyStatus(runtime: TwilioRuntime) {
     : 'Offline'
 }
 
-async function acceptIncomingCall(
+export async function acceptIncomingCall(
   runtime: TwilioRuntime,
   update: UpdateState,
   call: Call,
@@ -119,6 +123,10 @@ async function acceptIncomingCall(
     call.on('accept', () => runtime.onCallAccepted?.(call))
 
     await call.accept()
+    // The remote caller can hang up while this accept is still settling. In
+    // that case the disconnect handler clears acceptingCall; do not resurrect
+    // the already-closed call as active when this promise resumes.
+    if (runtime.acceptingCall !== call) return
     runtime.activeCall = call
     update({ callActive: true, incomingCall: null })
   } catch (error) {
@@ -150,13 +158,12 @@ function showIncomingNotification(
   }
 }
 
-function canShowIncomingNotification() {
-  if (document.visibilityState === 'visible') return false
+export function canShowIncomingNotification() {
   if (!('Notification' in window)) return false
   return Notification.permission === 'granted'
 }
 
-function handleIncomingCall(
+export function handleIncomingCall(
   runtime: TwilioRuntime,
   update: UpdateState,
   call: Call,
@@ -169,6 +176,7 @@ function handleIncomingCall(
 
   call.on('disconnect', () => {
     closeIncomingNotification(runtime)
+    if (runtime.acceptingCall === call) runtime.acceptingCall = null
     runtime.activeCall = null
     update({ callActive: false, incomingCall: null })
     runtime.onCallDisconnected?.()
@@ -259,7 +267,6 @@ export function bindDeviceEvents(
   runtime: TwilioRuntime,
   update: UpdateState,
   device: Device,
-  setWorkerStatus: SetWorkerStatus,
 ) {
   device.on('incoming', (call) => handleIncomingCall(runtime, update, call))
   device.on('registered', () => handleDeviceRegistered(runtime, update, device))
@@ -278,36 +285,149 @@ export function bindDeviceEvents(
     })
   })
   device.on('tokenWillExpire', () => {
-    void refreshExpiringToken(runtime, update, device, setWorkerStatus)
+    void refreshTwilioToken(runtime, update, device)
   })
 }
 
 async function fetchTwilioCredentials(
   update: UpdateState,
+  canUpdate = () => true,
 ): Promise<TwilioCredentials | null> {
-  const response = await fetch('/api/twilio-token')
-  const data = (await response.json()) as {
-    token?: string
-    identity?: string
+  try {
+    return await requestTwilioCredentials()
+  } catch (error) {
+    const message = getErrorMessage(error)
+    if (canUpdate()) {
+      update({
+        status: `Token error: ${message}`,
+        deviceError: `Failed to get access token: ${message}`,
+      })
+    }
+    return null
+  }
+}
+
+class CredentialRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message)
+  }
+}
+
+async function requestTwilioCredentials(): Promise<TwilioCredentials> {
+  const response = await fetch('/api/twilio-token', { cache: 'no-store' })
+  const data = (await response.json()) as Partial<TwilioCredentials> & {
     error?: string
   }
-
   const credentialError = getCredentialError(data)
   if (credentialError) {
-    update({
-      status: `Token error: ${credentialError}`,
-      deviceError: `Failed to get access token: ${credentialError}`,
-    })
-    return null
+    throw new CredentialRequestError(credentialError, response.status)
   }
   if (!data.identity) {
-    update({
-      status: 'Error: No user identity in token',
-      deviceError: 'No user identity found. Please log in again.',
-    })
-    return null
+    throw new CredentialRequestError(
+      'No user identity in token',
+      response.status,
+    )
   }
-  return { token: data.token!, identity: data.identity }
+  if (!data.expiresAt) {
+    throw new CredentialRequestError(
+      'No access token expiration returned',
+      response.status,
+    )
+  }
+  return data as TwilioCredentials
+}
+
+function isCurrentDevice(runtime: TwilioRuntime, device: Device) {
+  return !runtime.loggedOut && runtime.device === device
+}
+
+function shouldRetryTokenRequest(error: unknown) {
+  if (!(error instanceof CredentialRequestError)) return true
+  return error.status === 429 || error.status >= 500
+}
+
+const wait = (delayMs: number) =>
+  new Promise<void>((resolve) => window.setTimeout(resolve, delayMs))
+
+async function applyRefreshedToken(
+  runtime: TwilioRuntime,
+  update: UpdateState,
+  device: Device,
+) {
+  const credentials = await requestTwilioCredentials()
+  if (!isCurrentDevice(runtime, device)) return false
+
+  // Replacement tokens cannot outlive the fixed login session. Installing
+  // one inside the warning window would immediately emit another warning.
+  if (credentials.expiresAt * 1000 - Date.now() <= TOKEN_REFRESH_MS) return true
+
+  device.updateToken(credentials.token)
+  update({ userEmail: credentials.identity, deviceError: null })
+  return true
+}
+
+function canRetryTokenRequest(
+  error: unknown,
+  retryDelay: number | undefined,
+  runtime: TwilioRuntime,
+  device: Device,
+): retryDelay is number {
+  return (
+    retryDelay !== undefined &&
+    shouldRetryTokenRequest(error) &&
+    isCurrentDevice(runtime, device)
+  )
+}
+
+function reportTokenRefreshError(
+  error: unknown,
+  runtime: TwilioRuntime,
+  update: UpdateState,
+  device: Device,
+) {
+  console.error('Failed to refresh Twilio access token:', error)
+  if (!isCurrentDevice(runtime, device)) return
+  update({ deviceError: `Token refresh failed: ${getErrorMessage(error)}` })
+}
+
+export async function refreshTwilioToken(
+  runtime: TwilioRuntime,
+  update: UpdateState,
+  device: Device,
+  waitForRetry = wait,
+) {
+  if (!isCurrentDevice(runtime, device)) return false
+  if (runtime.tokenRefresh?.device === device) {
+    return runtime.tokenRefresh.promise
+  }
+
+  const refresh = (async () => {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await applyRefreshedToken(runtime, update, device)
+      } catch (error) {
+        const retryDelay = TOKEN_REFRESH_RETRY_DELAYS_MS[attempt]
+        if (canRetryTokenRequest(error, retryDelay, runtime, device)) {
+          await waitForRetry(retryDelay)
+          if (!isCurrentDevice(runtime, device)) return false
+          continue
+        }
+
+        reportTokenRefreshError(error, runtime, update, device)
+        return false
+      }
+    }
+  })()
+
+  runtime.tokenRefresh = { device, promise: refresh }
+  try {
+    return await refresh
+  } finally {
+    if (runtime.tokenRefresh?.promise === refresh) runtime.tokenRefresh = null
+  }
 }
 
 function getCredentialError(data: { token?: string; error?: string }) {
@@ -338,31 +458,42 @@ function prepareCurrentDevice(runtime: TwilioRuntime) {
   runtime.device = null
 }
 
-async function startTwilioDevice(
-  runtime: TwilioRuntime,
-  update: UpdateState,
-  setWorkerStatus: SetWorkerStatus,
-) {
+function discardDevice(runtime: TwilioRuntime, device: Device) {
+  if (runtime.device === device) runtime.device = null
+  if (device.state !== 'destroyed') device.destroy()
+}
+
+async function startTwilioDevice(runtime: TwilioRuntime, update: UpdateState) {
   prepareCurrentDevice(runtime)
-  const credentials = await fetchTwilioCredentials(update)
-  if (!credentials) return false
+  const credentials = await fetchTwilioCredentials(
+    update,
+    () => !runtime.loggedOut,
+  )
+  if (!credentials || runtime.loggedOut) return false
   update({ userEmail: credentials.identity })
 
   const device = new Device(credentials.token, {
     codecPreferences: [Call.Codec.Opus, Call.Codec.PCMU],
+    tokenRefreshMs: TOKEN_REFRESH_MS,
   })
-  bindDeviceEvents(runtime, update, device, setWorkerStatus)
-  await device.register()
+  bindDeviceEvents(runtime, update, device)
   runtime.device = device
+  try {
+    await device.register()
+  } catch (error) {
+    discardDevice(runtime, device)
+    if (runtime.loggedOut) return false
+    throw error
+  }
+  if (!isCurrentDevice(runtime, device)) {
+    discardDevice(runtime, device)
+    return false
+  }
   exposeDeviceForDebugging(runtime)
   return true
 }
 
-async function initializeTwilio(
-  runtime: TwilioRuntime,
-  update: UpdateState,
-  setWorkerStatus: SetWorkerStatus,
-) {
+async function initializeTwilio(runtime: TwilioRuntime, update: UpdateState) {
   const status = getInitializationStatus(runtime)
   if (status === 'blocked') return false
   if (status === 'ready') return true
@@ -370,8 +501,9 @@ async function initializeTwilio(
   try {
     runtime.initializing = true
     update({ status: 'Initializing Twilio...', deviceError: null })
-    return await startTwilioDevice(runtime, update, setWorkerStatus)
+    return await startTwilioDevice(runtime, update)
   } catch (error) {
+    if (runtime.loggedOut) return false
     console.error('Twilio initialization failed:', error)
     update({
       status: 'Twilio initialization failed',
@@ -403,19 +535,18 @@ function deviceNeedsRecovery(runtime: TwilioRuntime) {
   return runtime.device?.state === 'destroyed'
 }
 
-function useTwilioLifecycle(
-  runtime: TwilioRuntime,
-  update: UpdateState,
-  setWorkerStatus: SetWorkerStatus,
-) {
+function useTwilioLifecycle(runtime: TwilioRuntime, update: UpdateState) {
   const initTwilio = useCallback(
-    () => initializeTwilio(runtime, update, setWorkerStatus),
-    [runtime, setWorkerStatus, update],
+    () => initializeTwilio(runtime, update),
+    [runtime, update],
   )
 
   useEffect(() => {
+    // The runtime is an intentionally mutable external Twilio SDK controller.
+    // eslint-disable-next-line react-hooks/immutability
     runtime.loggedOut = false
     void initTwilio()
+    return () => disposeTwilioRuntime(runtime)
   }, [initTwilio, runtime])
 
   useEffect(() => {
@@ -427,14 +558,19 @@ function useTwilioLifecycle(
   }, [runtime, update])
 }
 
-function destroyTwilioDevice(runtime: TwilioRuntime, update: UpdateState) {
+export function disposeTwilioRuntime(runtime: TwilioRuntime) {
   runtime.loggedOut = true
   closeIncomingNotification(runtime)
   runtime.activeCall?.disconnect()
   runtime.activeCall = null
+  runtime.tokenRefresh = null
   if (runtime.device?.state !== 'destroyed') runtime.device?.destroy()
   runtime.device = null
   runtime.initialized = false
+}
+
+function destroyTwilioDevice(runtime: TwilioRuntime, update: UpdateState) {
+  disposeTwilioRuntime(runtime)
   update({
     twilioReady: false,
     incomingCall: null,
@@ -504,15 +640,17 @@ function createContextValue(
 
 function useTwilioController(): TwilioContextType {
   const [state, update] = useReducer(updateTwilioState, initialState)
-  const { status: workerStatus, setStatus: setWorkerStatus } = useWorkerStatus()
+  const { status: workerStatus } = useWorkerStatus()
   const runtimeRef = useRef<TwilioRuntime>(createRuntime(workerStatus))
+  // The runtime has stable identity and is deliberately kept outside React state.
+  // eslint-disable-next-line react-hooks/refs
   const runtime = runtimeRef.current
 
   useEffect(() => {
     runtime.workerStatus = workerStatus
   }, [runtime, workerStatus])
 
-  useTwilioLifecycle(runtime, update, setWorkerStatus)
+  useTwilioLifecycle(runtime, update)
 
   useEffect(() => {
     if (state.twilioReady && !state.incomingCall && !state.callActive) {

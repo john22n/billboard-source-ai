@@ -6,6 +6,7 @@ import { user } from '@/db/schema'
 import * as jose from 'jose'
 import { cache } from 'react'
 import { serverConfig } from '@/lib/config'
+import { eq } from 'drizzle-orm'
 
 //JWT types
 interface JWTPayload {
@@ -16,8 +17,9 @@ interface JWTPayload {
 
 const JWT_SECRET = new TextEncoder().encode(serverConfig.auth.jwtSecret)
 
-// A work session lasts at most eight hours and is never extended.
-const JWT_EXPIRATION = '8h'
+// A work session lasts ten hours. Calls renew this window when
+// accepted so their post-call Nutshell submission remains authenticated.
+const JWT_EXPIRATION = '10h'
 
 // hash a password
 export async function hashPassword(password: string) {
@@ -38,7 +40,6 @@ export async function createUser(
 ) {
   const hashedPassword = await hashPassword(password)
   const id = nanoid()
-  console.log(id)
 
   try {
     await db.insert(user).values({
@@ -49,8 +50,8 @@ export async function createUser(
       twilioPhoneNumber: twilioPhoneNumber || null,
     })
     return { id, email }
-  } catch (error) {
-    console.error('error creating user:', error)
+  } catch {
+    console.error('Error creating user')
     return null
   }
 }
@@ -77,13 +78,9 @@ export async function verifyJWT(token: string): Promise<JWTPayload | null> {
       'code' in error &&
       error.code === 'ERR_JWT_EXPIRED'
     ) {
-      // Extract user email from the expired token's payload
-      const expiredPayload =
-        'payload' in error ? (error.payload as JWTPayload) : null
-      const userEmail = expiredPayload?.email || 'unknown'
-      console.log(`🔒 Token expired for user: ${userEmail} - logging out`)
+      console.log('🔒 Token expired - logging out')
     } else {
-      console.error('JWT verification failed:', error)
+      console.error('JWT verification failed')
     }
     return null
   }
@@ -117,13 +114,39 @@ export async function createSession(
     await setAuthCookie(token)
 
     return true
-  } catch (error) {
-    console.error('Error creating session:', error)
+  } catch {
+    console.error('Error creating session')
     return false
   }
 }
 
-/** Returns the current session without extending its fixed eight-hour lifetime. */
+export async function extendSessionForCall(
+  session: {
+    userId: string
+    email: string
+    role: string
+    issuedAt: number
+    sessionStartedAt: number
+  },
+  activeCallSid: string,
+) {
+  try {
+    const token = await generateJWT({
+      userId: session.userId,
+      email: session.email,
+      role: session.role,
+      sessionStartedAt: session.sessionStartedAt,
+      activeCallSid,
+    })
+    await setAuthCookie(token)
+    return true
+  } catch {
+    console.error('Error extending session for call')
+    return false
+  }
+}
+
+/** Returns the current session without extending its lifetime. */
 export const getSession = cache(async () => {
   try {
     const cookieStore = await cookies()
@@ -134,11 +157,26 @@ export const getSession = cache(async () => {
     const payload = await verifyJWT(token)
     if (!payload) return null
 
+    const [currentUser] = await db
+      .select({ email: user.email, role: user.role })
+      .from(user)
+      .where(eq(user.id, payload.userId))
+      .limit(1)
+    if (!currentUser) return null
+
     return {
       userId: payload.userId,
-      email: payload.email as string,
-      role: (payload.role as string) || 'user',
+      email: currentUser.email,
+      role: currentUser.role || 'user',
       issuedAt: payload.iat as number,
+      sessionStartedAt:
+        typeof payload.sessionStartedAt === 'number'
+          ? payload.sessionStartedAt
+          : (payload.iat as number),
+      activeCallSid:
+        typeof payload.activeCallSid === 'string'
+          ? payload.activeCallSid
+          : undefined,
     }
   } catch (error) {
     if (
@@ -150,12 +188,12 @@ export const getSession = cache(async () => {
       )
       return null
     }
-    console.error('Error getting session:', error)
+    console.error('Error getting session')
     return null
   }
 })
 
-// Retain the existing API name for background callers; all sessions are now fixed.
+// Retain the existing API name for background callers.
 export const getSessionWithoutRefresh = getSession
 
 // delete session by clearing the JWT cookie

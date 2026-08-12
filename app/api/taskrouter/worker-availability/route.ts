@@ -219,7 +219,7 @@ async function fetchAvailability() {
     }
   > = {}
 
-  const errors: string[] = []
+  let errorCount = 0
 
   for (const result of results) {
     if (result.status === 'fulfilled') {
@@ -233,12 +233,8 @@ async function fetchAvailability() {
         }
       }
     } else {
-      const reason =
-        result.reason instanceof Error
-          ? result.reason.message
-          : String(result.reason)
-      console.error('❌ Worker stats fetch failed:', reason)
-      errors.push(reason)
+      console.error('❌ Worker stats fetch failed')
+      errorCount++
     }
   }
 
@@ -250,16 +246,7 @@ async function fetchAvailability() {
     availability,
     periodDays: PERIOD_DAYS,
     workdayCount,
-    _debug: {
-      twilioWorkersFound: twilioWorkers.length,
-      workers: twilioWorkers.map((w) => ({
-        name: w.friendlyName,
-        sid: w.sid,
-        matched: !!emailToUserId[w.friendlyName.toLowerCase()],
-      })),
-      fulfilled: Object.keys(availability).length,
-      errors,
-    },
+    failedWorkers: errorCount,
   }
 }
 
@@ -291,7 +278,7 @@ export async function GET() {
     if (isMissingConfig(error)) {
       return Response.json(configErrorResponseBody(error), { status: 500 })
     }
-    console.error('❌ Worker availability error:', error)
+    console.error('❌ Worker availability request failed')
     return Response.json({ error: 'Internal error' }, { status: 500 })
   }
 }

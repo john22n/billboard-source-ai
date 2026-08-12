@@ -2,28 +2,67 @@ import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { serverConfig } from '@/lib/config'
 import { generatePasskeyAuthenticationOptions } from '@/lib/passkey'
+import { rateLimit, unauthenticatedRateLimitIdentities } from '@/lib/rate-limit'
+import { z } from 'zod'
+
+const requestSchema = z.object({}).strict()
+
+class AuthOptionsError extends Error {
+  constructor(readonly response: NextResponse) {
+    super('Authentication options request rejected')
+  }
+}
+
+function invalidRequest(): never {
+  throw new AuthOptionsError(
+    NextResponse.json({ error: 'Invalid request' }, { status: 400 }),
+  )
+}
+
+async function validateRequestBody(request: NextRequest) {
+  const rawBody = await request.text()
+  let input: unknown = {}
+  if (rawBody.trim()) {
+    try {
+      input = JSON.parse(rawBody)
+    } catch {
+      invalidRequest()
+    }
+  }
+  if (!requestSchema.safeParse(input).success) invalidRequest()
+}
+
+async function enforceSourceLimit() {
+  const { source } = await unauthenticatedRateLimitIdentities()
+  const attempt = await rateLimit('passkey-source', source, 30, 10 * 60)
+  if (!attempt.allowed) {
+    throw new AuthOptionsError(
+      NextResponse.json(
+        { error: 'Too many requests' },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(attempt.retryAfterSeconds) },
+        },
+      ),
+    )
+  }
+}
 
 /**
  * POST /api/passkey/auth-options
  *
- * Generates WebAuthn authentication options.
- * Can optionally filter to a specific user's passkeys if email is provided.
+ * Generates usernameless WebAuthn authentication options. Not accepting an
+ * email here prevents the options response from becoming an account oracle.
  *
- * Body: { email?: string }
+ * Body: {}
  */
 export async function POST(request: NextRequest) {
   try {
-    // Parse optional email from body
-    let email: string | undefined
-    try {
-      const body = await request.json()
-      email = body.email
-    } catch {
-      // No body or invalid JSON, that's fine for usernameless auth
-    }
-
+    // An empty body is valid for discoverable-credential authentication.
+    await validateRequestBody(request)
+    await enforceSourceLimit()
     // Generate authentication options
-    const options = await generatePasskeyAuthenticationOptions(email)
+    const options = await generatePasskeyAuthenticationOptions()
 
     // Store challenge in cookie for verification
     const cookieStore = await cookies()
@@ -39,7 +78,8 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(options)
   } catch (error) {
-    console.error('Error generating authentication options:', error)
+    if (error instanceof AuthOptionsError) return error.response
+    console.error('Error generating authentication options')
     return NextResponse.json(
       { error: 'Failed to generate authentication options' },
       { status: 500 },
