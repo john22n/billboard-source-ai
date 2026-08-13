@@ -6,7 +6,6 @@ vi.mock('@/hooks/useWorkerStatus', () => ({
 
 import {
   acceptIncomingCall,
-  bindDeviceEvents,
   canShowIncomingNotification,
   disposeTwilioRuntime,
   handleIncomingCall,
@@ -30,6 +29,19 @@ function createRefreshRuntime(device: RefreshDevice): RefreshRuntime {
     onCallAccepted: null,
     onCallDisconnected: null,
   }
+}
+
+function createCredentialsResponse(
+  token = 'replacement-token',
+  expiresAt = Math.floor(Date.now() / 1000) + 60 * 60,
+) {
+  return new Response(
+    JSON.stringify({
+      token,
+      identity: 'rep@example.com',
+      expiresAt,
+    }),
+  )
 }
 
 describe('canShowIncomingNotification', () => {
@@ -109,15 +121,7 @@ describe('refreshTwilioToken', () => {
     const device = { updateToken } as unknown as RefreshDevice
     const runtime = createRefreshRuntime(device)
     const update = vi.fn()
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          token: 'replacement-token',
-          identity: 'rep@example.com',
-          expiresAt: Math.floor(Date.now() / 1000) + 60 * 60,
-        }),
-      ),
-    )
+    const fetchMock = vi.fn().mockResolvedValue(createCredentialsResponse())
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(refreshTwilioToken(runtime, update, device)).resolves.toBe(
@@ -135,48 +139,31 @@ describe('refreshTwilioToken', () => {
     })
   })
 
-  it('refreshes an invalid access token instead of surfacing error 20101', async () => {
-    const listeners = new Map<
-      string,
-      (error?: Error & { code?: number }) => void
-    >()
+  it('restores registration after refreshing an invalid access token', async () => {
     const device = {
-      on: vi.fn(
-        (
-          event: string,
-          listener: (error?: Error & { code?: number }) => void,
-        ) => listeners.set(event, listener),
-      ),
-      state: 'registered',
+      state: 'unregistered',
+      register: vi.fn().mockResolvedValue(undefined),
       updateToken: vi.fn(),
     } as unknown as RefreshDevice
     const runtime = createRefreshRuntime(device)
+    const activeCall = {} as NonNullable<typeof runtime.activeCall>
+    runtime.activeCall = activeCall
+    runtime.workerStatus = 'unavailable'
     const update = vi.fn()
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            token: 'replacement-token',
-            identity: 'rep@example.com',
-            expiresAt: Math.floor(Date.now() / 1000) + 60 * 60,
-          }),
-        ),
-      ),
+      vi.fn().mockResolvedValue(createCredentialsResponse()),
     )
 
-    bindDeviceEvents(runtime, update, device)
-    listeners.get('error')?.(
-      Object.assign(new Error('AccessTokenInvalid'), { code: 20101 }),
+    await expect(refreshTwilioToken(runtime, update, device)).resolves.toBe(
+      true,
     )
-
-    await vi.waitFor(() => {
-      expect(device.updateToken).toHaveBeenCalledWith('replacement-token')
-    })
+    expect(device.updateToken).toHaveBeenCalledWith('replacement-token')
+    expect(device.register).toHaveBeenCalledOnce()
+    expect(runtime.activeCall).toBe(activeCall)
+    expect(runtime.workerStatus).toBe('unavailable')
     expect(update).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        deviceError: expect.stringContaining('20101'),
-      }),
+      expect.objectContaining({ deviceError: expect.any(String) }),
     )
   })
 
@@ -193,41 +180,40 @@ describe('refreshTwilioToken', () => {
 
     const first = refreshTwilioToken(runtime, vi.fn(), device)
     const second = refreshTwilioToken(runtime, vi.fn(), device)
-    resolveFetch(
-      new Response(
-        JSON.stringify({
-          token: 'replacement-token',
-          identity: 'rep@example.com',
-          expiresAt: Math.floor(Date.now() / 1000) + 60 * 60,
-        }),
-      ),
-    )
+    resolveFetch(createCredentialsResponse())
 
     await expect(Promise.all([first, second])).resolves.toEqual([true, true])
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(device.updateToken).toHaveBeenCalledTimes(1)
   })
 
-  it('does not install a terminal token that would cause a refresh loop', async () => {
+  it('marks calling unavailable instead of installing a terminal token', async () => {
     const device = { updateToken: vi.fn() } as unknown as RefreshDevice
     const runtime = createRefreshRuntime(device)
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          token: 'terminal-token',
-          identity: 'rep@example.com',
-          expiresAt: Math.floor(Date.now() / 1000) + 30,
-        }),
-      ),
-    )
+    const update = vi.fn()
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        createCredentialsResponse(
+          'terminal-token',
+          Math.floor(Date.now() / 1000) + 30,
+        ),
+      )
     vi.stubGlobal('fetch', fetchMock)
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
-    await expect(refreshTwilioToken(runtime, vi.fn(), device)).resolves.toBe(
-      true,
+    await expect(refreshTwilioToken(runtime, update, device)).resolves.toBe(
+      false,
     )
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(device.updateToken).not.toHaveBeenCalled()
+    expect(update).toHaveBeenCalledWith({
+      twilioReady: false,
+      status: 'Calling unavailable',
+      deviceError:
+        'Your login session is ending. Sign in again to restore calling.',
+    })
   })
 
   it('retries a transient token request failure', async () => {
@@ -240,15 +226,7 @@ describe('refreshTwilioToken', () => {
           status: 503,
         }),
       )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            token: 'replacement-token',
-            identity: 'rep@example.com',
-            expiresAt: Math.floor(Date.now() / 1000) + 60 * 60,
-          }),
-        ),
-      )
+      .mockResolvedValueOnce(createCredentialsResponse())
     const waitForRetry = vi.fn().mockResolvedValue(undefined)
     vi.stubGlobal('fetch', fetchMock)
 
@@ -306,15 +284,7 @@ describe('refreshTwilioToken', () => {
 
     const refresh = refreshTwilioToken(runtime, update, device)
     disposeTwilioRuntime(runtime)
-    resolveFetch(
-      new Response(
-        JSON.stringify({
-          token: 'stale-token',
-          identity: 'rep@example.com',
-          expiresAt: Math.floor(Date.now() / 1000) + 60 * 60,
-        }),
-      ),
-    )
+    resolveFetch(createCredentialsResponse('stale-token'))
 
     await expect(refresh).resolves.toBe(false)
     expect(device.destroy).toHaveBeenCalledOnce()

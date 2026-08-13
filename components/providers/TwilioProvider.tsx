@@ -74,6 +74,7 @@ const initialState: TwilioState = {
 const TwilioContext = createContext<TwilioContextType | null>(null)
 const TOKEN_REFRESH_MS = 60_000
 const TOKEN_REFRESH_RETRY_DELAYS_MS = [1_000, 3_000, 5_000]
+const ACCESS_TOKEN_INVALID_ERROR_CODE = 20101
 
 function updateTwilioState(
   state: TwilioState,
@@ -224,6 +225,7 @@ function handleDeviceUnregistered(
     twilioReady: false,
     status: 'Reconnecting calling service...',
   })
+  if (runtime.tokenRefresh?.device === device) return
   if (runtime.initializing) return
 
   runtime.initializing = true
@@ -235,7 +237,7 @@ function handleDeviceUnregistered(
     })
 }
 
-export function bindDeviceEvents(
+function bindDeviceEvents(
   runtime: TwilioRuntime,
   update: UpdateState,
   device: Device,
@@ -246,7 +248,7 @@ export function bindDeviceEvents(
     handleDeviceUnregistered(runtime, update, device),
   )
   device.on('error', (error: Error & { code?: number }) => {
-    if (error.code === 20101) {
+    if (error.code === ACCESS_TOKEN_INVALID_ERROR_CODE) {
       void refreshTwilioToken(runtime, update, device)
       return
     }
@@ -288,6 +290,8 @@ class CredentialRequestError extends Error {
   }
 }
 
+class LoginSessionEndingError extends Error {}
+
 async function requestTwilioCredentials(): Promise<TwilioCredentials> {
   const response = await fetch('/api/twilio-token', { cache: 'no-store' })
   const data = (await response.json()) as Partial<TwilioCredentials> & {
@@ -317,6 +321,7 @@ function isCurrentDevice(runtime: TwilioRuntime, device: Device) {
 }
 
 function shouldRetryTokenRequest(error: unknown) {
+  if (error instanceof LoginSessionEndingError) return false
   if (!(error instanceof CredentialRequestError)) return true
   return error.status === 429 || error.status >= 500
 }
@@ -334,7 +339,11 @@ async function applyRefreshedToken(
 
   // Replacement tokens cannot outlive the fixed login session. Installing
   // one inside the warning window would immediately emit another warning.
-  if (credentials.expiresAt * 1000 - Date.now() <= TOKEN_REFRESH_MS) return true
+  if (credentials.expiresAt * 1000 - Date.now() <= TOKEN_REFRESH_MS) {
+    throw new LoginSessionEndingError(
+      'Your login session is ending. Sign in again to restore calling.',
+    )
+  }
 
   device.updateToken(credentials.token)
   update({ userEmail: credentials.identity, deviceError: null })
@@ -362,7 +371,43 @@ function reportTokenRefreshError(
 ) {
   console.error('Failed to refresh Twilio access token:', error)
   if (!isCurrentDevice(runtime, device)) return
+  if (error instanceof LoginSessionEndingError) {
+    update({
+      twilioReady: false,
+      status: 'Calling unavailable',
+      deviceError: error.message,
+    })
+    return
+  }
   update({ deviceError: `Token refresh failed: ${getErrorMessage(error)}` })
+}
+
+async function restoreDeviceRegistration(
+  runtime: TwilioRuntime,
+  update: UpdateState,
+  device: Device,
+) {
+  if (!isCurrentDevice(runtime, device) || device.state !== 'unregistered') {
+    return true
+  }
+
+  try {
+    runtime.initializing = true
+    await device.register()
+    return true
+  } catch (error) {
+    console.error('Failed to re-register Twilio after token refresh:', error)
+    if (isCurrentDevice(runtime, device)) {
+      update({
+        twilioReady: false,
+        status: 'Calling unavailable',
+        deviceError: 'Calling could not reconnect after refreshing your login.',
+      })
+    }
+    return false
+  } finally {
+    runtime.initializing = false
+  }
 }
 
 export async function refreshTwilioToken(
@@ -396,7 +441,9 @@ export async function refreshTwilioToken(
 
   runtime.tokenRefresh = { device, promise: refresh }
   try {
-    return await refresh
+    const refreshed = await refresh
+    if (!refreshed) return false
+    return await restoreDeviceRegistration(runtime, update, device)
   } finally {
     if (runtime.tokenRefresh?.promise === refresh) runtime.tokenRefresh = null
   }
