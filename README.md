@@ -50,3 +50,21 @@ The GitHub Actions workflow in `.github/workflows/ci-cd.yml`:
 - publishes an SPDX SBOM.
 
 Vercel's native Git integration owns deployments: pull requests receive preview deployments and pushes to `main` produce production deployments. GitHub Actions does not require Vercel credentials and does not build or deploy the application.
+
+## Admin issue reporting
+
+Signed-in administrators can open **Report an Issue** from the dashboard sidebar. A report collects a bounded diagnostic window from Twilio and the current Vercel deployment, redacts credentials and customer contact details, asks an OpenAI model for initial triage through the direct OpenAI API, and posts the sanitized package as the configured Slack user in that user's existing Amp conversation.
+
+Configure these server-only environment variables:
+
+```bash
+OPENAI_API_KEY=
+VERCEL_API_TOKEN=
+SLACK_USER_TOKEN=
+SLACK_AMP_CHANNEL_ID=
+SLACK_AMP_USER_ID=
+```
+
+`VERCEL_PROJECT_ID`, `VERCEL_DEPLOYMENT_ID`, and `VERCEL_TEAM_ID` come from Vercel system environment variables; enable **Project Settings → Environment Variables → Automatically expose System Environment Variables**. The Vercel API token needs Runtime Logs access.
+
+For Slack, add the `chat:write` **User Token Scope** to an internal Slack app, reinstall it as the Slack user linked to Amp, and use its user OAuth token for `SLACK_USER_TOKEN`. `SLACK_AMP_CHANNEL_ID` is the `D...` channel ID shown in that user's Amp conversation, and `SLACK_AMP_USER_ID` is the installed Amp app's `U...` member ID. Reports are explicitly limited to administrators because Slack attributes every message to the user who authorized `SLACK_USER_TOKEN`.

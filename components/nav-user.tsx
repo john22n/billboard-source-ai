@@ -1,7 +1,7 @@
 'use client'
 
 import { IconDotsVertical, IconLogout, IconKey } from '@tabler/icons-react'
-import { ShieldUser } from 'lucide-react'
+import { ShieldUser, TriangleAlert } from 'lucide-react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import {
   DropdownMenu,
@@ -118,15 +118,19 @@ export function NavUser({
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
 
-            {isAdmin && (
+            {isAdmin ? (
               <>
                 <DropdownMenuItem onClick={() => router.push('/admin')}>
                   <ShieldUser />
                   Admin Dashboard
                 </DropdownMenuItem>
-                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => router.push('/issues')}>
+                  <TriangleAlert />
+                  Report an Issue
+                </DropdownMenuItem>
               </>
-            )}
+            ) : null}
+            <DropdownMenuSeparator />
 
             <DropdownMenuItem onClick={() => setPasskeyDialogOpen(true)}>
               <IconKey />

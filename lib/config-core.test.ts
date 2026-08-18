@@ -28,7 +28,7 @@ describe('server config', () => {
     }
   })
 
-  it('exposes provider-specific OpenAI, Twilio, TaskRouter, Blob, and Nutshell values', () => {
+  it('exposes provider-specific service credentials', () => {
     const config = createServerConfig({
       OPENAI_API_KEY: 'openai-key',
       OPENAI_ADMIN_KEY: 'openai-admin-key',
@@ -45,6 +45,13 @@ describe('server config', () => {
       RESEND_API_KEY: 'resend-key',
       VOICEMAIL_NOTIFICATION_EMAIL: 'voicemail@example.com',
       NUTSHELL_API_KEY: 'nutshell-key',
+      VERCEL_API_TOKEN: 'vercel-token',
+      VERCEL_PROJECT_ID: 'project-id',
+      VERCEL_DEPLOYMENT_ID: 'deployment-id',
+      VERCEL_TEAM_ID: 'team-id',
+      SLACK_USER_TOKEN: 'slack-user-token',
+      SLACK_AMP_CHANNEL_ID: 'amp-channel-id',
+      SLACK_AMP_USER_ID: 'amp-user-id',
     })
 
     expect(config.openai.requireApiKey()).toBe('openai-key')
@@ -70,6 +77,17 @@ describe('server config', () => {
       'voicemail@example.com',
     )
     expect(config.nutshell.requireApiKey()).toBe('nutshell-key')
+    expect(config.vercel.requireRuntimeLogCredentials()).toEqual({
+      apiToken: 'vercel-token',
+      projectId: 'project-id',
+      deploymentId: 'deployment-id',
+      teamId: 'team-id',
+    })
+    expect(config.slack.requireIssueReportingCredentials()).toEqual({
+      userToken: 'slack-user-token',
+      ampChannelId: 'amp-channel-id',
+      ampUserId: 'amp-user-id',
+    })
   })
 
   it('requires passkey config in every environment', () => {

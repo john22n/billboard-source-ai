@@ -5,7 +5,10 @@ import { Pool } from 'pg'
 import * as schema from './schema'
 import { serverConfig } from '@/lib/config'
 
-const databaseUrl = serverConfig.database.url
+const databaseUrl = serverConfig.database.url.replace(
+  /([?&]sslmode=)(prefer|require|verify-ca)(?=&|$)/i,
+  '$1verify-full',
+)
 
 export const db = serverConfig.database.useNeon
   ? drizzleNeon({
