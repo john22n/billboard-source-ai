@@ -2,6 +2,7 @@
 
 import { useRef, useState, useEffect, useMemo, useCallback } from 'react'
 import dynamic from 'next/dynamic'
+import { Mic, MicOff, type LucideIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -15,7 +16,10 @@ import {
 } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useBillboardFormExtraction } from '@/hooks/useBillboardFormExtraction'
-import { useTwilioContext } from '@/components/providers/TwilioProvider'
+import {
+  useTwilioContext,
+  type MicrophoneStatus,
+} from '@/components/providers/TwilioProvider'
 import { useOpenAITranscription } from '@/hooks/useOpenAITranscription'
 import { LeadForm, PricingPanel, TranscriptView } from '@/components/sales-call'
 import type { TranscriptItem } from '@/types/sales-call'
@@ -226,12 +230,114 @@ const ArcGISMapPanel = dynamic(
 type TwilioState = ReturnType<typeof useTwilioContext>
 type TranscriptionState = ReturnType<typeof useOpenAITranscription>
 
+type MicrophoneIndicatorProps = {
+  status: MicrophoneStatus
+  level: number
+  label: string
+  message: string | null
+}
+
+const MICROPHONE_STATUS_STYLES: Record<
+  Exclude<MicrophoneStatus, 'idle'>,
+  {
+    label: string
+    className: string
+    icon: LucideIcon
+    iconClassName: string
+    meterClassName: string
+  }
+> = {
+  checking: {
+    label: 'Checking mic…',
+    className: 'bg-amber-500/30 border-amber-200/40',
+    icon: Mic,
+    iconClassName: 'animate-pulse motion-reduce:animate-none',
+    meterClassName: 'hidden',
+  },
+  connected: {
+    label: 'Mic connected',
+    className: 'bg-green-500/30 border-green-200/40',
+    icon: Mic,
+    iconClassName: '',
+    meterClassName: 'flex',
+  },
+  muted: {
+    label: 'Mic muted',
+    className: 'bg-amber-500/30 border-amber-200/40',
+    icon: MicOff,
+    iconClassName: '',
+    meterClassName: 'hidden',
+  },
+  warning: {
+    label: 'Check mic audio',
+    className: 'bg-amber-500/30 border-amber-200/40',
+    icon: Mic,
+    iconClassName: '',
+    meterClassName: 'flex',
+  },
+  disconnected: {
+    label: 'Mic disconnected',
+    className: 'bg-red-500/40 border-red-200/50',
+    icon: MicOff,
+    iconClassName: '',
+    meterClassName: 'hidden',
+  },
+}
+
+function MicrophoneIndicator({
+  status,
+  level,
+  label,
+  message,
+}: MicrophoneIndicatorProps) {
+  if (status === 'idle') return null
+
+  const config = MICROPHONE_STATUS_STYLES[status]
+  const MicrophoneIcon = config.icon
+  const description = [config.label, label, message].filter(Boolean).join('. ')
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label={description}
+      title={description}
+      className={`h-7 sm:h-8 max-w-full px-2 sm:px-2.5 rounded-full backdrop-blur-sm border flex items-center gap-1.5 text-[10px] sm:text-xs font-medium ${config.className}`}
+    >
+      <MicrophoneIcon
+        aria-hidden="true"
+        className={`size-3.5 shrink-0 ${config.iconClassName}`}
+      />
+      <span className="whitespace-nowrap">{config.label}</span>
+      <span
+        aria-hidden="true"
+        className={`${config.meterClassName} h-3 items-end gap-0.5 border-l border-white/30 pl-1.5`}
+      >
+        {[1, 2, 3, 4].map((bar) => (
+          <span
+            key={bar}
+            className={`w-0.5 rounded-full bg-white transition-opacity motion-reduce:transition-none ${bar <= level ? 'opacity-100' : 'opacity-30'}`}
+            style={{ height: `${bar * 2 + 2}px` }}
+          />
+        ))}
+      </span>
+      <span className="hidden empty:hidden lg:inline max-w-[150px] truncate border-l border-white/30 pl-1.5 opacity-80">
+        {label}
+      </span>
+    </div>
+  )
+}
+
 type CallHeaderProps = {
   userEmail: TwilioState['userEmail']
   status: TwilioState['status']
   twilioReady: TwilioState['twilioReady']
   incomingCall: TwilioState['incomingCall']
   callActive: TwilioState['callActive']
+  microphoneStatus: TwilioState['microphoneStatus']
+  microphoneLevel: TwilioState['microphoneLevel']
+  microphoneLabel: TwilioState['microphoneLabel']
+  microphoneMessage: TwilioState['microphoneMessage']
   callerPhone: string
   isProcessing: boolean
   isUploading: boolean
@@ -259,6 +365,10 @@ function CallHeader(props: CallHeaderProps) {
     twilioReady,
     incomingCall,
     callActive,
+    microphoneStatus,
+    microphoneLevel,
+    microphoneLabel,
+    microphoneMessage,
     callerPhone,
     isProcessing,
     isUploading,
@@ -316,6 +426,12 @@ function CallHeader(props: CallHeaderProps) {
                 {status}
               </span>
             </div>
+            <MicrophoneIndicator
+              status={microphoneStatus}
+              level={microphoneLevel}
+              label={microphoneLabel}
+              message={microphoneMessage}
+            />
             <div className="flex flex-1 sm:flex-initial gap-1 sm:gap-2">
               {callActive && (
                 <Button
@@ -1146,6 +1262,10 @@ function TranscriberContent({
             twilioReady={twilio.twilioReady}
             incomingCall={twilio.incomingCall}
             callActive={twilio.callActive}
+            microphoneStatus={twilio.microphoneStatus}
+            microphoneLevel={twilio.microphoneLevel}
+            microphoneLabel={twilio.microphoneLabel}
+            microphoneMessage={twilio.microphoneMessage}
             callerPhone={callerPhone}
             isProcessing={isProcessing}
             isUploading={upload.isUploading}

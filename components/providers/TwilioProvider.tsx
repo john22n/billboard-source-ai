@@ -13,11 +13,23 @@ import {
 import { Call, Device } from '@twilio/voice-sdk'
 import { useWorkerStatus, type WorkerActivity } from '@/hooks/useWorkerStatus'
 
+export type MicrophoneStatus =
+  | 'idle'
+  | 'checking'
+  | 'connected'
+  | 'muted'
+  | 'warning'
+  | 'disconnected'
+
 interface TwilioContextType {
   status: string
   twilioReady: boolean
   incomingCall: Call | null
   callActive: boolean
+  microphoneStatus: MicrophoneStatus
+  microphoneLevel: number
+  microphoneLabel: string
+  microphoneMessage: string | null
   userEmail: string
   deviceError: string | null
   acceptCall: () => Promise<void>
@@ -36,6 +48,10 @@ interface TwilioState {
   twilioReady: boolean
   incomingCall: Call | null
   callActive: boolean
+  microphoneStatus: MicrophoneStatus
+  microphoneLevel: number
+  microphoneLabel: string
+  microphoneMessage: string | null
   userEmail: string
   deviceError: string | null
 }
@@ -52,6 +68,10 @@ interface TwilioRuntime {
   workerStatus: WorkerActivity
   onCallAccepted: ((call: Call) => void) | null
   onCallDisconnected: (() => void) | null
+  microphoneCleanup: (() => void) | null
+  microphoneWarning: string | null
+  microphoneLevel: number
+  lastMicrophoneLevelUpdate: number
 }
 
 interface TwilioCredentials {
@@ -67,6 +87,10 @@ const initialState: TwilioState = {
   twilioReady: false,
   incomingCall: null,
   callActive: false,
+  microphoneStatus: 'idle',
+  microphoneLevel: 0,
+  microphoneLabel: '',
+  microphoneMessage: null,
   userEmail: '',
   deviceError: null,
 }
@@ -75,6 +99,8 @@ const TwilioContext = createContext<TwilioContextType | null>(null)
 const TOKEN_REFRESH_MS = 60_000
 const TOKEN_REFRESH_RETRY_DELAYS_MS = [1_000, 3_000, 5_000]
 const ACCESS_TOKEN_INVALID_ERROR_CODE = 20101
+const CONSTANT_AUDIO_INPUT_WARNING = 'constant-audio-input-level'
+const MICROPHONE_VOLUME_UPDATE_MS = 150
 
 function updateTwilioState(
   state: TwilioState,
@@ -96,6 +122,10 @@ function createRuntime(workerStatus: WorkerActivity): TwilioRuntime {
     workerStatus,
     onCallAccepted: null,
     onCallDisconnected: null,
+    microphoneCleanup: null,
+    microphoneWarning: null,
+    microphoneLevel: 0,
+    lastMicrophoneLevelUpdate: 0,
   }
 }
 
@@ -110,6 +140,187 @@ function getReadyStatus(runtime: TwilioRuntime) {
     : 'Offline'
 }
 
+function getIdleMicrophoneState() {
+  return {
+    microphoneStatus: 'idle' as const,
+    microphoneLevel: 0,
+    microphoneLabel: '',
+    microphoneMessage: null,
+  }
+}
+
+function getMicrophoneLevel(inputVolume: number) {
+  if (inputVolume >= 0.35) return 4
+  if (inputVolume >= 0.15) return 3
+  if (inputVolume >= 0.05) return 2
+  if (inputVolume >= 0.01) return 1
+  return 0
+}
+
+function getLocalAudioTrack(call: Call) {
+  return call.getLocalStream()?.getAudioTracks()[0] ?? null
+}
+
+function clearMicrophoneMonitoring(runtime: TwilioRuntime) {
+  runtime.microphoneCleanup?.()
+  runtime.microphoneCleanup = null
+  runtime.microphoneWarning = null
+  runtime.microphoneLevel = 0
+  runtime.lastMicrophoneLevelUpdate = 0
+}
+
+function hasNoLiveMicrophoneTrack(track: MediaStreamTrack | null) {
+  return !track || track.readyState === 'ended'
+}
+
+function isCallMicrophoneMuted(call: Call, track: MediaStreamTrack | null) {
+  return call.isMuted() || !track?.enabled
+}
+
+function getCallMicrophoneStatus(
+  runtime: TwilioRuntime,
+  call: Call,
+  track: MediaStreamTrack | null,
+): MicrophoneStatus {
+  if (hasNoLiveMicrophoneTrack(track)) return 'disconnected'
+  if (isCallMicrophoneMuted(call, track)) return 'muted'
+  if (track?.muted) return 'disconnected'
+  return runtime.microphoneWarning ? 'warning' : 'connected'
+}
+
+function getMicrophoneMessage(
+  status: MicrophoneStatus,
+  track: MediaStreamTrack | null,
+  warning: string | null,
+) {
+  const messages: Record<MicrophoneStatus, string | null> = {
+    idle: null,
+    checking: 'Connecting to your microphone...',
+    connected: 'Your microphone is connected. Speak to check the meter.',
+    muted: 'Your microphone is muted. The caller cannot hear you.',
+    warning,
+    disconnected: hasNoLiveMicrophoneTrack(track)
+      ? 'No live microphone is connected to this call.'
+      : 'Your browser is not receiving audio from this microphone.',
+  }
+  return messages[status]
+}
+
+function syncMicrophoneState(
+  runtime: TwilioRuntime,
+  update: UpdateState,
+  call: Call,
+) {
+  if (runtime.activeCall !== call) return
+
+  const track = getLocalAudioTrack(call)
+  const microphoneStatus = getCallMicrophoneStatus(runtime, call, track)
+  const microphoneLevel =
+    microphoneStatus === 'muted' || microphoneStatus === 'disconnected'
+      ? 0
+      : runtime.microphoneLevel
+  runtime.microphoneLevel = microphoneLevel
+
+  update({
+    microphoneStatus,
+    microphoneLevel,
+    microphoneLabel: track?.label || 'Default microphone',
+    microphoneMessage: getMicrophoneMessage(
+      microphoneStatus,
+      track,
+      runtime.microphoneWarning,
+    ),
+  })
+}
+
+export function monitorCallMicrophone(
+  runtime: TwilioRuntime,
+  update: UpdateState,
+  call: Call,
+) {
+  clearMicrophoneMonitoring(runtime)
+
+  const track = getLocalAudioTrack(call)
+  const sync = () => syncMicrophoneState(runtime, update, call)
+  const handleVolume = (inputVolume: number) => {
+    const level = getMicrophoneLevel(inputVolume)
+    if (level === runtime.microphoneLevel) return
+
+    const now = Date.now()
+    if (now - runtime.lastMicrophoneLevelUpdate < MICROPHONE_VOLUME_UPDATE_MS) {
+      return
+    }
+    runtime.microphoneLevel = level
+    runtime.lastMicrophoneLevelUpdate = now
+    update({ microphoneLevel: level })
+  }
+  const handleMute = () => sync()
+  const handleWarning = (warningName: string) => {
+    if (warningName !== CONSTANT_AUDIO_INPUT_WARNING) return
+    runtime.microphoneWarning =
+      'Microphone audio looks silent or stuck. Check the selected input and hardware mute switch.'
+    sync()
+  }
+  const handleWarningCleared = (warningName: string) => {
+    if (warningName !== CONSTANT_AUDIO_INPUT_WARNING) return
+    runtime.microphoneWarning = null
+    sync()
+  }
+
+  track?.addEventListener('ended', sync)
+  track?.addEventListener('mute', sync)
+  track?.addEventListener('unmute', sync)
+  call.on('volume', handleVolume)
+  call.on('mute', handleMute)
+  call.on('warning', handleWarning)
+  call.on('warning-cleared', handleWarningCleared)
+
+  runtime.microphoneCleanup = () => {
+    track?.removeEventListener('ended', sync)
+    track?.removeEventListener('mute', sync)
+    track?.removeEventListener('unmute', sync)
+    call.removeListener('volume', handleVolume)
+    call.removeListener('mute', handleMute)
+    call.removeListener('warning', handleWarning)
+    call.removeListener('warning-cleared', handleWarningCleared)
+  }
+  sync()
+}
+
+function waitForCallAcceptance(call: Call) {
+  return new Promise<boolean>((resolve, reject) => {
+    const cleanup = () => {
+      call.removeListener('accept', handleAccept)
+      call.removeListener('disconnect', handleClose)
+      call.removeListener('cancel', handleClose)
+      call.removeListener('error', handleError)
+    }
+    const handleAccept = () => {
+      cleanup()
+      resolve(true)
+    }
+    const handleClose = () => {
+      cleanup()
+      resolve(false)
+    }
+    const handleError = (error: Error) => {
+      cleanup()
+      reject(error)
+    }
+
+    call.on('accept', handleAccept)
+    call.on('disconnect', handleClose)
+    call.on('cancel', handleClose)
+    call.on('error', handleError)
+    try {
+      call.accept()
+    } catch (error) {
+      cleanup()
+      reject(error)
+    }
+  })
+}
+
 export async function acceptIncomingCall(
   runtime: TwilioRuntime,
   update: UpdateState,
@@ -120,21 +331,35 @@ export async function acceptIncomingCall(
   try {
     runtime.acceptingCall = call
     closeIncomingNotification(runtime)
-    update({ status: 'Accepting call...' })
-    call.on('accept', () => runtime.onCallAccepted?.(call))
+    update({
+      status: 'Accepting call...',
+      microphoneStatus: 'checking',
+      microphoneLevel: 0,
+      microphoneLabel: '',
+      microphoneMessage: 'Connecting to your microphone...',
+    })
 
-    await call.accept()
+    const accepted = await waitForCallAcceptance(call)
     // The remote caller can hang up while this accept is still settling. In
     // that case the disconnect handler clears acceptingCall; do not resurrect
     // the already-closed call as active when this promise resumes.
-    if (runtime.acceptingCall !== call) return
+    if (!accepted || runtime.acceptingCall !== call) return
     runtime.activeCall = call
     update({ callActive: true, incomingCall: null })
+    monitorCallMicrophone(runtime, update, call)
+    runtime.onCallAccepted?.(call)
   } catch (error) {
     console.error('Error accepting Twilio call:', error)
-    update({ status: 'Failed to accept call' })
+    update({
+      status: 'Failed to accept call',
+      microphoneStatus: 'disconnected',
+      microphoneLevel: 0,
+      microphoneLabel: '',
+      microphoneMessage:
+        'The microphone did not connect. Check browser permission and your input device.',
+    })
   } finally {
-    runtime.acceptingCall = null
+    if (runtime.acceptingCall === call) runtime.acceptingCall = null
   }
 }
 
@@ -172,6 +397,7 @@ export function handleIncomingCall(
   update({
     incomingCall: call,
     status: `Incoming call from ${call.parameters.From}`,
+    ...getIdleMicrophoneState(),
   })
   showIncomingNotification(runtime, update, call)
 
@@ -179,16 +405,25 @@ export function handleIncomingCall(
     closeIncomingNotification(runtime)
     if (runtime.acceptingCall === call) runtime.acceptingCall = null
     runtime.activeCall = null
-    update({ callActive: false, incomingCall: null })
+    clearMicrophoneMonitoring(runtime)
+    update({
+      callActive: false,
+      incomingCall: null,
+      ...getIdleMicrophoneState(),
+    })
     runtime.onCallDisconnected?.()
   })
   call.on('reject', () => {
     closeIncomingNotification(runtime)
-    update({ incomingCall: null })
+    update({ incomingCall: null, ...getIdleMicrophoneState() })
   })
   call.on('cancel', () => {
     closeIncomingNotification(runtime)
-    update({ incomingCall: null, status: 'Call canceled' })
+    update({
+      incomingCall: null,
+      status: 'Call canceled',
+      ...getIdleMicrophoneState(),
+    })
   })
   call.on('error', (error: Error) => {
     console.error('Twilio call error:', error)
@@ -580,6 +815,7 @@ function useTwilioLifecycle(runtime: TwilioRuntime, update: UpdateState) {
 export function disposeTwilioRuntime(runtime: TwilioRuntime) {
   runtime.loggedOut = true
   closeIncomingNotification(runtime)
+  clearMicrophoneMonitoring(runtime)
   runtime.activeCall?.disconnect()
   runtime.activeCall = null
   runtime.tokenRefresh = null
@@ -596,6 +832,7 @@ function destroyTwilioDevice(runtime: TwilioRuntime, update: UpdateState) {
     callActive: false,
     deviceError: null,
     status: 'Idle',
+    ...getIdleMicrophoneState(),
   })
 }
 
@@ -621,13 +858,15 @@ function createCallActions(
       update({
         incomingCall: null,
         status: state.twilioReady ? getReadyStatus(runtime) : 'Idle',
+        ...getIdleMicrophoneState(),
       })
     },
     hangupCall: () => {
       if (!runtime.activeCall) return
       runtime.activeCall.disconnect()
       runtime.activeCall = null
-      update({ callActive: false })
+      clearMicrophoneMonitoring(runtime)
+      update({ callActive: false, ...getIdleMicrophoneState() })
       runtime.onCallDisconnected?.()
     },
   }
