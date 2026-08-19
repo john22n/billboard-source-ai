@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/hooks/useWorkerStatus', () => ({
@@ -9,11 +10,42 @@ import {
   canShowIncomingNotification,
   disposeTwilioRuntime,
   handleIncomingCall,
+  monitorCallMicrophone,
   refreshTwilioToken,
 } from './TwilioProvider'
 
 type RefreshRuntime = Parameters<typeof refreshTwilioToken>[0]
 type RefreshDevice = Parameters<typeof refreshTwilioToken>[2]
+type MicrophoneRuntime = Parameters<typeof monitorCallMicrophone>[0]
+type MicrophoneCall = Parameters<typeof monitorCallMicrophone>[2]
+
+type MutableAudioTrack = EventTarget & {
+  enabled: boolean
+  label: string
+  muted: boolean
+  readyState: MediaStreamTrackState
+}
+
+function createAudioTrack(): MutableAudioTrack {
+  return Object.assign(new EventTarget(), {
+    enabled: true,
+    label: 'USB headset microphone',
+    muted: false,
+    readyState: 'live' as MediaStreamTrackState,
+  })
+}
+
+function createMicrophoneCall(track = createAudioTrack()) {
+  const events = new EventEmitter()
+  const call = {
+    getLocalStream: vi.fn(() => ({ getAudioTracks: () => [track] })),
+    isMuted: vi.fn(() => false),
+    on: vi.fn(events.on.bind(events)),
+    removeListener: vi.fn(events.removeListener.bind(events)),
+  } as unknown as MicrophoneCall
+
+  return { call, events, track }
+}
 
 function createRefreshRuntime(device: RefreshDevice): RefreshRuntime {
   return {
@@ -28,6 +60,10 @@ function createRefreshRuntime(device: RefreshDevice): RefreshRuntime {
     workerStatus: 'available',
     onCallAccepted: null,
     onCallDisconnected: null,
+    microphoneCleanup: null,
+    microphoneWarning: null,
+    microphoneLevel: 0,
+    lastMicrophoneLevelUpdate: 0,
   }
 }
 
@@ -79,15 +115,14 @@ describe('acceptIncomingCall', () => {
   it('does not reactivate a call that disconnects while accept is settling', async () => {
     type IncomingRuntime = Parameters<typeof handleIncomingCall>[0]
     type IncomingCall = Parameters<typeof handleIncomingCall>[2]
-    const listeners = new Map<string, () => void>()
+    const events = new EventEmitter()
     const call = {
       parameters: { From: '+15555550123' },
-      on: vi.fn((event: string, callback: () => void) => {
-        listeners.set(event, callback)
-      }),
-      accept: vi.fn(async () => {
-        listeners.get('accept')?.()
-        listeners.get('disconnect')?.()
+      on: vi.fn(events.on.bind(events)),
+      removeListener: vi.fn(events.removeListener.bind(events)),
+      accept: vi.fn(() => {
+        events.emit('accept', call)
+        events.emit('disconnect', call)
       }),
     } as unknown as IncomingCall
     const runtime = createRefreshRuntime({
@@ -103,10 +138,93 @@ describe('acceptIncomingCall', () => {
     expect(update).not.toHaveBeenCalledWith(
       expect.objectContaining({ callActive: true }),
     )
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        callActive: false,
+        incomingCall: null,
+      }),
+    )
+  })
+
+  it('marks a call active only after Twilio confirms media acceptance', async () => {
+    const { call: microphoneCall, events } = createMicrophoneCall()
+    const call = Object.assign(microphoneCall, {
+      accept: vi.fn(),
+    })
+    const runtime = createRefreshRuntime({
+      state: 'registered',
+    } as unknown as RefreshDevice) as MicrophoneRuntime
+    const onCallAccepted = vi.fn()
+    const update = vi.fn()
+    runtime.onCallAccepted = onCallAccepted
+
+    const acceptance = acceptIncomingCall(runtime, update, call)
+
+    expect(runtime.activeCall).toBeNull()
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({ microphoneStatus: 'checking' }),
+    )
+    expect(update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ callActive: true }),
+    )
+
+    events.emit('accept', call)
+    await acceptance
+
+    expect(runtime.activeCall).toBe(call)
     expect(update).toHaveBeenCalledWith({
-      callActive: false,
+      callActive: true,
       incomingCall: null,
     })
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        microphoneStatus: 'connected',
+        microphoneLabel: 'USB headset microphone',
+      }),
+    )
+    expect(onCallAccepted).toHaveBeenCalledWith(call)
+  })
+})
+
+describe('monitorCallMicrophone', () => {
+  it('reports input level and microphone health changes', () => {
+    const { call, events, track } = createMicrophoneCall()
+    const runtime = createRefreshRuntime({
+      state: 'registered',
+    } as unknown as RefreshDevice) as MicrophoneRuntime
+    const update = vi.fn()
+    runtime.activeCall = call
+
+    monitorCallMicrophone(runtime, update, call)
+
+    expect(update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        microphoneStatus: 'connected',
+        microphoneLabel: 'USB headset microphone',
+      }),
+    )
+
+    events.emit('volume', 0.4, 0)
+    expect(update).toHaveBeenLastCalledWith({ microphoneLevel: 4 })
+
+    events.emit('warning', 'constant-audio-input-level', {})
+    expect(update).toHaveBeenLastCalledWith(
+      expect.objectContaining({ microphoneStatus: 'warning' }),
+    )
+
+    events.emit('warning-cleared', 'constant-audio-input-level')
+    expect(update).toHaveBeenLastCalledWith(
+      expect.objectContaining({ microphoneStatus: 'connected' }),
+    )
+
+    track.readyState = 'ended'
+    track.dispatchEvent(new Event('ended'))
+    expect(update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        microphoneStatus: 'disconnected',
+        microphoneLevel: 0,
+      }),
+    )
   })
 })
 
