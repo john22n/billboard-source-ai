@@ -294,7 +294,10 @@ function MicrophoneIndicator({
 
   const config = MICROPHONE_STATUS_STYLES[status]
   const MicrophoneIcon = config.icon
-  const description = [config.label, label, message].filter(Boolean).join('. ')
+  const sourceLabel = label ? `Source: ${label}` : ''
+  const description = [config.label, sourceLabel, message]
+    .filter(Boolean)
+    .join('. ')
 
   return (
     <div
@@ -322,7 +325,7 @@ function MicrophoneIndicator({
         ))}
       </span>
       <span className="hidden empty:hidden lg:inline max-w-[150px] truncate border-l border-white/30 pl-1.5 opacity-80">
-        {label}
+        {sourceLabel}
       </span>
     </div>
   )
