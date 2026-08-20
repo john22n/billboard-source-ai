@@ -4,7 +4,7 @@ import {
   isMissingConfig,
   serverConfig,
 } from '@/lib/config'
-import { clearMonthlyOpenAILogs } from '@/lib/dal'
+import { clearExpiredReportedIssues, clearMonthlyOpenAILogs } from '@/lib/dal'
 import { clearExpiredRateLimits } from '@/lib/rate-limit'
 
 export async function GET(request: NextRequest) {
@@ -23,15 +23,18 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const [deletedCount, deletedRateLimitBuckets] = await Promise.all([
-    clearMonthlyOpenAILogs(),
-    clearExpiredRateLimits(),
-  ])
+  const [deletedCount, deletedRateLimitBuckets, deletedReportedIssues] =
+    await Promise.all([
+      clearMonthlyOpenAILogs(),
+      clearExpiredRateLimits(),
+      clearExpiredReportedIssues(),
+    ])
 
   return NextResponse.json({
     success: true,
     deletedCount,
     deletedRateLimitBuckets,
+    deletedReportedIssues,
     clearedBefore: new Date(
       new Date().getFullYear(),
       new Date().getMonth(),

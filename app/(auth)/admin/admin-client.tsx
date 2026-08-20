@@ -23,12 +23,14 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import {
   Trash2,
   Loader2,
-  FileText,
+  CheckCircle2,
+  CircleAlert,
   RefreshCw,
   DollarSign,
   UserPlus,
@@ -39,9 +41,10 @@ import {
   resetCallCounts,
 } from '@/actions/user-actions'
 import { useRouter } from 'next/navigation'
-import type { User, NutshellLead } from '@/db/schema'
+import type { User, NutshellLead, StoredIssueDiagnosis } from '@/db/schema'
 import { BillboardDataUploader } from '@/components/BillboardDataUploader'
 import {
+  handleApiResponse,
   showErrorToast,
   showSuccessToast,
   getErrorMessage,
@@ -70,15 +73,15 @@ interface TwilioUsage {
   totalCostFormatted: string
 }
 
-interface Voicemail {
-  sid: string
-  callSid: string
-  from: string
-  dateCreated: string
-  duration: number
-  recordingUrl: string
-  transcription: string | null
-  transcriptionStatus: string | null
+interface ReportedIssue {
+  reportId: string
+  reporterEmail: string
+  title: string
+  description: string
+  occurredAt: string
+  diagnosis: StoredIssueDiagnosis
+  resolvedAt: string | null
+  createdAt: string
 }
 
 // Define a type for the cost parameter
@@ -88,17 +91,6 @@ type CostValue =
   | { toNumber?: () => number; toFixed?: () => string }
   | null
   | undefined
-
-function formatPhoneNumber(phone: string): string {
-  const cleaned = phone.replace(/\D/g, '')
-  if (cleaned.length === 11 && cleaned.startsWith('1')) {
-    return `(${cleaned.slice(1, 4)}) ${cleaned.slice(4, 7)}-${cleaned.slice(7)}`
-  }
-  if (cleaned.length === 10) {
-    return `(${cleaned.slice(0, 3)}) ${cleaned.slice(3, 6)}-${cleaned.slice(6)}`
-  }
-  return phone
-}
 
 function costToNumber(cost: CostValue): number {
   if (cost == null) return 0
@@ -223,8 +215,8 @@ function AdminHeader({
   handleDelete,
 }: AdminHeaderProps) {
   return (
-    <div className="w-full flex items-center gap-3 mb-4">
-      <div className="flex flex-1 items-center gap-2">
+    <div className="mb-4 flex w-full flex-wrap items-center gap-3 md:flex-nowrap">
+      <div className="order-2 flex flex-1 flex-wrap items-center gap-2 md:order-none md:flex-nowrap">
         <Button size="sm" onClick={handleBackToDashboard}>
           back to Dashboard
         </Button>
@@ -251,8 +243,10 @@ function AdminHeader({
           </SheetContent>
         </Sheet>
       </div>
-      <h2 className="flex-1 text-center text-2xl font-semibold">Admin Panel</h2>
-      <div className="flex flex-1 justify-end gap-2">
+      <h2 className="order-first basis-full text-center text-2xl font-semibold md:order-none md:flex-1 md:basis-auto">
+        Admin Panel
+      </h2>
+      <div className="order-3 flex justify-end gap-2 md:order-none md:flex-1">
         <Button
           variant="destructive"
           size="sm"
@@ -581,88 +575,145 @@ function CostsTab({
   )
 }
 
-interface VoicemailsTabProps {
-  voicemails: Voicemail[]
-  voicemailsLoading: boolean
-  voicemailsError: string | null
+interface ReportedIssuesTabProps {
+  reportedIssues: ReportedIssue[]
+  reportedIssuesLoading: boolean
+  reportedIssuesError: string | null
+  resolvingIssueId: string | null
+  handleResolveIssue: (reportId: string) => void
 }
 
-function VoicemailsTab({
-  voicemails,
-  voicemailsLoading,
-  voicemailsError,
-}: VoicemailsTabProps) {
-  return (
-    <>
-      {/* Voicemails Tab */}
-      <TabsContent value="voicemails">
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold">Voicemails (Last 7 Days)</h3>
-            <span className="text-sm text-muted-foreground">
-              {voicemails.length} recording
-              {voicemails.length !== 1 ? 's' : ''}
-            </span>
-          </div>
+function issueSeverityVariant(
+  severity: StoredIssueDiagnosis['severity'],
+): 'destructive' | 'secondary' | 'outline' {
+  if (severity === 'critical' || severity === 'high') return 'destructive'
+  return severity === 'medium' ? 'secondary' : 'outline'
+}
 
-          {voicemailsLoading ? (
-            <div className="flex items-center gap-2 text-muted-foreground py-8 justify-center">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>Loading voicemails...</span>
-            </div>
-          ) : voicemailsError ? (
-            <p className="text-sm text-red-500 py-4">{voicemailsError}</p>
-          ) : voicemails.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-8 text-center">
-              No voicemails in the last 7 days
+function formatIssueDate(value: string) {
+  return new Date(value).toLocaleString([], {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  })
+}
+
+function ReportedIssuesTab({
+  reportedIssues,
+  reportedIssuesLoading,
+  reportedIssuesError,
+  resolvingIssueId,
+  handleResolveIssue,
+}: ReportedIssuesTabProps) {
+  const openIssueCount = reportedIssues.filter(
+    (issue) => !issue.resolvedAt,
+  ).length
+
+  return (
+    <TabsContent value="issues">
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-lg font-semibold">
+              Reported Issues (Last 30 Days)
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              {openIssueCount} open of {reportedIssues.length} total · newest
+              100 retained
             </p>
-          ) : (
-            <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-2">
-              {voicemails.map((vm) => (
-                <div
-                  key={vm.sid}
-                  className="p-4 bg-muted rounded-lg border space-y-2"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <span className="font-medium">
-                        {formatPhoneNumber(vm.from)}
-                      </span>
-                      <span className="text-sm text-muted-foreground">
-                        {vm.duration}s
+          </div>
+        </div>
+
+        {reportedIssuesLoading ? (
+          <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span>Loading reported issues...</span>
+          </div>
+        ) : reportedIssuesError ? (
+          <p className="py-4 text-sm text-red-500">{reportedIssuesError}</p>
+        ) : reportedIssues.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            No issues reported in the last 30 days
+          </p>
+        ) : (
+          <div className="max-h-[65vh] space-y-3 overflow-y-auto pr-2">
+            {reportedIssues.map((issue) => (
+              <article
+                key={issue.reportId}
+                className="space-y-4 rounded-lg border bg-muted p-4"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge
+                        variant={issueSeverityVariant(issue.diagnosis.severity)}
+                      >
+                        {issue.diagnosis.severity}
+                      </Badge>
+                      <Badge
+                        variant={issue.resolvedAt ? 'secondary' : 'outline'}
+                      >
+                        {issue.resolvedAt ? 'Resolved' : 'Open'}
+                      </Badge>
+                      <span className="font-mono text-xs text-muted-foreground">
+                        {issue.reportId}
                       </span>
                     </div>
-                    <span className="text-xs text-muted-foreground">
-                      {new Date(vm.dateCreated).toLocaleDateString()}{' '}
-                      {new Date(vm.dateCreated).toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </span>
+                    <h4 className="font-semibold">{issue.title}</h4>
+                    <p className="text-xs text-muted-foreground">
+                      Reported by {issue.reporterEmail} · Occurred{' '}
+                      {formatIssueDate(issue.occurredAt)}
+                    </p>
                   </div>
 
-                  {vm.transcription ? (
-                    <div className="flex items-start gap-2 pt-2 border-t">
-                      <FileText className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
-                      <p className="text-sm">{vm.transcription}</p>
+                  {issue.resolvedAt ? (
+                    <div className="flex items-center gap-2 text-sm text-emerald-700 dark:text-emerald-400">
+                      <CheckCircle2 className="size-4" aria-hidden="true" />
+                      Resolved {formatIssueDate(issue.resolvedAt)}
                     </div>
                   ) : (
-                    <div className="flex items-center gap-2 pt-2 border-t text-muted-foreground">
-                      <FileText className="h-4 w-4" />
-                      <span className="text-sm italic">
-                        {vm.transcriptionStatus === 'in-progress'
-                          ? 'Transcription in progress...'
-                          : 'No transcription available'}
-                      </span>
-                    </div>
+                    <Button
+                      size="sm"
+                      onClick={() => handleResolveIssue(issue.reportId)}
+                      disabled={resolvingIssueId !== null}
+                    >
+                      {resolvingIssueId === issue.reportId ? (
+                        <Loader2 className="animate-spin" aria-hidden="true" />
+                      ) : (
+                        <CheckCircle2 aria-hidden="true" />
+                      )}
+                      {resolvingIssueId === issue.reportId
+                        ? 'Resolving...'
+                        : 'Resolve'}
+                    </Button>
                   )}
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </TabsContent>
-    </>
+
+                <p className="whitespace-pre-wrap text-sm leading-6">
+                  {issue.description}
+                </p>
+
+                <div className="space-y-2 border-t pt-3">
+                  <div className="flex items-start gap-2">
+                    <CircleAlert
+                      className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                      aria-hidden="true"
+                    />
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Reason
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {issue.diagnosis.summary}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
+    </TabsContent>
   )
 }
 
@@ -812,9 +863,12 @@ function useRemoteAdminData() {
   const [twilioUsage, setTwilioUsage] = useState<TwilioUsage | null>(null)
   const [twilioLoading, setTwilioLoading] = useState(true)
   const [twilioError, setTwilioError] = useState<string | null>(null)
-  const [voicemails, setVoicemails] = useState<Voicemail[]>([])
-  const [voicemailsLoading, setVoicemailsLoading] = useState(true)
-  const [voicemailsError, setVoicemailsError] = useState<string | null>(null)
+  const [reportedIssues, setReportedIssues] = useState<ReportedIssue[]>([])
+  const [reportedIssuesLoading, setReportedIssuesLoading] = useState(true)
+  const [reportedIssuesError, setReportedIssuesError] = useState<string | null>(
+    null,
+  )
+  const [resolvingIssueId, setResolvingIssueId] = useState<string | null>(null)
   const [workerAvailability, setWorkerAvailability] =
     useState<WorkerAvailability>({})
   const [availabilityLoading, setAvailabilityLoading] = useState(true)
@@ -860,18 +914,19 @@ function useRemoteAdminData() {
       }
     }
 
-    async function fetchVoicemails() {
+    async function fetchReportedIssues() {
       try {
-        const response = await fetch('/api/twilio/voicemails')
-        if (!response.ok) throw new Error('Failed to fetch voicemails')
-        const data = await response.json()
-        setVoicemails(data.voicemails || [])
+        const response = await fetch('/api/issues')
+        const data = await handleApiResponse<{ issues: ReportedIssue[] }>(
+          response,
+        )
+        setReportedIssues(data.issues)
       } catch (error) {
         const message = getErrorMessage(error)
-        console.error('Error fetching voicemails:', message)
-        setVoicemailsError(message)
+        console.error('Error fetching reported issues:', message)
+        setReportedIssuesError(message)
       } finally {
-        setVoicemailsLoading(false)
+        setReportedIssuesLoading(false)
       }
     }
 
@@ -890,9 +945,35 @@ function useRemoteAdminData() {
 
     fetchOpenAIUsage()
     fetchTwilioUsage()
-    fetchVoicemails()
+    fetchReportedIssues()
     fetchWorkerAvailability()
   }, [])
+
+  async function handleResolveIssue(reportId: string) {
+    setResolvingIssueId(reportId)
+    try {
+      const response = await fetch('/api/issues', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reportId }),
+      })
+      const data = await handleApiResponse<{ issue: ReportedIssue }>(response)
+      setReportedIssues((issues) => {
+        const updatedIssues = issues.map((issue) =>
+          issue.reportId === data.issue.reportId ? data.issue : issue,
+        )
+        return [
+          ...updatedIssues.filter((issue) => !issue.resolvedAt),
+          ...updatedIssues.filter((issue) => issue.resolvedAt),
+        ]
+      })
+      showSuccessToast(`${reportId} resolved`)
+    } catch (error) {
+      showErrorToast(error, 'The issue could not be resolved')
+    } finally {
+      setResolvingIssueId(null)
+    }
+  }
 
   return {
     openaiUsage,
@@ -901,9 +982,11 @@ function useRemoteAdminData() {
     twilioUsage,
     twilioLoading,
     twilioError,
-    voicemails,
-    voicemailsLoading,
-    voicemailsError,
+    reportedIssues,
+    reportedIssuesLoading,
+    reportedIssuesError,
+    resolvingIssueId,
+    handleResolveIssue,
     workerAvailability,
     availabilityLoading,
   }
@@ -1091,9 +1174,10 @@ export default function AdminClient({
     twilioUsage,
     twilioLoading,
     twilioError,
-    voicemails,
-    voicemailsLoading,
-    voicemailsError,
+    reportedIssues,
+    reportedIssuesLoading,
+    reportedIssuesError,
+    resolvingIssueId,
     workerAvailability,
     availabilityLoading,
     leadStats,
@@ -1104,6 +1188,7 @@ export default function AdminClient({
     handleResetCounts,
     handleBackToDashboard,
     handlePhoneUpdate,
+    handleResolveIssue,
     handleSyncLeads,
     handleSignupSuccess,
   } = {
@@ -1130,13 +1215,13 @@ export default function AdminClient({
           handleDelete,
         }}
       />
-      <Tabs defaultValue="users" className="w-full">
+      <Tabs defaultValue="users" className="min-w-0 w-full">
         <TabsList
-          className={`grid w-full mb-6 ${showLeadsTab ? 'grid-cols-5' : 'grid-cols-4'}`}
+          className={`grid h-auto w-full min-w-0 grid-cols-2 mb-6 ${showLeadsTab ? 'sm:grid-cols-5' : 'sm:grid-cols-4'}`}
         >
           <TabsTrigger value="users">User Accounts</TabsTrigger>
           <TabsTrigger value="costs">User Costs</TabsTrigger>
-          <TabsTrigger value="voicemails">Voicemails</TabsTrigger>
+          <TabsTrigger value="issues">Reported Issues</TabsTrigger>
           <TabsTrigger value="billboard">Billboard Data</TabsTrigger>
           {showLeadsTab && <TabsTrigger value="leads">CRM Leads</TabsTrigger>}
         </TabsList>
@@ -1172,8 +1257,14 @@ export default function AdminClient({
           }}
         />
 
-        <VoicemailsTab
-          {...{ voicemails, voicemailsLoading, voicemailsError }}
+        <ReportedIssuesTab
+          {...{
+            reportedIssues,
+            reportedIssuesLoading,
+            reportedIssuesError,
+            resolvingIssueId,
+            handleResolveIssue,
+          }}
         />
 
         {/* Billboard Data Tab */}

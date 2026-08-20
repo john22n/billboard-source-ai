@@ -53,18 +53,18 @@ Vercel's native Git integration owns deployments: pull requests receive preview 
 
 ## Admin issue reporting
 
-Signed-in administrators can open **Report an Issue** from the dashboard sidebar. A report collects a bounded diagnostic window from Twilio and the current Vercel deployment, redacts credentials and customer contact details, asks an OpenAI model for initial triage through the direct OpenAI API, and posts the sanitized package as the configured Slack user in that user's existing Amp conversation.
+Signed-in employees can open **Report an Issue** from the dashboard sidebar. A report collects a bounded diagnostic window from Twilio and the current Vercel deployment, scopes provider records to the reporting employee's phone number, Twilio client identity, worker SID, and related Call SIDs, and redacts credentials while retaining operational email addresses and phone numbers. OpenAI returns only a reason for the issue, never a fix. When an employee asks for information about a Twilio call they had, the result includes only contact details and call records tied to that employee's account. The event-driven Amp Orb is notified only when OpenAI requests engineering help or OpenAI triage is unavailable. Administrators can review and resolve retained reports from the Admin Panel.
+
+Each employee account can save one issue every 24 hours. The database keeps at most the newest 100 reported issues and deletes any report older than 30 days. Cleanup runs after each saved report, during issue-list and resolution requests, and from the daily maintenance cron.
 
 Configure these server-only environment variables:
 
 ```bash
 OPENAI_API_KEY=
 VERCEL_API_TOKEN=
-SLACK_USER_TOKEN=
-SLACK_AMP_CHANNEL_ID=
-SLACK_AMP_USER_ID=
+AMP_ISSUE_WEBHOOK_URL=
 ```
 
 `VERCEL_PROJECT_ID`, `VERCEL_DEPLOYMENT_ID`, and `VERCEL_TEAM_ID` come from Vercel system environment variables; enable **Project Settings → Environment Variables → Automatically expose System Environment Variables**. The Vercel API token needs Runtime Logs access.
 
-For Slack, add the `chat:write` **User Token Scope** to an internal Slack app, reinstall it as the Slack user linked to Amp, and use its user OAuth token for `SLACK_USER_TOKEN`. `SLACK_AMP_CHANNEL_ID` is the `D...` channel ID shown in that user's Amp conversation, and `SLACK_AMP_USER_ID` is the installed Amp app's `U...` member ID. Reports are explicitly limited to administrators because Slack attributes every message to the user who authorized `SLACK_USER_TOKEN`.
+Load `.amp/plugins/issue-report-webhook.ts` in the Orb thread that should investigate escalated reports, then set its private durable webhook URL as `AMP_ISSUE_WEBHOOK_URL`. The URL is a credential: keep it server-only and never commit or print it. The sender uses each report ID as its idempotency key, and the plugin validates the versioned payload before waking its owning thread.

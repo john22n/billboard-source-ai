@@ -49,9 +49,7 @@ describe('server config', () => {
       VERCEL_PROJECT_ID: 'project-id',
       VERCEL_DEPLOYMENT_ID: 'deployment-id',
       VERCEL_TEAM_ID: 'team-id',
-      SLACK_USER_TOKEN: 'slack-user-token',
-      SLACK_AMP_CHANNEL_ID: 'amp-channel-id',
-      SLACK_AMP_USER_ID: 'amp-user-id',
+      AMP_ISSUE_WEBHOOK_URL: 'https://webhooks.ampcode.com/example',
     })
 
     expect(config.openai.requireApiKey()).toBe('openai-key')
@@ -83,11 +81,9 @@ describe('server config', () => {
       deploymentId: 'deployment-id',
       teamId: 'team-id',
     })
-    expect(config.slack.requireIssueReportingCredentials()).toEqual({
-      userToken: 'slack-user-token',
-      ampChannelId: 'amp-channel-id',
-      ampUserId: 'amp-user-id',
-    })
+    expect(config.amp.requireIssueWebhookUrl()).toBe(
+      'https://webhooks.ampcode.com/example',
+    )
   })
 
   it('requires passkey config in every environment', () => {

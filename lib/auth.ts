@@ -158,7 +158,12 @@ export const getSession = cache(async () => {
     if (!payload) return null
 
     const [currentUser] = await db
-      .select({ email: user.email, role: user.role })
+      .select({
+        email: user.email,
+        role: user.role,
+        twilioPhoneNumber: user.twilioPhoneNumber,
+        taskRouterWorkerSid: user.taskRouterWorkerSid,
+      })
       .from(user)
       .where(eq(user.id, payload.userId))
       .limit(1)
@@ -168,6 +173,8 @@ export const getSession = cache(async () => {
       userId: payload.userId,
       email: currentUser.email,
       role: currentUser.role || 'user',
+      twilioPhoneNumber: currentUser.twilioPhoneNumber,
+      taskRouterWorkerSid: currentUser.taskRouterWorkerSid,
       issuedAt: payload.iat as number,
       sessionStartedAt:
         typeof payload.sessionStartedAt === 'number'

@@ -1,9 +1,15 @@
 import { db } from '@/db'
 import { getSession } from './auth'
 import { serverConfig } from './config'
-import { and, eq, gte, inArray, lt, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray, isNull, lt, sql } from 'drizzle-orm'
 import { cache } from 'react'
-import { openaiLogs, user, nutshellLeads, appMetrics } from '@/db/schema'
+import {
+  openaiLogs,
+  user,
+  nutshellLeads,
+  appMetrics,
+  reportedIssues,
+} from '@/db/schema'
 import {
   calculateOpenAIDurationCost,
   calculateOpenAIEmbeddingCost,
@@ -295,6 +301,100 @@ export async function clearMonthlyOpenAILogs() {
     .returning()
 
   return result.length
+}
+
+const REPORTED_ISSUE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
+const REPORTED_ISSUE_STORAGE_LIMIT = 100
+
+function reportedIssueCutoff(now = new Date()) {
+  return new Date(now.getTime() - REPORTED_ISSUE_RETENTION_MS)
+}
+
+async function clearExcessReportedIssues() {
+  const excessIssues = db
+    .select({ reportId: reportedIssues.reportId })
+    .from(reportedIssues)
+    .orderBy(desc(reportedIssues.createdAt), desc(reportedIssues.reportId))
+    .offset(REPORTED_ISSUE_STORAGE_LIMIT)
+
+  const result = await db
+    .delete(reportedIssues)
+    .where(inArray(reportedIssues.reportId, excessIssues))
+    .returning()
+
+  return result.length
+}
+
+export async function clearExpiredReportedIssues(now = new Date()) {
+  const expiredIssues = await db
+    .delete(reportedIssues)
+    .where(lt(reportedIssues.createdAt, reportedIssueCutoff(now)))
+    .returning()
+
+  return expiredIssues.length + (await clearExcessReportedIssues())
+}
+
+export async function saveReportedIssue(
+  issue: typeof reportedIssues.$inferInsert,
+) {
+  const [savedIssue] = await db
+    .insert(reportedIssues)
+    .values(issue)
+    .onConflictDoNothing({ target: reportedIssues.reportId })
+    .returning()
+
+  await clearExcessReportedIssues()
+  return savedIssue ?? null
+}
+
+function withoutLegacyIssueDiagnosis(
+  issue: typeof reportedIssues.$inferSelect,
+): typeof reportedIssues.$inferSelect {
+  const diagnosis = issue.diagnosis
+  return {
+    ...issue,
+    diagnosis: {
+      severity: diagnosis.severity,
+      summary: diagnosis.summary,
+      evidence: diagnosis.evidence ?? [],
+      missingData: diagnosis.missingData ?? [],
+      needsAmpEscalation: diagnosis.needsAmpEscalation ?? false,
+      escalationReason: diagnosis.escalationReason ?? null,
+      twilioCallInfoRequested: diagnosis.twilioCallInfoRequested ?? false,
+      twilioCallContext: diagnosis.twilioCallContext ?? null,
+    },
+  }
+}
+
+export async function getReportedIssues(now = new Date()) {
+  const issues = await db
+    .select()
+    .from(reportedIssues)
+    .where(gte(reportedIssues.createdAt, reportedIssueCutoff(now)))
+    .orderBy(
+      sql`${reportedIssues.resolvedAt} ASC NULLS FIRST`,
+      desc(reportedIssues.createdAt),
+    )
+
+  return issues.map(withoutLegacyIssueDiagnosis)
+}
+
+export async function resolveReportedIssue(
+  reportId: string,
+  resolverId: string,
+) {
+  const [resolvedIssue] = await db
+    .update(reportedIssues)
+    .set({ resolvedAt: new Date(), resolvedById: resolverId })
+    .where(
+      and(
+        eq(reportedIssues.reportId, reportId),
+        isNull(reportedIssues.resolvedAt),
+      ),
+    )
+    .returning()
+
+  return resolvedIssue ? withoutLegacyIssueDiagnosis(resolvedIssue) : null
 }
 
 export async function promoteToAdmin(email: string) {

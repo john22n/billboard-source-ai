@@ -10,22 +10,45 @@ export const issueReportSchema = z.object({
 
 export type IssueReportInput = z.infer<typeof issueReportSchema>
 
+export const issueResolutionSchema = z.object({
+  reportId: z.string().regex(/^ISS-[A-F0-9]{8}$/),
+})
+
+export interface IssueTwilioCall {
+  callSid: string
+  parentCallSid: string | null
+  startedAt: string
+  endedAt: string | null
+  from: string
+  to: string
+  status: string
+  durationSeconds: number
+  direction: string
+}
+
+export interface IssueTwilioCallContext {
+  phoneNumbers: string[]
+  emailAddresses: string[]
+  calls: IssueTwilioCall[]
+}
+
 export interface IssueDiagnosis {
   severity: 'low' | 'medium' | 'high' | 'critical'
   summary: string
-  likelyCauses: string[]
   evidence: Array<{
     source: 'report' | 'twilio' | 'vercel'
     detail: string
   }>
-  recommendedActions: string[]
   missingData: string[]
+  needsAmpEscalation: boolean
+  escalationReason: string | null
+  twilioCallInfoRequested: boolean
+  twilioCallContext: IssueTwilioCallContext | null
 }
 
 export interface IssueReportResponse {
   reportId: string
-  slackChannelId: string
-  slackMessageTs: string
   diagnosis: IssueDiagnosis
   unavailableSources: string[]
+  ampEscalated: boolean
 }

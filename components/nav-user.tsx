@@ -119,17 +119,15 @@ export function NavUser({
             <DropdownMenuSeparator />
 
             {isAdmin ? (
-              <>
-                <DropdownMenuItem onClick={() => router.push('/admin')}>
-                  <ShieldUser />
-                  Admin Dashboard
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => router.push('/issues')}>
-                  <TriangleAlert />
-                  Report an Issue
-                </DropdownMenuItem>
-              </>
+              <DropdownMenuItem onClick={() => router.push('/admin')}>
+                <ShieldUser />
+                Admin Dashboard
+              </DropdownMenuItem>
             ) : null}
+            <DropdownMenuItem onClick={() => router.push('/issues')}>
+              <TriangleAlert />
+              Report an Issue
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
 
             <DropdownMenuItem onClick={() => setPasskeyDialogOpen(true)}>

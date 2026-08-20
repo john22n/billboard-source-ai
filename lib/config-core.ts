@@ -175,15 +175,9 @@ export interface ServerConfig {
       teamId: string
     }
   }
-  slack: {
-    userToken: string | null
-    ampChannelId: string | null
-    ampUserId: string | null
-    requireIssueReportingCredentials: () => {
-      userToken: string
-      ampChannelId: string
-      ampUserId: string
-    }
+  amp: {
+    issueWebhookUrl: string | null
+    requireIssueWebhookUrl: () => string
   }
 }
 
@@ -471,34 +465,16 @@ export function createServerConfig(env: EnvSource): ServerConfig {
     },
   }
 
-  const slack = {
-    get userToken() {
-      return optionalString(env, 'SLACK_USER_TOKEN')
+  const amp = {
+    get issueWebhookUrl() {
+      return optionalString(env, 'AMP_ISSUE_WEBHOOK_URL')
     },
-    get ampChannelId() {
-      return optionalString(env, 'SLACK_AMP_CHANNEL_ID')
-    },
-    get ampUserId() {
-      return optionalString(env, 'SLACK_AMP_USER_ID')
-    },
-    requireIssueReportingCredentials() {
-      return {
-        userToken: requiredString(
-          env,
-          'SLACK_USER_TOKEN',
-          'serverConfig.slack.userToken',
-        ),
-        ampChannelId: requiredString(
-          env,
-          'SLACK_AMP_CHANNEL_ID',
-          'serverConfig.slack.ampChannelId',
-        ),
-        ampUserId: requiredString(
-          env,
-          'SLACK_AMP_USER_ID',
-          'serverConfig.slack.ampUserId',
-        ),
-      }
+    requireIssueWebhookUrl() {
+      return requiredString(
+        env,
+        'AMP_ISSUE_WEBHOOK_URL',
+        'serverConfig.amp.issueWebhookUrl',
+      )
     },
   }
 
@@ -556,7 +532,7 @@ export function createServerConfig(env: EnvSource): ServerConfig {
     passkey,
     app,
     vercel,
-    slack,
+    amp,
   }
 }
 

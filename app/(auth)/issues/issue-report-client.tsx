@@ -45,22 +45,22 @@ const sourceCards = [
   {
     icon: PhoneCall,
     label: 'Twilio',
-    detail: 'Debugger alerts, call outcomes, and TaskRouter events',
+    detail: 'Calls, alerts, and worker events scoped to your account',
   },
   {
     icon: CloudCog,
     label: 'Vercel',
-    detail: 'Runtime request and function logs around the incident',
+    detail: 'Runtime logs containing your account or related Call SIDs',
   },
   {
     icon: Sparkles,
     label: 'OpenAI',
-    detail: 'Timestamp correlation and likely-cause analysis',
+    detail: 'Issue reason and engineering escalation decision',
   },
   {
     icon: Bot,
     label: 'Amp',
-    detail: 'Slack handoff with the sanitized diagnostic package',
+    detail: 'Orb escalation only when OpenAI requests engineering help',
   },
 ]
 
@@ -105,10 +105,10 @@ function PendingReportStatus({ isPending }: { isPending: boolean }) {
         aria-hidden="true"
         className="animate-spin motion-reduce:animate-none"
       />
-      <AlertTitle>Building the handoff</AlertTitle>
+      <AlertTitle>Analyzing the issue</AlertTitle>
       <AlertDescription className="text-amber-100/70">
-        Log APIs may take a few seconds. Keep this page open until Slack
-        confirms delivery.
+        Log APIs may take a few seconds. OpenAI will decide whether the issue
+        needs Amp engineering help.
       </AlertDescription>
     </Alert>
   )
@@ -119,7 +119,123 @@ function UnavailableSources({ sources }: { sources: string[] }) {
 
   return (
     <div className="rounded-md border border-amber-400/20 bg-amber-400/5 p-3 text-xs leading-5 text-amber-100/70">
-      Partial handoff: {sources.join(', ')} could not provide complete data.
+      Partial diagnostics: {sources.join(', ')} could not provide complete data.
+    </div>
+  )
+}
+
+function formatCallDuration(durationSeconds: number) {
+  if (durationSeconds < 60) return `${durationSeconds}s`
+  return `${Math.floor(durationSeconds / 60)}m ${durationSeconds % 60}s`
+}
+
+type TwilioCallContextValue = NonNullable<
+  IssueReportResponse['diagnosis']['twilioCallContext']
+>
+
+function TwilioContactList({
+  label,
+  values,
+  protocol,
+}: {
+  label: string
+  values: string[]
+  protocol: 'tel' | 'mailto'
+}) {
+  if (values.length === 0) return null
+
+  return (
+    <div>
+      <dt className="text-xs text-slate-500">{label}</dt>
+      <dd className="flex flex-wrap gap-x-3 gap-y-1">
+        {values.map((value) => (
+          <a
+            key={value}
+            href={`${protocol}:${value}`}
+            className="text-sky-300 underline-offset-4 hover:underline"
+          >
+            {value}
+          </a>
+        ))}
+      </dd>
+    </div>
+  )
+}
+
+function TwilioRelatedCalls({
+  calls,
+}: {
+  calls: TwilioCallContextValue['calls']
+}) {
+  if (calls.length === 0) return null
+
+  return (
+    <div>
+      <dt className="text-xs text-slate-500">Related calls</dt>
+      <dd className="mt-1 space-y-2">
+        {calls.map((call) => (
+          <div
+            key={call.callSid}
+            className="rounded border border-sky-400/15 bg-slate-950/40 p-2 text-xs"
+          >
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="font-mono text-sky-200">{call.callSid}</span>
+              <span className="capitalize text-slate-400">{call.status}</span>
+              <span className="text-slate-500">
+                {formatCallDuration(call.durationSeconds)}
+              </span>
+            </div>
+            <p className="mt-1 text-slate-400">
+              {call.from} → {call.to}
+            </p>
+            <p className="mt-1 text-slate-500">
+              {new Date(call.startedAt).toLocaleString()}
+            </p>
+          </div>
+        ))}
+      </dd>
+    </div>
+  )
+}
+
+function TwilioCallContext({
+  context,
+}: {
+  context: IssueReportResponse['diagnosis']['twilioCallContext']
+}) {
+  if (!context) return null
+
+  const hasDetails = [
+    context.phoneNumbers,
+    context.emailAddresses,
+    context.calls,
+  ].some(({ length }) => length > 0)
+
+  return (
+    <div className="space-y-2 rounded-md border border-sky-400/20 bg-sky-400/5 p-3">
+      <p className="text-xs font-medium uppercase tracking-[0.14em] text-sky-200">
+        Twilio call information for your account
+      </p>
+      {hasDetails ? (
+        <dl className="space-y-2 text-sm text-slate-300">
+          <TwilioContactList
+            label="Phone"
+            values={context.phoneNumbers}
+            protocol="tel"
+          />
+          <TwilioContactList
+            label="Email"
+            values={context.emailAddresses}
+            protocol="mailto"
+          />
+          <TwilioRelatedCalls calls={context.calls} />
+        </dl>
+      ) : (
+        <p className="text-sm text-slate-400">
+          No call details were found for your account in the selected evidence
+          window.
+        </p>
+      )}
     </div>
   )
 }
@@ -141,7 +257,7 @@ function CompletedReportStatus({
         <div className="flex items-center justify-between gap-3">
           <CardTitle className="flex items-center gap-2 text-emerald-100">
             <CheckCircle2 aria-hidden="true" className="size-5" />
-            Sent to Amp
+            {result.ampEscalated ? 'Escalated to Amp' : 'Explanation complete'}
           </CardTitle>
           <Badge variant={severityVariant(result.diagnosis.severity)}>
             {result.diagnosis.severity}
@@ -152,13 +268,21 @@ function CompletedReportStatus({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4 py-5">
-        <p className="text-sm leading-6 text-slate-300">
-          {result.diagnosis.summary}
-        </p>
+        <div className="space-y-2">
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
+            Reason
+          </p>
+          <p className="text-sm leading-6 text-slate-300">
+            {result.diagnosis.summary}
+          </p>
+        </div>
+        <TwilioCallContext context={result.diagnosis.twilioCallContext} />
         <UnavailableSources sources={result.unavailableSources} />
         <div className="flex items-center gap-2 text-xs text-emerald-100/60">
           <MessageSquareText aria-hidden="true" className="size-4" />
-          Amp was contacted directly in Slack.
+          {result.ampEscalated
+            ? 'The issue-monitoring Orb was notified directly.'
+            : 'OpenAI found a reason, so the Amp Orb was not started.'}
         </div>
       </CardContent>
     </Card>
@@ -252,7 +376,11 @@ export default function IssueReportClient({
         })
         const report = await handleApiResponse<IssueReportResponse>(response)
         setResult(report)
-        showSuccessToast(`${report.reportId} sent to Amp in Slack`)
+        showSuccessToast(
+          report.ampEscalated
+            ? `${report.reportId} escalated to Amp`
+            : `${report.reportId} diagnosed without Amp escalation`,
+        )
         form.reset()
         setOccurredAt(toLocalDateTimeInput(new Date()))
         setRequestId(crypto.randomUUID())
@@ -294,8 +422,9 @@ export default function IssueReportClient({
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-400 sm:text-base">
               Capture what happened once. The system gathers the surrounding
-              evidence, asks OpenAI for an initial diagnosis, and hands the
-              package to Amp in Slack.
+              evidence and asks OpenAI why it happened. If you request details
+              about a Twilio call, only records tied to your account are shown.
+              Amp is only started when OpenAI needs engineering help.
             </p>
           </div>
           <div className="flex items-center gap-2 text-xs text-slate-500">
@@ -353,7 +482,9 @@ export default function IssueReportClient({
                   />
                   <p className="text-xs leading-5 text-slate-500">
                     Include the affected workflow and any visible error. Do not
-                    paste passwords, API keys, or customer payment data.
+                    paste passwords, API keys, or customer payment data. If you
+                    need information about a Twilio call you had, ask for it
+                    here and select the matching evidence window.
                   </p>
                 </div>
 
@@ -401,17 +532,17 @@ export default function IssueReportClient({
 
                 <Alert className="border-emerald-400/20 bg-emerald-400/5 text-emerald-100">
                   <ShieldCheck aria-hidden="true" />
-                  <AlertTitle>Sanitized before handoff</AlertTitle>
+                  <AlertTitle>Contact details are retained</AlertTitle>
                   <AlertDescription className="text-emerald-100/70">
-                    Credentials, email addresses, and phone numbers found in
-                    logs are redacted before diagnostics are sent to OpenAI,
-                    Slack, or Amp.
+                    Credentials and customer payment data should never be
+                    included. Email addresses and phone numbers are preserved so
+                    administrators can retrieve the affected records.
                   </AlertDescription>
                 </Alert>
               </CardContent>
               <CardFooter className="justify-between gap-4 border-t border-slate-800 py-5">
                 <p className="hidden text-xs text-slate-500 sm:block">
-                  Reports are limited to 3 every 15 minutes.
+                  Each employee account can report one issue every 24 hours.
                 </p>
                 <span
                   id="issue-submit-status"
@@ -427,7 +558,7 @@ export default function IssueReportClient({
                   type="submit"
                   disabled={isPending}
                   aria-describedby="issue-submit-status"
-                  aria-label="Diagnose and send issue report"
+                  aria-label="Analyze issue report"
                   className="ml-auto min-w-44 bg-amber-400 text-slate-950 hover:bg-amber-300"
                 >
                   {isPending ? (
@@ -442,7 +573,7 @@ export default function IssueReportClient({
                   ) : (
                     <>
                       <Send aria-hidden="true" data-icon="inline-start" />
-                      Diagnose and send
+                      Analyze issue
                     </>
                   )}
                 </Button>
