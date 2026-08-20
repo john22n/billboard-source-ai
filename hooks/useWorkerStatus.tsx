@@ -9,8 +9,13 @@ import {
   useRef,
   ReactNode,
 } from 'react'
+import { clearPersistedIssueReport } from '@/lib/issue-report-storage'
 
 export type WorkerActivity = 'available' | 'unavailable' | 'offline'
+
+function clearIssueReportWhenOffline(status: WorkerActivity) {
+  if (status === 'offline') clearPersistedIssueReport()
+}
 
 interface WorkerStatusContextType {
   status: WorkerActivity
@@ -54,6 +59,7 @@ export function WorkerStatusProvider({ children }: WorkerStatusProviderProps) {
   /* Set worker offline (used when session expires)       */
   /* ---------------------------------------------------- */
   const setWorkerOffline = useCallback(() => {
+    clearPersistedIssueReport()
     try {
       navigator.sendBeacon(
         '/api/taskrouter/worker-status',
@@ -97,7 +103,8 @@ export function WorkerStatusProvider({ children }: WorkerStatusProviderProps) {
         throw new Error(data.error || 'Failed to fetch status')
       }
 
-      const newStatus = data.status || 'offline'
+      const newStatus = (data.status || 'offline') as WorkerActivity
+      clearIssueReportWhenOffline(newStatus)
       if (newStatus !== statusRef.current) {
         setStatusState(newStatus)
         statusRef.current = newStatus
@@ -140,6 +147,7 @@ export function WorkerStatusProvider({ children }: WorkerStatusProviderProps) {
           throw new Error(data.error || 'Failed to update status')
         }
 
+        clearIssueReportWhenOffline(newStatus)
         setStatusState(newStatus)
         statusRef.current = newStatus
       } catch (err) {

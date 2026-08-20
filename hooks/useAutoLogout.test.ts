@@ -3,6 +3,9 @@ import { describe, expect, it, vi } from 'vitest'
 vi.mock('next/navigation', () => ({
   useRouter: vi.fn(),
 }))
+vi.mock('@/lib/issue-report-storage', () => ({
+  clearPersistedIssueReport: vi.fn(),
+}))
 
 import { isAutoLogoutDue } from './useAutoLogout'
 

@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useState, useTransition } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 import {
   ArrowLeft,
   Bot,
@@ -40,6 +40,11 @@ import {
   issueReportSchema,
   type IssueReportResponse,
 } from '@/lib/issue-report-schema'
+import {
+  ISSUE_REPORT_RESULT_CLEARED_EVENT,
+  loadPersistedIssueReport,
+  persistIssueReport,
+} from '@/lib/issue-report-storage'
 
 const sourceCards = [
   {
@@ -354,6 +359,20 @@ export default function IssueReportClient({
   )
   const [requestId, setRequestId] = useState(() => crypto.randomUUID())
 
+  useEffect(() => {
+    const persistedResult = loadPersistedIssueReport(reporterEmail)
+    if (persistedResult) {
+      // Browser-owned session state can only be restored after hydration.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setResult(persistedResult)
+    }
+
+    const clearResult = () => setResult(null)
+    window.addEventListener(ISSUE_REPORT_RESULT_CLEARED_EVENT, clearResult)
+    return () =>
+      window.removeEventListener(ISSUE_REPORT_RESULT_CLEARED_EVENT, clearResult)
+  }, [reporterEmail])
+
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = event.currentTarget
@@ -368,13 +387,13 @@ export default function IssueReportClient({
 
     startTransition(async () => {
       try {
-        setResult(null)
         const response = await fetch('/api/issues', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(input.data),
         })
         const report = await handleApiResponse<IssueReportResponse>(response)
+        persistIssueReport(reporterEmail, report)
         setResult(report)
         showSuccessToast(
           report.ampEscalated
@@ -542,7 +561,7 @@ export default function IssueReportClient({
               </CardContent>
               <CardFooter className="justify-between gap-4 border-t border-slate-800 py-5">
                 <p className="hidden text-xs text-slate-500 sm:block">
-                  Each employee account can report one issue every 24 hours.
+                  Each employee account can report one issue every 16 hours.
                 </p>
                 <span
                   id="issue-submit-status"

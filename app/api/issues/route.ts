@@ -23,8 +23,9 @@ export const maxDuration = 60
 
 const MAX_REPORT_AGE_MS = 30 * 24 * 60 * 60 * 1000
 const MAX_FUTURE_SKEW_MS = 5 * 60 * 1000
-const DAILY_REPORT_SCOPE = 'issue-report-daily'
-const DAILY_REPORT_WINDOW_SECONDS = 24 * 60 * 60
+// Preserve active buckets while shortening new report windows from 24 to 16 hours.
+const REPORT_RATE_LIMIT_SCOPE = 'issue-report-daily'
+const REPORT_RATE_LIMIT_WINDOW_SECONDS = 16 * 60 * 60
 
 export async function GET() {
   const session = await getSession()
@@ -81,14 +82,14 @@ export async function POST(request: NextRequest) {
   }
 
   const attempt = await rateLimit(
-    DAILY_REPORT_SCOPE,
+    REPORT_RATE_LIMIT_SCOPE,
     session.userId,
     1,
-    DAILY_REPORT_WINDOW_SECONDS,
+    REPORT_RATE_LIMIT_WINDOW_SECONDS,
   )
   if (!attempt.allowed) {
     return NextResponse.json(
-      { error: 'Each account can report one issue every 24 hours.' },
+      { error: 'Each account can report one issue every 16 hours.' },
       {
         status: 429,
         headers: { 'Retry-After': String(attempt.retryAfterSeconds) },
@@ -124,9 +125,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(report)
   } catch (error) {
     try {
-      await resetRateLimit(DAILY_REPORT_SCOPE, session.userId)
+      await resetRateLimit(REPORT_RATE_LIMIT_SCOPE, session.userId)
     } catch {
-      console.error('Failed to reset issue-report daily limit')
+      console.error('Failed to reset issue-report rate limit')
     }
     if (error instanceof IssueReportDeliveryError) {
       return NextResponse.json(

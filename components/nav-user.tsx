@@ -28,6 +28,7 @@ import { useTransition, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { PasskeyManager } from '@/components/passkey-manager'
 import { useTwilioContext } from '@/components/providers/TwilioProvider'
+import { clearPersistedIssueReport } from '@/lib/issue-report-storage'
 
 export function NavUser({
   user,
@@ -63,6 +64,7 @@ export function NavUser({
       }
 
       // Stop token refreshes and destroy the Voice SDK connection before logout.
+      clearPersistedIssueReport()
       destroyDevice()
       await signOut()
     })

@@ -176,11 +176,11 @@ describe('/api/issues', () => {
       'issue-report-daily',
       'admin-1',
       1,
-      86_400,
+      57_600,
     )
   })
 
-  it('limits each employee account to one report every 24 hours', async () => {
+  it('limits each employee account to one report every 16 hours', async () => {
     rateLimit.mockResolvedValue({ allowed: false, retryAfterSeconds: 3600 })
 
     const response = await POST(request(validInput()))
@@ -188,12 +188,12 @@ describe('/api/issues', () => {
     expect(response.status).toBe(429)
     expect(response.headers.get('Retry-After')).toBe('3600')
     await expect(response.json()).resolves.toEqual({
-      error: 'Each account can report one issue every 24 hours.',
+      error: 'Each account can report one issue every 16 hours.',
     })
     expect(submitIssueReport).not.toHaveBeenCalled()
   })
 
-  it('restores the daily allowance when a report fails', async () => {
+  it('restores the reporting allowance when a report fails', async () => {
     submitIssueReport.mockRejectedValue(new Error('provider unavailable'))
 
     const response = await POST(request(validInput()))
