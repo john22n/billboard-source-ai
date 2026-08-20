@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
+import { clearPersistedIssueReport } from '@/lib/issue-report-storage'
 
 const SESSION_DURATION_MS = 10 * 60 * 60 * 1000
 
@@ -22,6 +23,7 @@ export function useAutoLogout(sessionIssuedAt: number, logoutBlocked = false) {
 
   useEffect(() => {
     const setWorkerOffline = () => {
+      clearPersistedIssueReport()
       navigator.sendBeacon(
         '/api/taskrouter/worker-status',
         JSON.stringify({ status: 'offline' }),
@@ -47,6 +49,7 @@ export function useAutoLogout(sessionIssuedAt: number, logoutBlocked = false) {
       })
       if (!response.ok)
         throw new Error(`Worker status returned ${response.status}`)
+      clearPersistedIssueReport()
       console.log('✅ Worker set to offline')
     } catch (error) {
       console.error('Failed to set worker offline:', error)
@@ -57,6 +60,7 @@ export function useAutoLogout(sessionIssuedAt: number, logoutBlocked = false) {
       if (!response.ok)
         throw new Error(`Logout API returned ${response.status}`)
 
+      clearPersistedIssueReport()
       router.replace('/login?reason=auto-logout')
     } catch (error) {
       hasLoggedOutRef.current = false

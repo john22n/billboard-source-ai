@@ -28,7 +28,7 @@ describe('server config', () => {
     }
   })
 
-  it('exposes provider-specific OpenAI, Twilio, TaskRouter, Blob, and Nutshell values', () => {
+  it('exposes provider-specific service credentials', () => {
     const config = createServerConfig({
       OPENAI_API_KEY: 'openai-key',
       OPENAI_ADMIN_KEY: 'openai-admin-key',
@@ -45,6 +45,11 @@ describe('server config', () => {
       RESEND_API_KEY: 'resend-key',
       VOICEMAIL_NOTIFICATION_EMAIL: 'voicemail@example.com',
       NUTSHELL_API_KEY: 'nutshell-key',
+      VERCEL_API_TOKEN: 'vercel-token',
+      VERCEL_PROJECT_ID: 'project-id',
+      VERCEL_DEPLOYMENT_ID: 'deployment-id',
+      VERCEL_TEAM_ID: 'team-id',
+      AMP_ISSUE_WEBHOOK_URL: 'https://webhooks.ampcode.com/example',
     })
 
     expect(config.openai.requireApiKey()).toBe('openai-key')
@@ -70,6 +75,15 @@ describe('server config', () => {
       'voicemail@example.com',
     )
     expect(config.nutshell.requireApiKey()).toBe('nutshell-key')
+    expect(config.vercel.requireRuntimeLogCredentials()).toEqual({
+      apiToken: 'vercel-token',
+      projectId: 'project-id',
+      deploymentId: 'deployment-id',
+      teamId: 'team-id',
+    })
+    expect(config.amp.requireIssueWebhookUrl()).toBe(
+      'https://webhooks.ampcode.com/example',
+    )
   })
 
   it('requires passkey config in every environment', () => {

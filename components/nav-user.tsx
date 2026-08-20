@@ -1,7 +1,7 @@
 'use client'
 
 import { IconDotsVertical, IconLogout, IconKey } from '@tabler/icons-react'
-import { ShieldUser } from 'lucide-react'
+import { ShieldUser, TriangleAlert } from 'lucide-react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import {
   DropdownMenu,
@@ -28,6 +28,7 @@ import { useTransition, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { PasskeyManager } from '@/components/passkey-manager'
 import { useTwilioContext } from '@/components/providers/TwilioProvider'
+import { clearPersistedIssueReport } from '@/lib/issue-report-storage'
 
 export function NavUser({
   user,
@@ -63,6 +64,7 @@ export function NavUser({
       }
 
       // Stop token refreshes and destroy the Voice SDK connection before logout.
+      clearPersistedIssueReport()
       destroyDevice()
       await signOut()
     })
@@ -118,15 +120,17 @@ export function NavUser({
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
 
-            {isAdmin && (
-              <>
-                <DropdownMenuItem onClick={() => router.push('/admin')}>
-                  <ShieldUser />
-                  Admin Dashboard
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-              </>
-            )}
+            {isAdmin ? (
+              <DropdownMenuItem onClick={() => router.push('/admin')}>
+                <ShieldUser />
+                Admin Dashboard
+              </DropdownMenuItem>
+            ) : null}
+            <DropdownMenuItem onClick={() => router.push('/issues')}>
+              <TriangleAlert />
+              Report an Issue
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
 
             <DropdownMenuItem onClick={() => setPasskeyDialogOpen(true)}>
               <IconKey />

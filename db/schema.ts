@@ -5,6 +5,7 @@ import {
   text,
   timestamp,
   integer,
+  jsonb,
   numeric,
   index,
   varchar,
@@ -168,3 +169,69 @@ export const rateLimitBuckets = pgTable(
     resetAtIndex: index('rate_limit_buckets_reset_at_idx').on(table.resetAt),
   }),
 )
+
+export interface StoredIssueDiagnosis {
+  severity: 'low' | 'medium' | 'high' | 'critical'
+  summary: string
+  evidence: Array<{
+    source: 'report' | 'twilio' | 'vercel'
+    detail: string
+  }>
+  missingData: string[]
+  needsAmpEscalation: boolean
+  escalationReason: string | null
+  twilioCallInfoRequested: boolean
+  twilioCallContext: {
+    phoneNumbers: string[]
+    emailAddresses: string[]
+    calls: Array<{
+      callSid: string
+      parentCallSid: string | null
+      startedAt: string
+      endedAt: string | null
+      from: string
+      to: string
+      status: string
+      durationSeconds: number
+      direction: string
+    }>
+  } | null
+}
+
+// Reported issues are short-lived operational records. The application keeps
+// only the newest 100 rows and prunes rows after 30 days.
+export const reportedIssues = pgTable(
+  'reported_issues',
+  {
+    reportId: varchar('report_id', { length: 12 }).primaryKey().notNull(),
+    reporterId: varchar('reporter_id', { length: 21 }).references(
+      () => user.id,
+      { onDelete: 'set null' },
+    ),
+    reporterEmail: varchar('reporter_email', { length: 64 }).notNull(),
+    title: varchar('title', { length: 120 }).notNull(),
+    description: text('description').notNull(),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+    lookbackMinutes: integer('lookback_minutes').notNull(),
+    diagnosis: jsonb('diagnosis').$type<StoredIssueDiagnosis>().notNull(),
+    unavailableSources: jsonb('unavailable_sources')
+      .$type<string[]>()
+      .notNull(),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    resolvedById: varchar('resolved_by_id', { length: 21 }).references(
+      () => user.id,
+      { onDelete: 'set null' },
+    ),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    createdAtIndex: index('reported_issues_created_at_idx').on(table.createdAt),
+    resolvedAtIndex: index('reported_issues_resolved_at_idx').on(
+      table.resolvedAt,
+    ),
+  }),
+)
+
+export type ReportedIssue = InferSelectModel<typeof reportedIssues>

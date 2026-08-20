@@ -13,7 +13,9 @@ function isEditableTarget(target: EventTarget | null) {
   return editableTags.includes(target.tagName) || target.isContentEditable
 }
 
-function shouldIgnoreThemeHotkey(event: KeyboardEvent) {
+export function shouldIgnoreThemeHotkey(event: KeyboardEvent) {
+  if (typeof event.key !== 'string') return true
+
   const hasModifier = [event.metaKey, event.ctrlKey, event.altKey].some(Boolean)
   return (
     event.key.toLowerCase() !== 'd' ||

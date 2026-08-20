@@ -50,3 +50,21 @@ The GitHub Actions workflow in `.github/workflows/ci-cd.yml`:
 - publishes an SPDX SBOM.
 
 Vercel's native Git integration owns deployments: pull requests receive preview deployments and pushes to `main` produce production deployments. GitHub Actions does not require Vercel credentials and does not build or deploy the application.
+
+## Admin issue reporting
+
+Signed-in employees can open **Report an Issue** from the dashboard sidebar. A report collects a bounded diagnostic window from Twilio and the current Vercel deployment, scopes provider records to the reporting employee's phone number, Twilio client identity, worker SID, and related Call SIDs, and redacts credentials while retaining operational email addresses and phone numbers. OpenAI returns only a reason for the issue, never a fix. When an employee asks for information about a Twilio call they had, the result includes only contact details and call records tied to that employee's account. The finding remains available when the employee navigates away and returns during the same browser session; logging out or moving the Twilio worker to Offline clears it. The event-driven Amp Orb is notified only when OpenAI requests engineering help or OpenAI triage is unavailable. Administrators can review and resolve retained reports from the Admin Panel.
+
+Each employee account can save one issue every 16 hours. The database keeps at most the newest 100 reported issues and deletes any report older than 30 days. Cleanup runs after each saved report, during issue-list and resolution requests, and from the daily maintenance cron.
+
+Configure these server-only environment variables:
+
+```bash
+OPENAI_API_KEY=
+VERCEL_API_TOKEN=
+AMP_ISSUE_WEBHOOK_URL=
+```
+
+`VERCEL_PROJECT_ID`, `VERCEL_DEPLOYMENT_ID`, and `VERCEL_TEAM_ID` come from Vercel system environment variables; enable **Project Settings → Environment Variables → Automatically expose System Environment Variables**. The Vercel API token needs Runtime Logs access.
+
+Load `.amp/plugins/issue-report-webhook.ts` in the Orb thread that should investigate escalated reports, then set its private durable webhook URL as `AMP_ISSUE_WEBHOOK_URL`. The URL is a credential: keep it server-only and never commit or print it. The sender uses each report ID as its idempotency key, and the plugin validates the versioned payload before waking its owning thread.

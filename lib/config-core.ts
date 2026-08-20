@@ -163,6 +163,22 @@ export interface ServerConfig {
     baseUrlFromRequest: (requestUrl: string) => string
     addVercelBypassToken: (url: URL) => URL
   }
+  vercel: {
+    apiToken: string | null
+    projectId: string | null
+    deploymentId: string | null
+    teamId: string | null
+    requireRuntimeLogCredentials: () => {
+      apiToken: string
+      projectId: string
+      deploymentId: string
+      teamId: string
+    }
+  }
+  amp: {
+    issueWebhookUrl: string | null
+    requireIssueWebhookUrl: () => string
+  }
 }
 
 export interface PublicConfig {
@@ -410,6 +426,58 @@ export function createServerConfig(env: EnvSource): ServerConfig {
     },
   }
 
+  const vercel = {
+    get apiToken() {
+      return optionalString(env, 'VERCEL_API_TOKEN')
+    },
+    get projectId() {
+      return optionalString(env, 'VERCEL_PROJECT_ID')
+    },
+    get deploymentId() {
+      return optionalString(env, 'VERCEL_DEPLOYMENT_ID')
+    },
+    get teamId() {
+      return optionalString(env, 'VERCEL_TEAM_ID')
+    },
+    requireRuntimeLogCredentials() {
+      return {
+        apiToken: requiredString(
+          env,
+          'VERCEL_API_TOKEN',
+          'serverConfig.vercel.apiToken',
+        ),
+        projectId: requiredString(
+          env,
+          'VERCEL_PROJECT_ID',
+          'serverConfig.vercel.projectId',
+        ),
+        deploymentId: requiredString(
+          env,
+          'VERCEL_DEPLOYMENT_ID',
+          'serverConfig.vercel.deploymentId',
+        ),
+        teamId: requiredString(
+          env,
+          'VERCEL_TEAM_ID',
+          'serverConfig.vercel.teamId',
+        ),
+      }
+    },
+  }
+
+  const amp = {
+    get issueWebhookUrl() {
+      return optionalString(env, 'AMP_ISSUE_WEBHOOK_URL')
+    },
+    requireIssueWebhookUrl() {
+      return requiredString(
+        env,
+        'AMP_ISSUE_WEBHOOK_URL',
+        'serverConfig.amp.issueWebhookUrl',
+      )
+    },
+  }
+
   const passkey = {
     rpName: 'Billboard Source',
     get rpId() {
@@ -463,6 +531,8 @@ export function createServerConfig(env: EnvSource): ServerConfig {
     nutshell,
     passkey,
     app,
+    vercel,
+    amp,
   }
 }
 
