@@ -9,6 +9,7 @@ const contentSecurityPolicy = [
   "connect-src 'self' https: wss:",
   "media-src 'self' blob: https:",
   "worker-src 'self' blob:",
+  "frame-src 'self' https://geopoepoe.com",
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",

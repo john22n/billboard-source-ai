@@ -21,7 +21,12 @@ import {
   type MicrophoneStatus,
 } from '@/components/providers/TwilioProvider'
 import { useOpenAITranscription } from '@/hooks/useOpenAITranscription'
-import { LeadForm, PricingPanel, TranscriptView } from '@/components/sales-call'
+import {
+  InventoryExplorerPanel,
+  LeadForm,
+  PricingPanel,
+  TranscriptView,
+} from '@/components/sales-call'
 import type { TranscriptItem } from '@/types/sales-call'
 import {
   dismissToasts,
@@ -543,7 +548,7 @@ type TabbedBodyProps = {
   setIsLoadingBillboard: React.Dispatch<React.SetStateAction<boolean>>
   setBillboardContext: React.Dispatch<React.SetStateAction<string>>
   onClearAll: () => void
-  currentMarketLocation: string
+  currentMarketLocation: MarketLocation
   scrollRef: React.RefObject<HTMLDivElement | null>
   interimTranscript: TranscriptionState['interimTranscript']
   interimSpeaker: TranscriptionState['interimSpeaker']
@@ -640,7 +645,7 @@ function LeadActions({
 
 function TabbedBody(props: TabbedBodyProps) {
   const [sidePanel, setSidePanel] = useState<
-    'pricing' | 'google-map' | 'bsi-map'
+    'pricing' | 'google-map' | 'bsi-map' | 'inventory'
   >('pricing')
   const {
     resetTrigger,
@@ -668,7 +673,7 @@ function TabbedBody(props: TabbedBodyProps) {
         onValueChange={() => setSidePanel('pricing')}
         className="w-full flex-1 flex flex-col gap-0 min-h-0 overflow-hidden"
       >
-        <TabsList className="grid w-full grid-cols-4 mb-2 bg-slate-100 p-0.5 sm:p-1 rounded-lg h-8 sm:h-9 flex-shrink-0">
+        <TabsList className="grid w-full grid-cols-5 mb-2 bg-slate-100 p-0.5 sm:p-1 rounded-lg h-8 sm:h-9 flex-shrink-0">
           <TabsTrigger
             value="form"
             className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs"
@@ -689,6 +694,13 @@ function TabbedBody(props: TabbedBodyProps) {
           >
             <span className="hidden sm:inline">BSI Map</span>
             <span className="sm:hidden">BSI</span>
+          </TabsTrigger>
+          <TabsTrigger
+            value="inventory"
+            className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs"
+          >
+            <span className="hidden sm:inline">Inventory Map</span>
+            <span className="sm:hidden">Inv</span>
           </TabsTrigger>
           <TabsTrigger
             value="transcript"
@@ -727,7 +739,7 @@ function TabbedBody(props: TabbedBodyProps) {
                   : ''
               }`}
             >
-              <TabsList className="mx-auto mb-1 grid h-9 w-full max-w-sm grid-cols-3 rounded-none border-b border-slate-200 bg-transparent p-0">
+              <TabsList className="mx-auto mb-1 grid h-9 w-full max-w-lg grid-cols-4 rounded-none border-b border-slate-200 bg-transparent p-0">
                 <TabsTrigger
                   value="pricing"
                   className="h-9 rounded-none border-x-0 border-t-0 border-b-2 border-transparent bg-transparent text-[10px] font-semibold tracking-wide text-slate-500 shadow-none transition-colors hover:text-slate-900 data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent sm:text-xs"
@@ -745,6 +757,12 @@ function TabbedBody(props: TabbedBodyProps) {
                   className="h-9 rounded-none border-x-0 border-t-0 border-b-2 border-transparent bg-transparent text-[10px] font-semibold tracking-wide text-slate-500 shadow-none transition-colors hover:text-slate-900 data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent sm:text-xs"
                 >
                   BSI Map
+                </TabsTrigger>
+                <TabsTrigger
+                  value="inventory"
+                  className="h-9 rounded-none border-x-0 border-t-0 border-b-2 border-transparent bg-transparent text-[10px] font-semibold tracking-wide text-slate-500 shadow-none transition-colors hover:text-slate-900 data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent sm:text-xs"
+                >
+                  Inventory
                 </TabsTrigger>
               </TabsList>
 
@@ -766,7 +784,7 @@ function TabbedBody(props: TabbedBodyProps) {
               >
                 <GoogleMapPanel
                   key={`google-map-${resetTrigger}`}
-                  initialLocation={currentMarketLocation}
+                  initialLocation={currentMarketLocation.query}
                   exclusiveView
                 />
               </TabsContent>
@@ -776,7 +794,17 @@ function TabbedBody(props: TabbedBodyProps) {
               >
                 <ArcGISMapPanel
                   key={`arcgis-map-${resetTrigger}`}
-                  initialLocation={currentMarketLocation}
+                  initialLocation={currentMarketLocation.query}
+                />
+              </TabsContent>
+              <TabsContent
+                value="inventory"
+                className="mt-0 min-h-0 overflow-hidden data-[state=active]:block"
+              >
+                <InventoryExplorerPanel
+                  city={currentMarketLocation.city}
+                  state={currentMarketLocation.state}
+                  collapseFilters
                 />
               </TabsContent>
 
@@ -797,7 +825,7 @@ function TabbedBody(props: TabbedBodyProps) {
           <div className="h-full overflow-hidden">
             <GoogleMapPanel
               key={`google-map-${resetTrigger}`}
-              initialLocation={currentMarketLocation}
+              initialLocation={currentMarketLocation.query}
             />
           </div>
         </TabsContent>
@@ -808,7 +836,18 @@ function TabbedBody(props: TabbedBodyProps) {
           <div className="h-full overflow-hidden">
             <ArcGISMapPanel
               key={`arcgis-map-${resetTrigger}`}
-              initialLocation={currentMarketLocation}
+              initialLocation={currentMarketLocation.query}
+            />
+          </div>
+        </TabsContent>
+        <TabsContent
+          value="inventory"
+          className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col"
+        >
+          <div className="h-full overflow-hidden">
+            <InventoryExplorerPanel
+              city={currentMarketLocation.city}
+              state={currentMarketLocation.state}
             />
           </div>
         </TabsContent>
@@ -1170,6 +1209,13 @@ type Market = {
   state?: string | null
   targetArea?: string | null
 }
+
+type MarketLocation = {
+  query: string
+  city: string
+  state: string
+}
+
 function getMarketLocation(
   activeMarketIndex: number,
   primary: Market,
@@ -1177,17 +1223,20 @@ function getMarketLocation(
 ) {
   const market =
     activeMarketIndex === 0 ? primary : additionalMarkets[activeMarketIndex - 1]
-  if (!market) return ''
+  if (!market) return { query: '', city: '', state: '' }
 
   const city = market.targetCity?.trim()
   const state = market.state?.trim()
   const area = market.targetArea?.trim()
 
-  if (city && state) {
-    return area ? `${area}, ${city}, ${state}` : `${city}, ${state}`
-  }
+  const query =
+    city && state
+      ? area
+        ? `${area}, ${city}, ${state}`
+        : `${city}, ${state}`
+      : area || ''
 
-  return area || ''
+  return { query, city: city || '', state: state || '' }
 }
 
 function useMarketLocation() {
