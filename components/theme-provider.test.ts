@@ -1,31 +1,20 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { shouldIgnoreThemeHotkey } from './theme-provider'
+import type { ReactElement, ReactNode } from 'react'
+import type { ThemeProviderProps } from 'next-themes'
+import { describe, expect, it } from 'vitest'
+import { ThemeProvider } from './theme-provider'
 
-describe('theme hotkey', () => {
-  afterEach(() => vi.unstubAllGlobals())
+describe('ThemeProvider', () => {
+  it('forces light mode without mounting a theme shortcut', () => {
+    const children = 'App content'
+    const provider = ThemeProvider({ children }) as ReactElement<
+      ThemeProviderProps & { children: ReactNode }
+    >
 
-  it('ignores event-like keydown events that do not include a key', () => {
-    const event = {
-      key: undefined,
-      metaKey: false,
-      ctrlKey: false,
-      altKey: false,
-      target: null,
-    } as unknown as KeyboardEvent
-
-    expect(() => shouldIgnoreThemeHotkey(event)).not.toThrow()
-  })
-
-  it('handles an unmodified D key case-insensitively', () => {
-    vi.stubGlobal('HTMLElement', class {})
-    const event = {
-      key: 'D',
-      metaKey: false,
-      ctrlKey: false,
-      altKey: false,
-      target: null,
-    } as unknown as KeyboardEvent
-
-    expect(shouldIgnoreThemeHotkey(event)).toBe(false)
+    expect(provider.props).toMatchObject({
+      attribute: 'class',
+      forcedTheme: 'light',
+      enableSystem: false,
+    })
+    expect(provider.props.children).toBe(children)
   })
 })
