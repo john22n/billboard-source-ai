@@ -68,3 +68,15 @@ AMP_ISSUE_WEBHOOK_URL=
 `VERCEL_PROJECT_ID`, `VERCEL_DEPLOYMENT_ID`, and `VERCEL_TEAM_ID` come from Vercel system environment variables; enable **Project Settings → Environment Variables → Automatically expose System Environment Variables**. The Vercel API token needs Runtime Logs access.
 
 Load `.amp/plugins/issue-report-webhook.ts` in the Orb thread that should investigate escalated reports, then set its private durable webhook URL as `AMP_ISSUE_WEBHOOK_URL`. The URL is a credential: keep it server-only and never commit or print it. The sender uses each report ID as its idempotency key, and the plugin validates the versioned payload before waking its owning thread.
+
+## Billboard market data
+
+Vercel syncs billboard market pricing from the Market Intel API every Sunday at 11:00 PM Central. Configure these server-only environment variables in Vercel:
+
+```bash
+CRON_SECRET=
+DIALOGS_API_KEY=
+OPENAI_API_KEY=
+```
+
+The cron runs at both possible UTC equivalents and performs the sync only during the matching Central-time hour, so daylight saving time does not shift the local schedule.

@@ -42,7 +42,6 @@ import {
 } from '@/actions/user-actions'
 import { useRouter } from 'next/navigation'
 import type { User, NutshellLead, StoredIssueDiagnosis } from '@/db/schema'
-import { BillboardDataUploader } from '@/components/BillboardDataUploader'
 import {
   handleApiResponse,
   showErrorToast,
@@ -1217,12 +1216,11 @@ export default function AdminClient({
       />
       <Tabs defaultValue="users" className="min-w-0 w-full">
         <TabsList
-          className={`grid h-auto w-full min-w-0 grid-cols-2 mb-6 ${showLeadsTab ? 'sm:grid-cols-5' : 'sm:grid-cols-4'}`}
+          className={`grid h-auto w-full min-w-0 grid-cols-2 mb-6 ${showLeadsTab ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}
         >
           <TabsTrigger value="users">User Accounts</TabsTrigger>
           <TabsTrigger value="costs">User Costs</TabsTrigger>
           <TabsTrigger value="issues">Reported Issues</TabsTrigger>
-          <TabsTrigger value="billboard">Billboard Data</TabsTrigger>
           {showLeadsTab && <TabsTrigger value="leads">CRM Leads</TabsTrigger>}
         </TabsList>
 
@@ -1266,11 +1264,6 @@ export default function AdminClient({
             handleResolveIssue,
           }}
         />
-
-        {/* Billboard Data Tab */}
-        <TabsContent value="billboard" className="w-full">
-          <BillboardDataUploader />
-        </TabsContent>
 
         <LeadsTab
           {...{

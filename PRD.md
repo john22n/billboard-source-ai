@@ -28,7 +28,7 @@ Billboard Source sales reps take inbound advertising inquiries over the phone. T
 | Persona       | Description                                                                                                                                                           |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Sales Rep** | `@billboardsource.com` employees who take inbound billboard advertising calls. Primary daily user of the transcription, form extraction, and CRM submission features. |
-| **Admin**     | Internal staff who manage user accounts, upload billboard market pricing data, and review usage costs across all reps.                                                |
+| **Admin**     | Internal staff who manage user accounts and review usage costs across all reps.                                                                                       |
 
 ---
 
@@ -68,6 +68,7 @@ When a market (city/state) is identified in the conversation, the app performs a
 
 - **Storage:** PostgreSQL + pgvector (512-dim embeddings, HNSW index, cosine similarity)
 - **Embedding model:** `text-embedding-3-small`
+- **Data refresh:** Market Intel API sync and embedding refresh every Sunday at 11:00 PM Central
 - **Coverage:** Bulletin, poster, and digital billboard types with per-type pricing and traffic data
 
 ### 5.4 Inbound Call Routing (Twilio TaskRouter)
@@ -100,7 +101,6 @@ Session costs are logged at call start (status: `pending`) and finalized at call
 Protected admin area for managing the application:
 
 - **User management:** View all users, promote to admin, delete accounts
-- **Billboard data upload:** CSV bulk upload with chunked processing (5,000 records/chunk) and vector embedding generation
 - **Cost visibility:** Per-user cost breakdown for OpenAI and Twilio
 
 ### 5.8 Authentication
@@ -130,7 +130,6 @@ Dual authentication supporting both password-based login and passwordless WebAut
 ### Admin
 
 - As an admin, I want to see how much each rep is spending on AI and phone usage so I can manage costs.
-- As an admin, I want to upload updated billboard pricing data so reps always have current market information.
 - As an admin, I want to promote users to admin and deactivate accounts without touching the database.
 - As an admin, I want voicemail recordings and transcriptions delivered by email so I can review missed calls.
 

@@ -40,8 +40,8 @@ describe('server config', () => {
       TASKROUTER_WORKFLOW_SID: 'workflow-sid',
       TASKROUTER_ACTIVITY_AVAILABLE_SID: 'available-sid',
       TASKROUTER_ACTIVITY_OFFLINE_SID: 'offline-sid',
-      BLOB_READ_WRITE_TOKEN: 'blob-token',
       CRON_SECRET: 'cron-secret',
+      DIALOGS_API_KEY: 'dialogs-key',
       RESEND_API_KEY: 'resend-key',
       VOICEMAIL_NOTIFICATION_EMAIL: 'voicemail@example.com',
       NUTSHELL_API_KEY: 'nutshell-key',
@@ -68,8 +68,8 @@ describe('server config', () => {
     expect(
       config.taskRouter.requireActivitySids(['available', 'offline'] as const),
     ).toEqual({ available: 'available-sid', offline: 'offline-sid' })
-    expect(config.blob.requireReadWriteToken()).toBe('blob-token')
     expect(config.cron.requireSecret()).toBe('cron-secret')
+    expect(config.marketData.requireApiKey()).toBe('dialogs-key')
     expect(config.email.requireResendApiKey()).toBe('resend-key')
     expect(config.voicemail.requireNotificationEmail()).toBe(
       'voicemail@example.com',

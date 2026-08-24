@@ -132,13 +132,13 @@ export interface ServerConfig {
       activities: T,
     ) => Record<T[number], string>
   }
-  blob: {
-    readWriteToken: string | null
-    requireReadWriteToken: () => string
-  }
   cron: {
     secret: string | null
     requireSecret: () => string
+  }
+  marketData: {
+    apiKey: string | null
+    requireApiKey: () => string
   }
   email: {
     resendApiKey: string | null
@@ -365,25 +365,25 @@ export function createServerConfig(env: EnvSource): ServerConfig {
     },
   }
 
-  const blob = {
-    get readWriteToken() {
-      return optionalString(env, 'BLOB_READ_WRITE_TOKEN')
-    },
-    requireReadWriteToken() {
-      return requiredString(
-        env,
-        'BLOB_READ_WRITE_TOKEN',
-        'serverConfig.blob.readWriteToken',
-      )
-    },
-  }
-
   const cron = {
     get secret() {
       return optionalString(env, 'CRON_SECRET')
     },
     requireSecret() {
       return requiredString(env, 'CRON_SECRET', 'serverConfig.cron.secret')
+    },
+  }
+
+  const marketData = {
+    get apiKey() {
+      return optionalString(env, 'DIALOGS_API_KEY')
+    },
+    requireApiKey() {
+      return requiredString(
+        env,
+        'DIALOGS_API_KEY',
+        'serverConfig.marketData.apiKey',
+      )
     },
   }
 
@@ -524,8 +524,8 @@ export function createServerConfig(env: EnvSource): ServerConfig {
     openai,
     twilio,
     taskRouter,
-    blob,
     cron,
+    marketData,
     email,
     voicemail,
     nutshell,
