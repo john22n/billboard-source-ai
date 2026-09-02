@@ -72,6 +72,8 @@ interface TwilioRuntime {
   microphoneWarning: string | null
   microphoneLevel: number
   lastMicrophoneLevelUpdate: number
+  standbyMicrophoneLabel: string
+  standbyMicrophonePending: boolean
 }
 
 interface TwilioCredentials {
@@ -126,6 +128,8 @@ function createRuntime(workerStatus: WorkerActivity): TwilioRuntime {
     microphoneWarning: null,
     microphoneLevel: 0,
     lastMicrophoneLevelUpdate: 0,
+    standbyMicrophoneLabel: '',
+    standbyMicrophonePending: false,
   }
 }
 
@@ -140,12 +144,88 @@ function getReadyStatus(runtime: TwilioRuntime) {
     : 'Offline'
 }
 
-function getIdleMicrophoneState() {
+function getStandbyMicrophoneLabel(runtime: TwilioRuntime) {
+  return (
+    runtime.standbyMicrophoneLabel ||
+    runtime.device?.audio?.inputDevice?.label ||
+    ''
+  )
+}
+
+function getIdleMicrophoneState(runtime: TwilioRuntime) {
   return {
     microphoneStatus: 'idle' as const,
     microphoneLevel: 0,
-    microphoneLabel: '',
+    microphoneLabel: getStandbyMicrophoneLabel(runtime),
     microphoneMessage: null,
+  }
+}
+
+function getStandbyInputDevice(device: Device) {
+  const audio = device.audio
+  if (!audio) return undefined
+
+  const selectedInput = audio.inputDevice
+  if (selectedInput && selectedInput.deviceId !== 'default') {
+    return (
+      audio.availableInputDevices.get(selectedInput.deviceId) ?? selectedInput
+    )
+  }
+
+  const defaultInput = audio.availableInputDevices.get('default')
+  const physicalInputs = Array.from(
+    audio.availableInputDevices.values(),
+  ).filter((input) => input.deviceId !== 'default')
+  return (
+    physicalInputs.find(
+      (input) =>
+        defaultInput?.groupId && input.groupId === defaultInput.groupId,
+    ) ??
+    physicalInputs[0] ??
+    selectedInput ??
+    defaultInput
+  )
+}
+
+function isUnknownMicrophoneLabel(label: string) {
+  return label === 'Default' || label.startsWith('Unknown Audio Input Device')
+}
+
+function canUpdateStandbyMicrophone(runtime: TwilioRuntime, device: Device) {
+  return (
+    isCurrentDevice(runtime, device) &&
+    !runtime.activeCall &&
+    !runtime.acceptingCall
+  )
+}
+
+function publishStandbyMicrophoneLabel(
+  runtime: TwilioRuntime,
+  update: UpdateState,
+  label: string,
+) {
+  runtime.standbyMicrophoneLabel = label
+  update({ microphoneLabel: label })
+}
+
+function getMicrophoneRequester(
+  getUserMedia?: (constraints: MediaStreamConstraints) => Promise<MediaStream>,
+) {
+  if (getUserMedia) return getUserMedia
+  if (typeof navigator === 'undefined') return undefined
+  return navigator.mediaDevices?.getUserMedia.bind(navigator.mediaDevices)
+}
+
+async function readDefaultMicrophoneLabel(
+  requestMicrophone: (
+    constraints: MediaStreamConstraints,
+  ) => Promise<MediaStream>,
+) {
+  const stream = await requestMicrophone({ audio: true })
+  try {
+    return stream.getAudioTracks()[0]?.label
+  } finally {
+    stream.getTracks().forEach((track) => track.stop())
   }
 }
 
@@ -220,6 +300,7 @@ function syncMicrophoneState(
       ? 0
       : runtime.microphoneLevel
   runtime.microphoneLevel = microphoneLevel
+  if (track?.label) runtime.standbyMicrophoneLabel = track.label
 
   update({
     microphoneStatus,
@@ -335,7 +416,7 @@ export async function acceptIncomingCall(
       status: 'Accepting call...',
       microphoneStatus: 'checking',
       microphoneLevel: 0,
-      microphoneLabel: '',
+      microphoneLabel: getStandbyMicrophoneLabel(runtime),
       microphoneMessage: 'Connecting to your microphone...',
     })
 
@@ -397,7 +478,7 @@ export function handleIncomingCall(
   update({
     incomingCall: call,
     status: `Incoming call from ${call.parameters.From}`,
-    ...getIdleMicrophoneState(),
+    ...getIdleMicrophoneState(runtime),
   })
   showIncomingNotification(runtime, update, call)
 
@@ -409,20 +490,20 @@ export function handleIncomingCall(
     update({
       callActive: false,
       incomingCall: null,
-      ...getIdleMicrophoneState(),
+      ...getIdleMicrophoneState(runtime),
     })
     runtime.onCallDisconnected?.()
   })
   call.on('reject', () => {
     closeIncomingNotification(runtime)
-    update({ incomingCall: null, ...getIdleMicrophoneState() })
+    update({ incomingCall: null, ...getIdleMicrophoneState(runtime) })
   })
   call.on('cancel', () => {
     closeIncomingNotification(runtime)
     update({
       incomingCall: null,
       status: 'Call canceled',
-      ...getIdleMicrophoneState(),
+      ...getIdleMicrophoneState(runtime),
     })
   })
   call.on('error', (error: Error) => {
@@ -430,6 +511,46 @@ export function handleIncomingCall(
     closeIncomingNotification(runtime)
     update({ incomingCall: null })
   })
+}
+
+export async function prepareStandbyMicrophone(
+  runtime: TwilioRuntime,
+  update: UpdateState,
+  device: Device,
+  getUserMedia?: (constraints: MediaStreamConstraints) => Promise<MediaStream>,
+) {
+  if (!canUpdateStandbyMicrophone(runtime, device)) return
+
+  const audio = device.audio
+  if (!audio) return
+  const inputDevice = getStandbyInputDevice(device)
+  if (!inputDevice) return
+
+  if (!isUnknownMicrophoneLabel(inputDevice.label)) {
+    publishStandbyMicrophoneLabel(runtime, update, inputDevice.label)
+    return
+  }
+
+  if (runtime.standbyMicrophonePending) return
+  const requestMicrophone = getMicrophoneRequester(getUserMedia)
+  if (!requestMicrophone) return
+
+  runtime.standbyMicrophonePending = true
+  try {
+    const label = await readDefaultMicrophoneLabel(requestMicrophone)
+    if (!label || !canUpdateStandbyMicrophone(runtime, device)) return
+
+    publishStandbyMicrophoneLabel(runtime, update, label)
+  } catch (error) {
+    console.error('Failed to read standby microphone label:', error)
+    if (canUpdateStandbyMicrophone(runtime, device)) {
+      update({
+        microphoneMessage: 'Allow microphone access to show the source label.',
+      })
+    }
+  } finally {
+    runtime.standbyMicrophonePending = false
+  }
 }
 
 function handleDeviceRegistered(
@@ -447,6 +568,7 @@ function handleDeviceRegistered(
     status: getReadyStatus(runtime),
     deviceError: null,
   })
+  void prepareStandbyMicrophone(runtime, update, device)
 }
 
 function handleDeviceUnregistered(
@@ -495,6 +617,9 @@ function bindDeviceEvents(
   })
   device.on('tokenWillExpire', () => {
     void refreshTwilioToken(runtime, update, device)
+  })
+  device.audio?.on('deviceChange', () => {
+    void prepareStandbyMicrophone(runtime, update, device)
   })
 }
 
@@ -832,7 +957,7 @@ function destroyTwilioDevice(runtime: TwilioRuntime, update: UpdateState) {
     callActive: false,
     deviceError: null,
     status: 'Idle',
-    ...getIdleMicrophoneState(),
+    ...getIdleMicrophoneState(runtime),
   })
 }
 
@@ -858,7 +983,7 @@ function createCallActions(
       update({
         incomingCall: null,
         status: state.twilioReady ? getReadyStatus(runtime) : 'Idle',
-        ...getIdleMicrophoneState(),
+        ...getIdleMicrophoneState(runtime),
       })
     },
     hangupCall: () => {
@@ -866,7 +991,7 @@ function createCallActions(
       runtime.activeCall.disconnect()
       runtime.activeCall = null
       clearMicrophoneMonitoring(runtime)
-      update({ callActive: false, ...getIdleMicrophoneState() })
+      update({ callActive: false, ...getIdleMicrophoneState(runtime) })
       runtime.onCallDisconnected?.()
     },
   }
