@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# This repository has no local backing services or per-thread authentication to
+# repair when an orb wakes. Dependencies and toolchains belong in setup only.
+printf 'No orb resume steps required.\n'

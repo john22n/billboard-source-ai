@@ -181,3 +181,6 @@ next-env.d.ts
 # claude
 .claude/
 .fallow/
+
+# Amp orb runtime
+.amp/portals/
