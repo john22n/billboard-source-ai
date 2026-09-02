@@ -1,17 +1,29 @@
 import { EventEmitter } from 'node:events'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+const { sendTwilioClientTelemetry } = vi.hoisted(() => ({
+  sendTwilioClientTelemetry: vi.fn(),
+}))
+
 vi.mock('@/hooks/useWorkerStatus', () => ({
   useWorkerStatus: vi.fn(),
+}))
+
+vi.mock('@/lib/twilio-client-telemetry', async () => ({
+  ...(await vi.importActual('../../lib/twilio-client-telemetry')),
+  sendTwilioClientTelemetry,
 }))
 
 import {
   acceptIncomingCall,
   canShowIncomingNotification,
   disposeTwilioRuntime,
+  getDeviceRecoveryReason,
   handleIncomingCall,
+  holdTwilioDeviceOwnership,
   monitorCallMicrophone,
   prepareStandbyMicrophone,
+  recoverTwilioDevice,
   refreshTwilioToken,
 } from './TwilioProvider'
 
@@ -53,7 +65,12 @@ function createRefreshRuntime(device: RefreshDevice): RefreshRuntime {
     device,
     activeCall: null,
     acceptingCall: null,
+    incomingCall: null,
     tokenRefresh: null,
+    deviceRecovery: null,
+    tabOwnership: null,
+    hasDeviceOwnership: false,
+    tabId: 'test-tab',
     notification: null,
     initializing: false,
     initialized: true,
@@ -112,7 +129,10 @@ describe('canShowIncomingNotification', () => {
 
 describe('acceptIncomingCall', () => {
   afterEach(() => {
+    vi.useRealTimers()
     vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+    sendTwilioClientTelemetry.mockClear()
   })
 
   it('does not reactivate a call that disconnects while accept is settling', async () => {
@@ -152,10 +172,16 @@ describe('acceptIncomingCall', () => {
   it('marks a call active only after Twilio confirms media acceptance', async () => {
     const { call: microphoneCall, events } = createMicrophoneCall()
     const call = Object.assign(microphoneCall, {
+      direction: 'INCOMING',
+      parameters: { CallSid: 'CA-test-call' },
       accept: vi.fn(),
+      status: vi.fn(() => 'pending'),
     })
     const runtime = createRefreshRuntime({
       state: 'registered',
+      edge: 'ashburn',
+      isBusy: false,
+      calls: [call],
     } as unknown as RefreshDevice) as MicrophoneRuntime
     const onCallAccepted = vi.fn()
     const update = vi.fn()
@@ -186,6 +212,320 @@ describe('acceptIncomingCall', () => {
       }),
     )
     expect(onCallAccepted).toHaveBeenCalledWith(call)
+    expect(sendTwilioClientTelemetry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'call-accept-start',
+        tabId: 'test-tab',
+        device: expect.objectContaining({
+          state: 'registered',
+          isBusy: false,
+          callCount: 1,
+        }),
+        call: expect.objectContaining({
+          sid: 'CA-test-call',
+          status: 'pending',
+        }),
+      }),
+    )
+    expect(sendTwilioClientTelemetry).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'call-accepted' }),
+    )
+  })
+
+  it('times out a stalled acceptance and releases the call for recovery', async () => {
+    vi.useFakeTimers()
+    type IncomingRuntime = Parameters<typeof handleIncomingCall>[0]
+    type IncomingCall = Parameters<typeof handleIncomingCall>[2]
+    const events = new EventEmitter()
+    const call = {
+      direction: 'INCOMING',
+      parameters: { CallSid: 'CA-stalled', From: '+15555550123' },
+      on: vi.fn(events.on.bind(events)),
+      removeListener: vi.fn(events.removeListener.bind(events)),
+      accept: vi.fn(),
+      disconnect: vi.fn(),
+      status: vi.fn(() => 'pending'),
+    } as unknown as IncomingCall
+    const runtime = createRefreshRuntime({
+      calls: [call],
+      isBusy: true,
+      state: 'registered',
+    } as unknown as RefreshDevice) as IncomingRuntime
+    const onCallDisconnected = vi.fn()
+    const update = vi.fn()
+    runtime.onCallDisconnected = onCallDisconnected
+    vi.stubGlobal('window', {})
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    handleIncomingCall(runtime, update, call)
+    const acceptance = acceptIncomingCall(runtime, update, call)
+    await vi.advanceTimersByTimeAsync(10_000)
+    await acceptance
+
+    expect(call.disconnect).toHaveBeenCalledOnce()
+    expect(runtime.acceptingCall).toBeNull()
+    expect(runtime.incomingCall).toBeNull()
+    expect(onCallDisconnected).toHaveBeenCalledOnce()
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        callActive: false,
+        incomingCall: null,
+        status: 'Failed to accept call',
+      }),
+    )
+    expect(sendTwilioClientTelemetry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'call-accept-error',
+        error: expect.objectContaining({
+          name: 'CallAcceptanceTimeoutError',
+        }),
+      }),
+    )
+  })
+
+  it('clears an accepting call when Twilio cancels it', async () => {
+    type IncomingRuntime = Parameters<typeof handleIncomingCall>[0]
+    type IncomingCall = Parameters<typeof handleIncomingCall>[2]
+    const events = new EventEmitter()
+    const call = {
+      parameters: { CallSid: 'CA-canceled', From: '+15555550123' },
+      on: vi.fn(events.on.bind(events)),
+      removeListener: vi.fn(events.removeListener.bind(events)),
+      accept: vi.fn(),
+      status: vi.fn(() => 'pending'),
+    } as unknown as IncomingCall
+    const runtime = createRefreshRuntime({
+      state: 'registered',
+    } as unknown as RefreshDevice) as IncomingRuntime
+    const update = vi.fn()
+    vi.stubGlobal('window', {})
+
+    handleIncomingCall(runtime, update, call)
+    const acceptance = acceptIncomingCall(runtime, update, call)
+    events.emit('cancel', call)
+    await acceptance
+
+    expect(runtime.acceptingCall).toBeNull()
+    expect(runtime.incomingCall).toBeNull()
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'Call canceled' }),
+    )
+  })
+
+  it('ignores a delayed disconnect from an older call', () => {
+    type IncomingRuntime = Parameters<typeof handleIncomingCall>[0]
+    type IncomingCall = Parameters<typeof handleIncomingCall>[2]
+    const events = new EventEmitter()
+    const oldCall = {
+      parameters: { CallSid: 'CA-old', From: '+15555550123' },
+      on: vi.fn(events.on.bind(events)),
+      status: vi.fn(() => 'closed'),
+    } as unknown as IncomingCall
+    const newerCall = {} as IncomingCall
+    const runtime = createRefreshRuntime({
+      state: 'registered',
+    } as unknown as RefreshDevice) as IncomingRuntime
+    const onCallDisconnected = vi.fn()
+    const update = vi.fn()
+    runtime.onCallDisconnected = onCallDisconnected
+    vi.stubGlobal('window', {})
+
+    handleIncomingCall(runtime, update, oldCall)
+    runtime.incomingCall = null
+    runtime.activeCall = newerCall
+    update.mockClear()
+    events.emit('disconnect', oldCall)
+
+    expect(runtime.activeCall).toBe(newerCall)
+    expect(update).not.toHaveBeenCalled()
+    expect(onCallDisconnected).not.toHaveBeenCalled()
+  })
+
+  it('truncates SDK errors to the server telemetry contract', async () => {
+    type IncomingRuntime = Parameters<typeof handleIncomingCall>[0]
+    type IncomingCall = Parameters<typeof handleIncomingCall>[2]
+    const events = new EventEmitter()
+    const error = Object.assign(new Error('m'.repeat(700)), {
+      name: 'n'.repeat(200),
+      code: 'c'.repeat(100),
+    })
+    const call = {
+      direction: 'd'.repeat(50),
+      parameters: {
+        CallSid: 's'.repeat(100),
+        From: '+15555550123',
+      },
+      on: vi.fn(events.on.bind(events)),
+      removeListener: vi.fn(events.removeListener.bind(events)),
+      accept: vi.fn(() => {
+        throw error
+      }),
+      disconnect: vi.fn(),
+      status: vi.fn(() => 'p'.repeat(50)),
+    } as unknown as IncomingCall
+    const runtime = createRefreshRuntime({
+      calls: [call],
+      edge: 'e'.repeat(100),
+      state: 'r'.repeat(50),
+    } as unknown as RefreshDevice) as IncomingRuntime
+    vi.stubGlobal('window', {})
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    handleIncomingCall(runtime, vi.fn(), call)
+    await acceptIncomingCall(runtime, vi.fn(), call)
+
+    const payload = sendTwilioClientTelemetry.mock.calls
+      .map(([event]) => event)
+      .find((event) => event.event === 'call-accept-error')
+    expect(payload).toMatchObject({
+      call: {
+        sid: 's'.repeat(64),
+        direction: 'd'.repeat(32),
+        status: 'p'.repeat(32),
+      },
+      device: {
+        state: 'r'.repeat(32),
+        edge: 'e'.repeat(64),
+      },
+      error: {
+        name: 'n'.repeat(128),
+        message: 'm'.repeat(500),
+        code: 'c'.repeat(64),
+      },
+    })
+  })
+})
+
+function createExclusiveLockManager() {
+  let previousRequest = Promise.resolve<unknown>(undefined)
+  return {
+    request: vi.fn(
+      (
+        name: string,
+        _options: LockOptions,
+        callback: (lock: Lock) => unknown,
+      ) => {
+        const request = previousRequest.then(() =>
+          callback({ name, mode: 'exclusive' }),
+        )
+        previousRequest = request.then(
+          () => undefined,
+          () => undefined,
+        )
+        return request
+      },
+    ),
+  } as unknown as LockManager
+}
+
+describe('Twilio device ownership', () => {
+  it('allows only one tab to initialize the Twilio device at a time', async () => {
+    const lockManager = createExclusiveLockManager()
+    const firstRuntime = createRefreshRuntime({
+      destroy: vi.fn(),
+      state: 'registered',
+    } as unknown as RefreshDevice)
+    const secondRuntime = createRefreshRuntime({
+      destroy: vi.fn(),
+      state: 'registered',
+    } as unknown as RefreshDevice)
+    const firstInitialize = vi.fn().mockResolvedValue(true)
+    const secondInitialize = vi.fn().mockResolvedValue(true)
+
+    const firstOwnership = holdTwilioDeviceOwnership(
+      firstRuntime,
+      vi.fn(),
+      lockManager,
+      firstInitialize,
+    )
+    const secondOwnership = holdTwilioDeviceOwnership(
+      secondRuntime,
+      vi.fn(),
+      lockManager,
+      secondInitialize,
+    )
+
+    await vi.waitFor(() => expect(firstInitialize).toHaveBeenCalledOnce())
+    expect(secondInitialize).not.toHaveBeenCalled()
+    expect(firstRuntime.hasDeviceOwnership).toBe(true)
+    expect(secondRuntime.hasDeviceOwnership).toBe(false)
+
+    disposeTwilioRuntime(firstRuntime)
+    await vi.waitFor(() => expect(secondInitialize).toHaveBeenCalledOnce())
+    expect(secondRuntime.hasDeviceOwnership).toBe(true)
+
+    disposeTwilioRuntime(secondRuntime)
+    await Promise.all([firstOwnership, secondOwnership])
+  })
+
+  it('fails closed when the browser cannot coordinate tabs', async () => {
+    const runtime = createRefreshRuntime({
+      state: 'registered',
+    } as unknown as RefreshDevice)
+    const initialize = vi.fn().mockResolvedValue(true)
+    const update = vi.fn()
+
+    await holdTwilioDeviceOwnership(runtime, update, null, initialize)
+
+    expect(initialize).not.toHaveBeenCalled()
+    expect(runtime.hasDeviceOwnership).toBe(false)
+    expect(update).toHaveBeenLastCalledWith({
+      twilioReady: false,
+      status: 'Calling unavailable in this browser',
+      deviceError:
+        'Safe call coordination is unavailable. Update Chrome and reload this page.',
+    })
+  })
+})
+
+describe('Twilio device recovery', () => {
+  it('rebuilds a device that is busy without an app-owned call', async () => {
+    const destroy = vi.fn()
+    const device = {
+      calls: [],
+      destroy,
+      isBusy: true,
+      state: 'registered',
+    } as unknown as RefreshDevice
+    const runtime = createRefreshRuntime(device)
+    const startDevice = vi.fn().mockResolvedValue(true)
+    runtime.hasDeviceOwnership = true
+
+    expect(getDeviceRecoveryReason(runtime)).toBe(
+      'device-busy-without-active-call',
+    )
+    await expect(
+      recoverTwilioDevice(
+        runtime,
+        vi.fn(),
+        'device-busy-without-active-call',
+        startDevice,
+      ),
+    ).resolves.toBe(true)
+
+    expect(destroy).toHaveBeenCalledOnce()
+    expect(startDevice).toHaveBeenCalledOnce()
+    expect(sendTwilioClientTelemetry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'device-recovery-start',
+        reason: 'device-busy-without-active-call',
+      }),
+    )
+    expect(sendTwilioClientTelemetry).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'device-recovery-succeeded' }),
+    )
+  })
+
+  it('does not recover while the app owns an active call', () => {
+    const device = {
+      calls: [],
+      isBusy: true,
+      state: 'registered',
+    } as unknown as RefreshDevice
+    const runtime = createRefreshRuntime(device)
+    runtime.activeCall = {} as NonNullable<typeof runtime.activeCall>
+
+    expect(getDeviceRecoveryReason(runtime)).toBeNull()
   })
 })
 
