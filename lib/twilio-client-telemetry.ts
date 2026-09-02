@@ -30,7 +30,7 @@ export const TWILIO_CLIENT_TELEMETRY_LIMITS = {
   deviceCallCount: 100,
   deviceCalls: 10,
   errorName: 128,
-  errorMessage: 500,
+  errorMessageMaxLength: 500,
   errorCode: 64,
 } as const
 

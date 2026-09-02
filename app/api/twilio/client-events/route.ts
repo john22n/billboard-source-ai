@@ -30,7 +30,7 @@ const telemetrySchema = z.object({
   error: z
     .object({
       name: z.string().max(limits.errorName),
-      message: z.string().max(limits.errorMessage),
+      message: z.string().max(limits.errorMessageMaxLength),
       code: z.union([z.number(), z.string().max(limits.errorCode)]).optional(),
     })
     .optional(),

@@ -238,7 +238,10 @@ function getErrorSnapshot(error: unknown) {
       0,
       telemetryLimits.errorName,
     ),
-    message: getErrorMessage(error).slice(0, telemetryLimits.errorMessage),
+    message: getErrorMessage(error).slice(
+      0,
+      telemetryLimits.errorMessageMaxLength,
+    ),
     code:
       typeof code === 'string'
         ? code.slice(0, telemetryLimits.errorCode)
