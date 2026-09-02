@@ -1,16 +1,27 @@
 import { EventEmitter } from 'node:events'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+const { sendTwilioClientTelemetry } = vi.hoisted(() => ({
+  sendTwilioClientTelemetry: vi.fn(),
+}))
+
 vi.mock('@/hooks/useWorkerStatus', () => ({
   useWorkerStatus: vi.fn(),
+}))
+
+vi.mock('@/lib/twilio-client-telemetry', () => ({
+  sendTwilioClientTelemetry,
 }))
 
 import {
   acceptIncomingCall,
   canShowIncomingNotification,
   disposeTwilioRuntime,
+  getDeviceRecoveryReason,
   handleIncomingCall,
+  holdTwilioDeviceOwnership,
   monitorCallMicrophone,
+  recoverTwilioDevice,
   refreshTwilioToken,
 } from './TwilioProvider'
 
@@ -52,7 +63,12 @@ function createRefreshRuntime(device: RefreshDevice): RefreshRuntime {
     device,
     activeCall: null,
     acceptingCall: null,
+    incomingCall: null,
     tokenRefresh: null,
+    deviceRecovery: null,
+    tabOwnership: null,
+    hasDeviceOwnership: false,
+    tabId: 'test-tab',
     notification: null,
     initializing: false,
     initialized: true,
@@ -110,6 +126,7 @@ describe('canShowIncomingNotification', () => {
 describe('acceptIncomingCall', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
+    sendTwilioClientTelemetry.mockClear()
   })
 
   it('does not reactivate a call that disconnects while accept is settling', async () => {
@@ -149,10 +166,16 @@ describe('acceptIncomingCall', () => {
   it('marks a call active only after Twilio confirms media acceptance', async () => {
     const { call: microphoneCall, events } = createMicrophoneCall()
     const call = Object.assign(microphoneCall, {
+      direction: 'INCOMING',
+      parameters: { CallSid: 'CA-test-call' },
       accept: vi.fn(),
+      status: vi.fn(() => 'pending'),
     })
     const runtime = createRefreshRuntime({
       state: 'registered',
+      edge: 'ashburn',
+      isBusy: false,
+      calls: [call],
     } as unknown as RefreshDevice) as MicrophoneRuntime
     const onCallAccepted = vi.fn()
     const update = vi.fn()
@@ -183,6 +206,133 @@ describe('acceptIncomingCall', () => {
       }),
     )
     expect(onCallAccepted).toHaveBeenCalledWith(call)
+    expect(sendTwilioClientTelemetry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'call-accept-start',
+        tabId: 'test-tab',
+        device: expect.objectContaining({
+          state: 'registered',
+          isBusy: false,
+          callCount: 1,
+        }),
+        call: expect.objectContaining({
+          sid: 'CA-test-call',
+          status: 'pending',
+        }),
+      }),
+    )
+    expect(sendTwilioClientTelemetry).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'call-accepted' }),
+    )
+  })
+})
+
+function createExclusiveLockManager() {
+  let previousRequest = Promise.resolve<unknown>(undefined)
+  return {
+    request: vi.fn(
+      (
+        name: string,
+        _options: LockOptions,
+        callback: (lock: Lock) => unknown,
+      ) => {
+        const request = previousRequest.then(() =>
+          callback({ name, mode: 'exclusive' }),
+        )
+        previousRequest = request.then(
+          () => undefined,
+          () => undefined,
+        )
+        return request
+      },
+    ),
+  } as unknown as LockManager
+}
+
+describe('Twilio device ownership', () => {
+  it('allows only one tab to initialize the Twilio device at a time', async () => {
+    const lockManager = createExclusiveLockManager()
+    const firstRuntime = createRefreshRuntime({
+      destroy: vi.fn(),
+      state: 'registered',
+    } as unknown as RefreshDevice)
+    const secondRuntime = createRefreshRuntime({
+      destroy: vi.fn(),
+      state: 'registered',
+    } as unknown as RefreshDevice)
+    const firstInitialize = vi.fn().mockResolvedValue(true)
+    const secondInitialize = vi.fn().mockResolvedValue(true)
+
+    const firstOwnership = holdTwilioDeviceOwnership(
+      firstRuntime,
+      vi.fn(),
+      lockManager,
+      firstInitialize,
+    )
+    const secondOwnership = holdTwilioDeviceOwnership(
+      secondRuntime,
+      vi.fn(),
+      lockManager,
+      secondInitialize,
+    )
+
+    await vi.waitFor(() => expect(firstInitialize).toHaveBeenCalledOnce())
+    expect(secondInitialize).not.toHaveBeenCalled()
+    expect(firstRuntime.hasDeviceOwnership).toBe(true)
+    expect(secondRuntime.hasDeviceOwnership).toBe(false)
+
+    disposeTwilioRuntime(firstRuntime)
+    await vi.waitFor(() => expect(secondInitialize).toHaveBeenCalledOnce())
+    expect(secondRuntime.hasDeviceOwnership).toBe(true)
+
+    disposeTwilioRuntime(secondRuntime)
+    await Promise.all([firstOwnership, secondOwnership])
+  })
+})
+
+describe('Twilio device recovery', () => {
+  it('rebuilds a device that is busy without an app-owned call', async () => {
+    const destroy = vi.fn()
+    const device = {
+      calls: [],
+      destroy,
+      isBusy: true,
+      state: 'registered',
+    } as unknown as RefreshDevice
+    const runtime = createRefreshRuntime(device)
+    const startDevice = vi.fn().mockResolvedValue(true)
+    runtime.hasDeviceOwnership = true
+
+    expect(getDeviceRecoveryReason(runtime)).toBe(
+      'device-busy-without-active-call',
+    )
+    await expect(
+      recoverTwilioDevice(runtime, vi.fn(), 'health-check', startDevice),
+    ).resolves.toBe(true)
+
+    expect(destroy).toHaveBeenCalledOnce()
+    expect(startDevice).toHaveBeenCalledOnce()
+    expect(sendTwilioClientTelemetry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'device-recovery-start',
+        reason: 'health-check',
+      }),
+    )
+    expect(sendTwilioClientTelemetry).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'device-recovery-succeeded' }),
+    )
+  })
+
+  it('does not recover while the app owns an active call', () => {
+    const device = {
+      calls: [],
+      isBusy: true,
+      state: 'registered',
+    } as unknown as RefreshDevice
+    const runtime = createRefreshRuntime(device)
+    runtime.activeCall = {} as NonNullable<typeof runtime.activeCall>
+
+    expect(getDeviceRecoveryReason(runtime)).toBeNull()
   })
 })
 
