@@ -7,26 +7,9 @@ const { getSession, rateLimit } = vi.hoisted(() => ({
 
 vi.mock('@/lib/auth', () => ({ getSession }))
 vi.mock('@/lib/rate-limit', () => ({ rateLimit }))
-vi.mock('@/lib/twilio-client-telemetry', () => ({
-  TWILIO_CLIENT_EVENT_NAMES: [
-    'tab-ownership-waiting',
-    'tab-ownership-acquired',
-    'tab-coordination-unavailable',
-    'device-registered',
-    'device-error',
-    'device-recovery-start',
-    'device-recovery-succeeded',
-    'device-recovery-failed',
-    'call-incoming',
-    'call-accept-start',
-    'call-accepted',
-    'call-accept-ended',
-    'call-accept-error',
-    'call-disconnected',
-    'call-canceled',
-    'call-error',
-  ],
-}))
+vi.mock('@/lib/twilio-client-telemetry', async () =>
+  vi.importActual('../../../../lib/twilio-client-telemetry'),
+)
 
 import { POST } from './route'
 

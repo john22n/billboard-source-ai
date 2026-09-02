@@ -1,32 +1,37 @@
 import { z } from 'zod'
 import { getSession } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
-import { TWILIO_CLIENT_EVENT_NAMES } from '@/lib/twilio-client-telemetry'
+import {
+  TWILIO_CLIENT_EVENT_NAMES,
+  TWILIO_CLIENT_TELEMETRY_LIMITS,
+} from '@/lib/twilio-client-telemetry'
+
+const limits = TWILIO_CLIENT_TELEMETRY_LIMITS
 
 const callSnapshotSchema = z.object({
-  sid: z.string().max(64).nullable(),
-  direction: z.string().max(32).nullable(),
-  status: z.string().max(32).nullable(),
+  sid: z.string().max(limits.callSid).nullable(),
+  direction: z.string().max(limits.callDirection).nullable(),
+  status: z.string().max(limits.callStatus).nullable(),
 })
 
 const telemetrySchema = z.object({
   event: z.enum(TWILIO_CLIENT_EVENT_NAMES),
   occurredAt: z.string().datetime(),
-  tabId: z.string().min(1).max(64),
-  reason: z.string().max(128).optional(),
+  tabId: z.string().min(1).max(limits.tabId),
+  reason: z.string().max(limits.reason).optional(),
   device: z.object({
-    state: z.string().max(32).nullable(),
+    state: z.string().max(limits.deviceState).nullable(),
     isBusy: z.boolean().nullable(),
-    edge: z.string().max(64).nullable(),
-    callCount: z.number().int().min(0).max(100),
-    calls: z.array(callSnapshotSchema).max(10),
+    edge: z.string().max(limits.deviceEdge).nullable(),
+    callCount: z.number().int().min(0).max(limits.deviceCallCount),
+    calls: z.array(callSnapshotSchema).max(limits.deviceCalls),
   }),
   call: callSnapshotSchema.optional(),
   error: z
     .object({
-      name: z.string().max(128),
-      message: z.string().max(500),
-      code: z.union([z.number(), z.string().max(64)]).optional(),
+      name: z.string().max(limits.errorName),
+      message: z.string().max(limits.errorMessage),
+      code: z.union([z.number(), z.string().max(limits.errorCode)]).optional(),
     })
     .optional(),
 })

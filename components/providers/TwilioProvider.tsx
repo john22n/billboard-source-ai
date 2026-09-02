@@ -14,6 +14,7 @@ import { Call, Device } from '@twilio/voice-sdk'
 import { useWorkerStatus, type WorkerActivity } from '@/hooks/useWorkerStatus'
 import {
   sendTwilioClientTelemetry,
+  TWILIO_CLIENT_TELEMETRY_LIMITS,
   type TwilioCallSnapshot,
   type TwilioClientEventName,
   type TwilioDeviceSnapshot,
@@ -87,7 +88,6 @@ interface TwilioRuntime {
 
 interface TwilioTabOwnership {
   abortController: AbortController
-  acquired: boolean
   release: () => void
   released: Promise<void>
 }
@@ -99,6 +99,15 @@ interface TwilioCredentials {
 }
 
 type UpdateState = Dispatch<Partial<TwilioState>>
+
+type TwilioDeviceRecoveryReason =
+  | 'device-missing'
+  | 'device-destroyed'
+  | 'device-busy-without-active-call'
+  | 'device-has-untracked-calls'
+  | 'call-ended-during-accept'
+  | 'call-accept-error'
+  | 'call-accept-timeout'
 
 const initialState: TwilioState = {
   status: 'Idle',
@@ -120,6 +129,15 @@ const ACCESS_TOKEN_INVALID_ERROR_CODE = 20101
 const CONSTANT_AUDIO_INPUT_WARNING = 'constant-audio-input-level'
 const MICROPHONE_VOLUME_UPDATE_MS = 150
 const TWILIO_DEVICE_LOCK_NAME = 'billboard-source-twilio-device'
+const CALL_ACCEPT_TIMEOUT_MS = 10_000
+const telemetryLimits = TWILIO_CLIENT_TELEMETRY_LIMITS
+
+class CallAcceptanceTimeoutError extends Error {
+  constructor() {
+    super('Twilio did not confirm call acceptance within 10 seconds')
+    this.name = 'CallAcceptanceTimeoutError'
+  }
+}
 
 function updateTwilioState(
   state: TwilioState,
@@ -160,6 +178,10 @@ function createTabId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
+function truncateTelemetryValue(value: string | null, maxLength: number) {
+  return value?.slice(0, maxLength) ?? null
+}
+
 function getCallSnapshot(call: Call): TwilioCallSnapshot {
   let status: string | null = null
   try {
@@ -170,9 +192,15 @@ function getCallSnapshot(call: Call): TwilioCallSnapshot {
   }
 
   return {
-    sid: call.parameters.CallSid ?? null,
-    direction: call.direction ?? null,
-    status,
+    sid: truncateTelemetryValue(
+      call.parameters.CallSid ?? null,
+      telemetryLimits.callSid,
+    ),
+    direction: truncateTelemetryValue(
+      call.direction ?? null,
+      telemetryLimits.callDirection,
+    ),
+    status: truncateTelemetryValue(status, telemetryLimits.callStatus),
   }
 }
 
@@ -188,20 +216,33 @@ function getDeviceCalls(device: Device | null) {
 function getDeviceSnapshot(device: Device | null): TwilioDeviceSnapshot {
   const calls = getDeviceCalls(device)
   return {
-    state: device?.state ?? null,
+    state: truncateTelemetryValue(
+      device?.state ?? null,
+      telemetryLimits.deviceState,
+    ),
     isBusy: device?.isBusy ?? null,
-    edge: device?.edge ?? null,
-    callCount: calls.length,
-    calls: calls.slice(0, 10).map(getCallSnapshot),
+    edge: truncateTelemetryValue(
+      device?.edge ?? null,
+      telemetryLimits.deviceEdge,
+    ),
+    callCount: Math.min(calls.length, telemetryLimits.deviceCallCount),
+    calls: calls.slice(0, telemetryLimits.deviceCalls).map(getCallSnapshot),
   }
 }
 
 function getErrorSnapshot(error: unknown) {
   if (error === undefined) return undefined
+  const code = getErrorCode(error)
   return {
-    name: error instanceof Error ? error.name : 'UnknownError',
-    message: getErrorMessage(error),
-    code: getErrorCode(error),
+    name: (error instanceof Error ? error.name : 'UnknownError').slice(
+      0,
+      telemetryLimits.errorName,
+    ),
+    message: getErrorMessage(error).slice(0, telemetryLimits.errorMessage),
+    code:
+      typeof code === 'string'
+        ? code.slice(0, telemetryLimits.errorCode)
+        : code,
   }
 }
 
@@ -213,8 +254,8 @@ function reportTwilioClientEvent(
   sendTwilioClientTelemetry({
     event,
     occurredAt: new Date().toISOString(),
-    tabId: runtime.tabId,
-    reason: options.reason,
+    tabId: runtime.tabId.slice(0, telemetryLimits.tabId),
+    reason: options.reason?.slice(0, telemetryLimits.reason),
     device: getDeviceSnapshot(runtime.device),
     call: options.call ? getCallSnapshot(options.call) : undefined,
     error: getErrorSnapshot(options.error),
@@ -389,6 +430,7 @@ export function monitorCallMicrophone(
 function waitForCallAcceptance(call: Call) {
   return new Promise<boolean>((resolve, reject) => {
     const cleanup = () => {
+      clearTimeout(timeout)
       call.removeListener('accept', handleAccept)
       call.removeListener('disconnect', handleClose)
       call.removeListener('cancel', handleClose)
@@ -407,6 +449,10 @@ function waitForCallAcceptance(call: Call) {
       reject(error)
     }
 
+    const timeout = setTimeout(
+      () => handleError(new CallAcceptanceTimeoutError()),
+      CALL_ACCEPT_TIMEOUT_MS,
+    )
     call.on('accept', handleAccept)
     call.on('disconnect', handleClose)
     call.on('cancel', handleClose)
@@ -418,6 +464,47 @@ function waitForCallAcceptance(call: Call) {
       reject(error)
     }
   })
+}
+
+async function handleCallAcceptanceFailure(
+  runtime: TwilioRuntime,
+  update: UpdateState,
+  call: Call,
+  error: unknown,
+) {
+  console.error('Error accepting Twilio call:', error)
+  reportTwilioClientEvent(runtime, 'call-accept-error', { call, error })
+  const ownedCallState =
+    runtime.acceptingCall === call || runtime.incomingCall === call
+  if (runtime.acceptingCall === call) runtime.acceptingCall = null
+  if (runtime.incomingCall === call) runtime.incomingCall = null
+  closeIncomingNotification(runtime)
+  try {
+    call.disconnect()
+  } catch (disconnectError) {
+    console.warn(
+      'Failed to disconnect unaccepted Twilio call:',
+      disconnectError,
+    )
+  }
+  update({
+    status: 'Failed to accept call',
+    callActive: false,
+    incomingCall: null,
+    microphoneStatus: 'disconnected',
+    microphoneLevel: 0,
+    microphoneLabel: '',
+    microphoneMessage:
+      'The microphone did not connect. Check browser permission and your input device.',
+  })
+  if (ownedCallState) runtime.onCallDisconnected?.()
+  await recoverTwilioDevice(
+    runtime,
+    update,
+    error instanceof CallAcceptanceTimeoutError
+      ? 'call-accept-timeout'
+      : 'call-accept-error',
+  )
 }
 
 export async function acceptIncomingCall(
@@ -458,18 +545,7 @@ export async function acceptIncomingCall(
     reportTwilioClientEvent(runtime, 'call-accepted', { call })
     runtime.onCallAccepted?.(call)
   } catch (error) {
-    console.error('Error accepting Twilio call:', error)
-    reportTwilioClientEvent(runtime, 'call-accept-error', { call, error })
-    if (runtime.acceptingCall === call) runtime.acceptingCall = null
-    update({
-      status: 'Failed to accept call',
-      microphoneStatus: 'disconnected',
-      microphoneLevel: 0,
-      microphoneLabel: '',
-      microphoneMessage:
-        'The microphone did not connect. Check browser permission and your input device.',
-    })
-    await recoverTwilioDevice(runtime, update, 'call-accept-error')
+    await handleCallAcceptanceFailure(runtime, update, call, error)
   } finally {
     if (runtime.acceptingCall === call) runtime.acceptingCall = null
   }
@@ -517,11 +593,18 @@ export function handleIncomingCall(
 
   call.on('disconnect', () => {
     reportTwilioClientEvent(runtime, 'call-disconnected', { call })
+    const wasAccepting = runtime.acceptingCall === call
+    const wasIncoming = runtime.incomingCall === call
+    const wasActive = runtime.activeCall === call
+    if (!wasAccepting && !wasIncoming && !wasActive) return
+
     closeIncomingNotification(runtime)
-    if (runtime.acceptingCall === call) runtime.acceptingCall = null
-    if (runtime.incomingCall === call) runtime.incomingCall = null
-    runtime.activeCall = null
-    clearMicrophoneMonitoring(runtime)
+    if (wasAccepting) runtime.acceptingCall = null
+    if (wasIncoming) runtime.incomingCall = null
+    if (wasActive) {
+      runtime.activeCall = null
+      clearMicrophoneMonitoring(runtime)
+    }
     update({
       callActive: false,
       incomingCall: null,
@@ -530,14 +613,20 @@ export function handleIncomingCall(
     runtime.onCallDisconnected?.()
   })
   call.on('reject', () => {
+    if (runtime.incomingCall !== call) return
     closeIncomingNotification(runtime)
-    if (runtime.incomingCall === call) runtime.incomingCall = null
+    runtime.incomingCall = null
     update({ incomingCall: null, ...getIdleMicrophoneState() })
   })
   call.on('cancel', () => {
     reportTwilioClientEvent(runtime, 'call-canceled', { call })
+    const wasAccepting = runtime.acceptingCall === call
+    const wasIncoming = runtime.incomingCall === call
+    if (!wasAccepting && !wasIncoming) return
+
     closeIncomingNotification(runtime)
-    if (runtime.incomingCall === call) runtime.incomingCall = null
+    if (wasAccepting) runtime.acceptingCall = null
+    if (wasIncoming) runtime.incomingCall = null
     update({
       incomingCall: null,
       status: 'Call canceled',
@@ -547,8 +636,11 @@ export function handleIncomingCall(
   call.on('error', (error: Error) => {
     console.error('Twilio call error:', error)
     reportTwilioClientEvent(runtime, 'call-error', { call, error })
+    if (runtime.acceptingCall === call) return
+    if (runtime.incomingCall !== call) return
+
     closeIncomingNotification(runtime)
-    if (runtime.incomingCall === call) runtime.incomingCall = null
+    runtime.incomingCall = null
     update({ incomingCall: null })
   })
 }
@@ -926,7 +1018,7 @@ export function getDeviceRecoveryReason(runtime: TwilioRuntime) {
 export async function recoverTwilioDevice(
   runtime: TwilioRuntime,
   update: UpdateState,
-  reason: string,
+  reason: TwilioDeviceRecoveryReason,
   startDevice = startTwilioDevice,
 ) {
   if (runtime.loggedOut || !runtime.hasDeviceOwnership) return false
@@ -1003,7 +1095,6 @@ function createTabOwnership(): TwilioTabOwnership {
   })
   return {
     abortController: new AbortController(),
-    acquired: false,
     release,
     released,
   }
@@ -1036,7 +1127,6 @@ export async function holdTwilioDeviceOwnership(
 
   const runAsOwner = async () => {
     if (runtime.loggedOut || runtime.tabOwnership !== ownership) return
-    ownership.acquired = true
     runtime.hasDeviceOwnership = true
     reportTwilioClientEvent(runtime, 'tab-ownership-acquired')
     await initializeDevice(runtime, update)
@@ -1047,7 +1137,13 @@ export async function holdTwilioDeviceOwnership(
     reportTwilioClientEvent(runtime, 'tab-coordination-unavailable', {
       reason: 'web-locks-unavailable',
     })
-    await runAsOwner()
+    runtime.tabOwnership = null
+    update({
+      twilioReady: false,
+      status: 'Calling unavailable in this browser',
+      deviceError:
+        'Safe call coordination is unavailable. Update Chrome and reload this page.',
+    })
     return
   }
 
@@ -1064,7 +1160,14 @@ export async function holdTwilioDeviceOwnership(
       reason: 'web-lock-request-failed',
       error,
     })
-    if (!ownership.acquired) await runAsOwner()
+    if (runtime.tabOwnership === ownership) runtime.tabOwnership = null
+    runtime.hasDeviceOwnership = false
+    update({
+      twilioReady: false,
+      status: 'Calling unavailable',
+      deviceError:
+        'Safe call coordination failed. Reload the page before receiving calls.',
+    })
   }
 }
 

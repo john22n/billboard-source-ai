@@ -19,6 +19,21 @@ export const TWILIO_CLIENT_EVENT_NAMES = [
 
 export type TwilioClientEventName = (typeof TWILIO_CLIENT_EVENT_NAMES)[number]
 
+export const TWILIO_CLIENT_TELEMETRY_LIMITS = {
+  tabId: 64,
+  reason: 128,
+  callSid: 64,
+  callDirection: 32,
+  callStatus: 32,
+  deviceState: 32,
+  deviceEdge: 64,
+  deviceCallCount: 100,
+  deviceCalls: 10,
+  errorName: 128,
+  errorMessage: 500,
+  errorCode: 64,
+} as const
+
 export interface TwilioCallSnapshot {
   sid: string | null
   direction: string | null
