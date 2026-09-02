@@ -27,7 +27,6 @@ import {
   PricingPanel,
   TranscriptView,
 } from '@/components/sales-call'
-import type { TranscriptItem } from '@/types/sales-call'
 import {
   dismissToasts,
   showSuccessToast,
@@ -243,7 +242,7 @@ type MicrophoneIndicatorProps = {
 }
 
 const MICROPHONE_STATUS_STYLES: Record<
-  Exclude<MicrophoneStatus, 'idle'>,
+  MicrophoneStatus,
   {
     label: string
     className: string
@@ -252,6 +251,13 @@ const MICROPHONE_STATUS_STYLES: Record<
     meterClassName: string
   }
 > = {
+  idle: {
+    label: 'Mic standby',
+    className: 'bg-white/10 border-white/20',
+    icon: Mic,
+    iconClassName: '',
+    meterClassName: 'hidden',
+  },
   checking: {
     label: 'Checking mic…',
     className: 'bg-amber-500/30 border-amber-200/40',
@@ -295,11 +301,9 @@ function MicrophoneIndicator({
   label,
   message,
 }: MicrophoneIndicatorProps) {
-  if (status === 'idle') return null
-
   const config = MICROPHONE_STATUS_STYLES[status]
   const MicrophoneIcon = config.icon
-  const sourceLabel = label ? `Source: ${label}` : ''
+  const sourceLabel = label ? `${label}` : ''
   const description = [config.label, sourceLabel, message]
     .filter(Boolean)
     .join('. ')
@@ -329,7 +333,7 @@ function MicrophoneIndicator({
           />
         ))}
       </span>
-      <span className="hidden empty:hidden lg:inline max-w-[150px] truncate border-l border-white/30 pl-1.5 opacity-80">
+      <span className="empty:hidden inline-block max-w-[90px] sm:max-w-[150px] truncate border-l border-white/30 pl-1.5 opacity-80">
         {sourceLabel}
       </span>
     </div>
@@ -348,10 +352,6 @@ type CallHeaderProps = {
   microphoneMessage: TwilioState['microphoneMessage']
   callerPhone: string
   isProcessing: boolean
-  isUploading: boolean
-  fileInputRef: React.RefObject<HTMLInputElement | null>
-  onFileSelect: (event: React.ChangeEvent<HTMLInputElement>) => void
-  onUploadClick: () => void
   onClearAll: () => void
   onHangupCall: TwilioState['hangupCall']
   onAcceptCall: TwilioState['acceptCall']
@@ -379,10 +379,6 @@ function CallHeader(props: CallHeaderProps) {
     microphoneMessage,
     callerPhone,
     isProcessing,
-    isUploading,
-    fileInputRef,
-    onFileSelect,
-    onUploadClick,
     onClearAll,
     onHangupCall,
     onAcceptCall,
@@ -410,9 +406,6 @@ function CallHeader(props: CallHeaderProps) {
                 </span>
               )}
             </CardTitle>
-            <p className="text-blue-100 text-[10px] sm:text-xs mt-0.5 hidden sm:block">
-              Real-time transcription & AI-powered data extraction
-            </p>
           </div>
           <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
             <div
@@ -458,29 +451,6 @@ function CallHeader(props: CallHeaderProps) {
                 disabled={callActive}
               >
                 Clear
-              </Button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                aria-label="Upload an audio recording"
-                accept="audio/*,.mp3,.wav,.m4a,.ogg"
-                onChange={onFileSelect}
-                disabled={isUploading || callActive}
-                className="hidden"
-              />
-              <Button
-                onClick={onUploadClick}
-                disabled={isUploading || callActive}
-                size="sm"
-                className="flex-1 sm:flex-initial bg-white/20 hover:bg-white/30 text-white border border-white/30 font-semibold backdrop-blur-sm h-7 sm:h-8 text-[10px] sm:text-xs px-2 sm:px-3"
-              >
-                <span className="mr-1 sm:mr-1.5">📁</span>
-                <span className="hidden sm:inline">
-                  {isUploading ? 'Uploading...' : 'Upload'}
-                </span>
-                <span className="sm:hidden">
-                  {isUploading ? '...' : 'File'}
-                </span>
               </Button>
             </div>
           </div>
@@ -1046,50 +1016,6 @@ function useTranscriptExtraction(
   return { ...extraction, fullTranscript, retry, resetFinalExtraction }
 }
 
-function useFileUpload(
-  addTranscript: TranscriptionState['addTranscript'],
-  updateStatus: TwilioState['updateStatus'],
-) {
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const [isUploading, setIsUploading] = useState(false)
-  const handleFileSelect = useCallback(
-    async (event: React.ChangeEvent<HTMLInputElement>) => {
-      const files = event.target.files
-      if (!files || files.length === 0) return
-      setIsUploading(true)
-      updateStatus('Uploading and transcribing...')
-      const formDataUpload = new FormData()
-      formDataUpload.append('file', files[0])
-      try {
-        const res = await fetch('/api/transcribe-file', {
-          method: 'POST',
-          body: formDataUpload,
-        })
-        const result = await res.json()
-        if (result.text) {
-          const newTranscript: TranscriptItem = {
-            id: `file-${Date.now()}`,
-            text: result.text,
-            isFinal: true,
-            timestamp: Date.now(),
-          }
-          addTranscript(newTranscript)
-          updateStatus('File transcribed successfully')
-        } else updateStatus('Transcription failed')
-      } catch (error) {
-        console.error('File transcription error:', error)
-        updateStatus('Error transcribing file')
-      } finally {
-        setIsUploading(false)
-        if (event.target) event.target.value = ''
-      }
-    },
-    [addTranscript, updateStatus],
-  )
-  const handleUploadClick = useCallback(() => fileInputRef.current?.click(), [])
-  return { fileInputRef, isUploading, handleFileSelect, handleUploadClick }
-}
-
 function useNutshellSubmission(
   fullTranscript: string,
   clearAll: () => void,
@@ -1256,26 +1182,17 @@ function useMarketLocation() {
   )
 }
 
-function isTranscriberProcessing(
-  isUploading: boolean,
-  isExtracting: boolean,
-  status: string,
-) {
-  if (isUploading || isExtracting) return true
-  return [
-    'Fetching',
-    'Connecting',
-    'Starting',
-    'Uploading',
-    'Initializing',
-  ].some((text) => status.includes(text))
+function isTranscriberProcessing(isExtracting: boolean, status: string) {
+  if (isExtracting) return true
+  return ['Fetching', 'Connecting', 'Starting', 'Initializing'].some((text) =>
+    status.includes(text),
+  )
 }
 
 type TranscriberContentProps = {
   twilio: ReturnType<typeof useTwilioContext>
   transcription: ReturnType<typeof useOpenAITranscription>
   extraction: ReturnType<typeof useTranscriptExtraction>
-  upload: ReturnType<typeof useFileUpload>
   nutshell: ReturnType<typeof useNutshellSubmission>
   callerPhone: string
   isProcessing: boolean
@@ -1292,7 +1209,6 @@ function TranscriberContent({
   twilio,
   transcription,
   extraction,
-  upload,
   nutshell,
   callerPhone,
   isProcessing,
@@ -1320,10 +1236,6 @@ function TranscriberContent({
             microphoneMessage={twilio.microphoneMessage}
             callerPhone={callerPhone}
             isProcessing={isProcessing}
-            isUploading={upload.isUploading}
-            fileInputRef={upload.fileInputRef}
-            onFileSelect={upload.handleFileSelect}
-            onUploadClick={upload.handleUploadClick}
             onClearAll={nutshell.clearAllWithValidation}
             onHangupCall={twilio.hangupCall}
             onAcceptCall={twilio.acceptCall}
@@ -1387,7 +1299,6 @@ export default function SalesCallTranscriber({
     twilio.callActive,
     scrollRef,
   )
-  const upload = useFileUpload(transcription.addTranscript, twilio.updateStatus)
   const clearAll = useClearTranscriber(
     transcription.clearTranscripts,
     extraction.reset,
@@ -1408,7 +1319,6 @@ export default function SalesCallTranscriber({
       nutshell.isSubmittingNutshell,
   )
   const isProcessing = isTranscriberProcessing(
-    upload.isUploading,
     extraction.isExtracting,
     twilio.status,
   )
@@ -1419,7 +1329,6 @@ export default function SalesCallTranscriber({
       twilio={twilio}
       transcription={transcription}
       extraction={extraction}
-      upload={upload}
       nutshell={nutshell}
       callerPhone={callerPhone}
       isProcessing={isProcessing}

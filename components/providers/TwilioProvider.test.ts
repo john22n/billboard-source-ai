@@ -11,6 +11,7 @@ import {
   disposeTwilioRuntime,
   handleIncomingCall,
   monitorCallMicrophone,
+  prepareStandbyMicrophone,
   refreshTwilioToken,
 } from './TwilioProvider'
 
@@ -64,6 +65,8 @@ function createRefreshRuntime(device: RefreshDevice): RefreshRuntime {
     microphoneWarning: null,
     microphoneLevel: 0,
     lastMicrophoneLevelUpdate: 0,
+    standbyMicrophoneLabel: '',
+    standbyMicrophonePending: false,
   }
 }
 
@@ -183,6 +186,104 @@ describe('acceptIncomingCall', () => {
       }),
     )
     expect(onCallAccepted).toHaveBeenCalledWith(call)
+  })
+})
+
+describe('standby microphone', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('reports Twilio’s default input label before a call', async () => {
+    const defaultInput = {
+      deviceId: 'default',
+      groupId: 'built-in',
+      label: 'Default - MacBook Pro Microphone',
+    } as MediaDeviceInfo
+    const physicalInput = {
+      deviceId: 'built-in-microphone',
+      groupId: 'built-in',
+      label: 'MacBook Pro Microphone',
+    } as MediaDeviceInfo
+    const audio = {
+      inputDevice: null as MediaDeviceInfo | null,
+      availableInputDevices: new Map([
+        ['default', defaultInput],
+        ['built-in-microphone', physicalInput],
+      ]),
+    }
+    const device = {
+      audio,
+      state: 'registered',
+    } as unknown as RefreshDevice
+    const runtime = createRefreshRuntime(device) as MicrophoneRuntime
+    const update = vi.fn()
+
+    await prepareStandbyMicrophone(runtime, update, device)
+
+    expect(update).toHaveBeenCalledWith({
+      microphoneLabel: 'MacBook Pro Microphone',
+    })
+  })
+
+  it('requests permission to replace Twilio’s unknown-device placeholder', async () => {
+    const unknownInput = {
+      deviceId: 'built-in-microphone',
+      label: 'Unknown Audio Input Device 1',
+    } as MediaDeviceInfo
+    const audio = {
+      inputDevice: null,
+      availableInputDevices: new Map([['built-in-microphone', unknownInput]]),
+    }
+    const device = {
+      audio,
+      state: 'registered',
+    } as unknown as RefreshDevice
+    const runtime = createRefreshRuntime(device) as MicrophoneRuntime
+    const update = vi.fn()
+    const stop = vi.fn()
+    const getUserMedia = vi.fn().mockResolvedValue({
+      getAudioTracks: () => [{ label: 'MacBook Pro Microphone' }],
+      getTracks: () => [{ stop }],
+    } as unknown as MediaStream)
+
+    await prepareStandbyMicrophone(runtime, update, device, getUserMedia)
+
+    expect(getUserMedia).toHaveBeenCalledWith({ audio: true })
+    expect(stop).toHaveBeenCalledOnce()
+    expect(update).toHaveBeenCalledWith({
+      microphoneLabel: 'MacBook Pro Microphone',
+    })
+  })
+
+  it('retains the selected input label while an incoming call is waiting', () => {
+    type IncomingRuntime = Parameters<typeof handleIncomingCall>[0]
+    type IncomingCall = Parameters<typeof handleIncomingCall>[2]
+    const inputDevice = {
+      deviceId: 'default',
+      label: 'USB headset microphone',
+    } as MediaDeviceInfo
+    const device = {
+      audio: { inputDevice },
+      state: 'registered',
+    } as unknown as RefreshDevice
+    const runtime = createRefreshRuntime(device) as IncomingRuntime
+    const events = new EventEmitter()
+    const call = {
+      parameters: { From: '+15555550123' },
+      on: vi.fn(events.on.bind(events)),
+    } as unknown as IncomingCall
+    const update = vi.fn()
+    vi.stubGlobal('window', {})
+
+    handleIncomingCall(runtime, update, call)
+
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        microphoneStatus: 'idle',
+        microphoneLabel: 'USB headset microphone',
+      }),
+    )
   })
 })
 
