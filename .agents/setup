@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+mise_bin="$HOME/.local/bin/mise"
+
+step() {
+  local label="$1"
+  shift
+  local started_at=$SECONDS
+
+  printf '\n==> %s\n' "$label"
+  "$@"
+  printf '<== %s (%ss)\n' "$label" "$((SECONDS - started_at))"
+}
+
+if [[ ! -x "$mise_bin" ]]; then
+  step "Install mise" bash -c \
+    'curl --proto "=https" --tlsv1.2 -fsSL https://mise.run | sh'
+fi
+
+profile_marker="# billboard-source-ai mise shims"
+if ! grep -Fqx "$profile_marker" "$HOME/.bash_profile" 2>/dev/null; then
+  cat >> "$HOME/.bash_profile" <<'EOF'
+
+# billboard-source-ai mise shims
+export PATH="$HOME/.local/share/mise/shims:$HOME/.local/bin:$PATH"
+EOF
+fi
+
+cd "$repo_root"
+step "Install pinned Node.js and pnpm" "$mise_bin" install --yes
+step "Install repository dependencies" "$mise_bin" exec -- pnpm install --frozen-lockfile
+
+printf '\nOrb setup complete.\n'
