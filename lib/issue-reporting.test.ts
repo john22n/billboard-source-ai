@@ -34,7 +34,8 @@ vi.mock('@ai-sdk/openai', () => ({
 }))
 vi.mock('ai', () => ({ generateObject: mocks.generateObject }))
 vi.mock('twilio', () => ({ default: vi.fn(() => mocks.twilioClient) }))
-vi.mock('@/lib/config', () => ({
+vi.mock('@/lib/config', async () => ({
+  ...(await import('./config-core')),
   serverConfig: {
     amp: { requireIssueWebhookUrl: mocks.requireAmpWebhookUrl },
     openai: { requireApiKey: mocks.requireOpenAIKey },
@@ -50,6 +51,7 @@ vi.mock('@/lib/dal', () => ({
   logOpenAITokenUsage: mocks.logOpenAITokenUsage,
 }))
 
+import { ConfigError } from './config-core'
 import {
   parseVercelRequestLogs,
   redactDiagnosticSecrets,
@@ -521,6 +523,99 @@ describe('issue reporting diagnostics', () => {
     })
     expect(JSON.stringify(result)).not.toMatch(/CAOTHER|\+16465550199/)
     expect(result.ampEscalated).toBe(true)
+  })
+
+  it('tells OpenAI which Vercel variable is missing instead of failing silently', async () => {
+    mocks.requireVercelCredentials.mockImplementation(() => {
+      throw new ConfigError({
+        path: 'serverConfig.vercel.teamId',
+        envKey: 'VERCEL_TEAM_ID',
+        reason: 'required value is not set',
+      })
+    })
+    mocks.generateObject.mockResolvedValue({
+      object: {
+        severity: 'low',
+        summary: 'The worker was offline.',
+        evidence: [],
+        missingData: ['Vercel runtime logs'],
+        needsAmpEscalation: false,
+        escalationReason: null,
+        twilioCallInfoRequested: false,
+      },
+      usage: { inputTokens: 80, outputTokens: 40, totalTokens: 120 },
+    })
+    const fetchMock = vi.fn(async () => {
+      throw new Error('No provider should be called')
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await submitIssueReport({
+      input: {
+        requestId: '45678901-1234-4234-8234-123456789012',
+        title: 'Worker appears offline',
+        description: 'The worker cannot receive calls and appears offline.',
+        occurredAt: new Date().toISOString(),
+        lookbackMinutes: 30,
+      },
+      reporter: { id: 'user-1', email: 'user@example.com' },
+    })
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(result.unavailableSources).toEqual(['Vercel'])
+    const [{ prompt, system }] = mocks.generateObject.mock.calls[0]
+    expect(prompt).toContain(
+      'Vercel runtime logs were skipped because VERCEL_TEAM_ID is not set in the deployment environment.',
+    )
+    expect(system).toContain('vercel.logs')
+  })
+
+  it('queries project-wide Vercel logs when the deployment ID is unavailable', async () => {
+    mocks.requireVercelCredentials.mockReturnValue({
+      apiToken: 'vercel-token',
+      projectId: 'project-1',
+      deploymentId: null,
+      teamId: 'team-1',
+    })
+    mocks.generateObject.mockResolvedValue({
+      object: {
+        severity: 'low',
+        summary: 'The worker was offline.',
+        evidence: [],
+        missingData: [],
+        needsAmpEscalation: false,
+        escalationReason: null,
+        twilioCallInfoRequested: false,
+      },
+      usage: { inputTokens: 80, outputTokens: 40, totalTokens: 120 },
+    })
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      void input
+      return Response.json({ rows: [] })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await submitIssueReport({
+      input: {
+        requestId: '56789012-1234-4234-8234-123456789012',
+        title: 'Worker appears offline',
+        description: 'The worker cannot receive calls and appears offline.',
+        occurredAt: new Date().toISOString(),
+        lookbackMinutes: 30,
+      },
+      reporter: { id: 'user-1', email: 'user@example.com' },
+    })
+
+    expect(result.unavailableSources).toEqual([])
+    const vercelUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
+    expect(vercelUrl.origin + vercelUrl.pathname).toBe(
+      'https://vercel.com/api/logs/request-logs',
+    )
+    expect(vercelUrl.searchParams.get('projectId')).toBe('project-1')
+    expect(vercelUrl.searchParams.get('ownerId')).toBe('team-1')
+    expect(vercelUrl.searchParams.has('deploymentId')).toBe(false)
+    const [{ prompt }] = mocks.generateObject.mock.calls[0]
+    expect(prompt).toContain('"deploymentId": null')
   })
 
   it('still hands the report to Amp when diagnostic providers are unavailable', async () => {

@@ -22,6 +22,7 @@
     "make-admin:dev": "dotenv -e .env.dev -- tsx scripts/make-admin.ts",
     "make-admin:prod": "dotenv -e .env -- tsx scripts/make-admin.ts",
     "make-admin": "tsx scripts/make-admin.ts",
+    "vercel-logs:check:prod": "dotenv -e .env -- tsx scripts/check-vercel-logs.ts",
     "taskrouter:setup:prod": "dotenv -e .env -- tsx scripts/setup-taskrouter.ts",
     "taskrouter:update-workflow:prod": "dotenv -e .env -- tsx scripts/update-workflow.ts",
     "taskrouter:setup-voicemail:prod": "dotenv -e .env -- tsx scripts/setup-voicemail-worker.ts",

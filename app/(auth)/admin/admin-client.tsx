@@ -31,6 +31,7 @@ import {
   Loader2,
   CheckCircle2,
   CircleAlert,
+  MessageSquareText,
   RefreshCw,
   DollarSign,
   UserPlus,
@@ -79,6 +80,7 @@ interface ReportedIssue {
   description: string
   occurredAt: string
   diagnosis: StoredIssueDiagnosis
+  unavailableSources: string[]
   resolvedAt: string | null
   createdAt: string
 }
@@ -653,6 +655,17 @@ function ReportedIssuesTab({
                       >
                         {issue.resolvedAt ? 'Resolved' : 'Open'}
                       </Badge>
+                      <Badge
+                        variant={
+                          issue.diagnosis.needsAmpEscalation
+                            ? 'default'
+                            : 'outline'
+                        }
+                      >
+                        {issue.diagnosis.needsAmpEscalation
+                          ? 'Escalated to Amp'
+                          : 'Explained by OpenAI'}
+                      </Badge>
                       <span className="font-mono text-xs text-muted-foreground">
                         {issue.reportId}
                       </span>
@@ -706,6 +719,29 @@ function ReportedIssuesTab({
                       </p>
                     </div>
                   </div>
+                  {issue.diagnosis.needsAmpEscalation && (
+                    <div className="flex items-start gap-2">
+                      <MessageSquareText
+                        className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                        aria-hidden="true"
+                      />
+                      <div className="space-y-1">
+                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          Why Amp was asked
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          {issue.diagnosis.escalationReason ??
+                            'OpenAI triage was unavailable.'}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                  {issue.unavailableSources.length > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      Diagnostic sources unavailable:{' '}
+                      {issue.unavailableSources.join(', ')}
+                    </p>
+                  )}
                 </div>
               </article>
             ))}

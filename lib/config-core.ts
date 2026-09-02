@@ -171,7 +171,7 @@ export interface ServerConfig {
     requireRuntimeLogCredentials: () => {
       apiToken: string
       projectId: string
-      deploymentId: string
+      deploymentId: string | null
       teamId: string
     }
   }
@@ -439,6 +439,10 @@ export function createServerConfig(env: EnvSource): ServerConfig {
     get teamId() {
       return optionalString(env, 'VERCEL_TEAM_ID')
     },
+    // VERCEL_PROJECT_ID and VERCEL_DEPLOYMENT_ID are Vercel system variables.
+    // VERCEL_TEAM_ID is not: the request-logs API needs the owning team ID,
+    // which must be configured manually alongside VERCEL_API_TOKEN.
+    // The deployment ID only narrows results, so it stays optional.
     requireRuntimeLogCredentials() {
       return {
         apiToken: requiredString(
@@ -451,16 +455,12 @@ export function createServerConfig(env: EnvSource): ServerConfig {
           'VERCEL_PROJECT_ID',
           'serverConfig.vercel.projectId',
         ),
-        deploymentId: requiredString(
-          env,
-          'VERCEL_DEPLOYMENT_ID',
-          'serverConfig.vercel.deploymentId',
-        ),
         teamId: requiredString(
           env,
           'VERCEL_TEAM_ID',
           'serverConfig.vercel.teamId',
         ),
+        deploymentId: optionalString(env, 'VERCEL_DEPLOYMENT_ID'),
       }
     },
   }

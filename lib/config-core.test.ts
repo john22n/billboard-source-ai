@@ -86,6 +86,26 @@ describe('server config', () => {
     )
   })
 
+  it('requires the Vercel team ID but treats the deployment ID as optional', () => {
+    const base = {
+      NODE_ENV: 'production',
+      VERCEL_API_TOKEN: 'vercel-token',
+      VERCEL_PROJECT_ID: 'project-id',
+    }
+    const missingTeam = createServerConfig(base)
+    expect(() => missingTeam.vercel.requireRuntimeLogCredentials()).toThrow(
+      'VERCEL_TEAM_ID',
+    )
+
+    const projectWide = createServerConfig({ ...base, VERCEL_TEAM_ID: 'team' })
+    expect(projectWide.vercel.requireRuntimeLogCredentials()).toEqual({
+      apiToken: 'vercel-token',
+      projectId: 'project-id',
+      teamId: 'team',
+      deploymentId: null,
+    })
+  })
+
   it('requires passkey config in every environment', () => {
     const missing = createServerConfig({ NODE_ENV: 'development' })
     expect(() => missing.passkey.rpId).toThrow('PASSKEY_RP_ID')
