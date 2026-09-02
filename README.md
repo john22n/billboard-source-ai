@@ -65,7 +65,7 @@ VERCEL_API_TOKEN=
 AMP_ISSUE_WEBHOOK_URL=
 ```
 
-`VERCEL_PROJECT_ID`, `VERCEL_DEPLOYMENT_ID`, and `VERCEL_TEAM_ID` come from Vercel system environment variables; enable **Project Settings → Environment Variables → Automatically expose System Environment Variables**. The Vercel API token needs Runtime Logs access.
+`VERCEL_PROJECT_ID` and `VERCEL_DEPLOYMENT_ID` come from Vercel system environment variables; enable **Project Settings → Environment Variables → Enable access to System Environment Variables**. `VERCEL_TEAM_ID` is **not** a system variable: copy the team ID from **Team Settings → General** and add it manually next to `VERCEL_API_TOKEN`, which needs Runtime Logs access for that team. If the deployment ID is unavailable, logs are collected for the whole project instead of the current deployment. When any of these are missing, the report's diagnostic bundle names the missing variable in `vercel.warnings` and the admin panel lists Vercel as an unavailable source.
 
 Load `.amp/plugins/issue-report-webhook.ts` in the Orb thread that should investigate escalated reports, then set its private durable webhook URL as `AMP_ISSUE_WEBHOOK_URL`. The URL is a credential: keep it server-only and never commit or print it. The sender uses each report ID as its idempotency key, and the plugin validates the versioned payload before waking its owning thread.
 
