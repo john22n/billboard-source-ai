@@ -12,8 +12,8 @@ const mocks = vi.hoisted(() => {
     generateObject: vi.fn(),
     logOpenAITokenUsage: vi.fn(),
     openaiProvider: vi.fn(() => 'direct-openai-model'),
-    requireAmpWebhookUrl: vi.fn(),
     requireOpenAIKey: vi.fn(),
+    requireSlackCredentials: vi.fn(),
     requireTwilioCredentials: vi.fn(),
     requireVercelCredentials: vi.fn(),
     twilioClient: {
@@ -37,8 +37,10 @@ vi.mock('twilio', () => ({ default: vi.fn(() => mocks.twilioClient) }))
 vi.mock('@/lib/config', async () => ({
   ...(await import('./config-core')),
   serverConfig: {
-    amp: { requireIssueWebhookUrl: mocks.requireAmpWebhookUrl },
     openai: { requireApiKey: mocks.requireOpenAIKey },
+    slack: {
+      requireIssueReportingCredentials: mocks.requireSlackCredentials,
+    },
     taskRouter: { workspaceSid: 'WS123' },
     twilio: {
       mainNumber: '+18338547126',
@@ -66,10 +68,12 @@ describe('issue reporting diagnostics', () => {
     mocks.callsList.mockResolvedValue([])
     mocks.eventsList.mockResolvedValue([])
     mocks.createOpenAI.mockReturnValue(mocks.openaiProvider)
-    mocks.requireAmpWebhookUrl.mockReturnValue(
-      'https://webhooks.ampcode.com/example',
-    )
     mocks.requireOpenAIKey.mockReturnValue('openai-key')
+    mocks.requireSlackCredentials.mockReturnValue({
+      userToken: 'slack-user-token',
+      ampChannelId: 'CAMP123',
+      ampUserId: 'UAMP123',
+    })
     mocks.requireTwilioCredentials.mockReturnValue({
       accountSid: 'AC123',
       authToken: 'twilio-token',
@@ -176,7 +180,7 @@ describe('issue reporting diagnostics', () => {
     ).toBe(false)
   })
 
-  it('keeps diagnostics account-scoped and sends one handoff when OpenAI asks for help', async () => {
+  it('keeps diagnostics account-scoped and sends one new Slack handoff mentioning Amp', async () => {
     const occurredAt = new Date()
     mocks.alertsList.mockResolvedValue([
       {
@@ -295,7 +299,11 @@ describe('issue reporting diagnostics', () => {
             ],
           })
         }
-        return new Response(null, { status: 202 })
+        return Response.json({
+          ok: true,
+          channel: 'CAMP123',
+          ts: '123.456',
+        })
       },
     )
     vi.stubGlobal('fetch', fetchMock)
@@ -341,26 +349,24 @@ describe('issue reporting diagnostics', () => {
       String(occurredAt.getTime() - 30 * 60 * 1000),
     )
 
-    const ampCall = fetchMock.mock.calls.find(([input]) =>
-      String(input).startsWith('https://webhooks.ampcode.com/'),
+    const slackCall = fetchMock.mock.calls.find(
+      ([input]) => String(input) === 'https://slack.com/api/chat.postMessage',
     )
-    const ampBody = JSON.parse(
-      String((ampCall?.[1] as RequestInit | undefined)?.body),
-    ) as { version: number; type: string; reportId: string; message: string }
-    expect(new Headers(ampCall?.[1]?.headers).get('Idempotency-Key')).toBe(
-      'ISS-12345678',
+    const slackBody = JSON.parse(
+      String((slackCall?.[1] as RequestInit | undefined)?.body),
+    ) as { channel: string; text: string; thread_ts?: string }
+    expect(new Headers(slackCall?.[1]?.headers).get('Authorization')).toBe(
+      'Bearer slack-user-token',
     )
-    expect(new Headers(ampCall?.[1]?.headers).has('Authorization')).toBe(false)
-    expect(ampBody).toMatchObject({
-      version: 1,
-      type: 'billboard-source.issue-reported',
-      reportId: 'ISS-12345678',
-    })
-    expect(ampBody.message).toContain('admin@example.com')
-    expect(ampBody.message).toContain('alice@example.com')
-    expect(ampBody.message).toContain('212-555-1212')
-    expect(ampBody.message).toContain('+12125551212')
-    expect(ampBody.message).not.toMatch(
+    expect(slackBody.channel).toBe('CAMP123')
+    expect(slackBody.thread_ts).toBeUndefined()
+    expect(slackBody.text).toContain('<@UAMP123>')
+    expect(slackBody.text).toContain('ISS-12345678')
+    expect(slackBody.text).toContain('admin@example.com')
+    expect(slackBody.text).toContain('alice@example.com')
+    expect(slackBody.text).toContain('212-555-1212')
+    expect(slackBody.text).toContain('+12125551212')
+    expect(slackBody.text).not.toMatch(
       /top-secret|vercel-secret|signature=secret|<!channel>|<#C123>|CAOTHER|other-account@example\.com|\+16465550199|Recommended actions/,
     )
     expect(result).toMatchObject({
@@ -390,7 +396,7 @@ describe('issue reporting diagnostics', () => {
     expect(result.diagnosis).not.toHaveProperty('recommendedActions')
   })
 
-  it('does not call Amp when OpenAI can explain the reason', async () => {
+  it('still sends the logs to Slack when OpenAI can explain the reason', async () => {
     mocks.generateObject.mockResolvedValue({
       object: {
         severity: 'low',
@@ -405,14 +411,21 @@ describe('issue reporting diagnostics', () => {
       },
       usage: { inputTokens: 80, outputTokens: 40, totalTokens: 120 },
     })
-    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
-      if (
-        String(input).startsWith('https://vercel.com/api/logs/request-logs')
-      ) {
-        return Response.json({ rows: [] })
-      }
-      throw new Error('Amp should not be called')
-    })
+    const fetchMock = vi.fn(
+      async (input: URL | RequestInfo, _init?: RequestInit) => {
+        void _init
+        if (
+          String(input).startsWith('https://vercel.com/api/logs/request-logs')
+        ) {
+          return Response.json({ rows: [] })
+        }
+        return Response.json({
+          ok: true,
+          channel: 'CAMP123',
+          ts: '234.567',
+        })
+      },
+    )
     vi.stubGlobal('fetch', fetchMock)
 
     const result = await submitIssueReport({
@@ -426,15 +439,65 @@ describe('issue reporting diagnostics', () => {
       reporter: { id: 'user-1', email: 'user@example.com' },
     })
 
-    expect(result.ampEscalated).toBe(false)
+    expect(result.ampEscalated).toBe(true)
     expect(result.diagnosis.twilioCallContext).toBeNull()
     expect(result.diagnosis).not.toHaveProperty('recommendedActions')
-    expect(mocks.requireAmpWebhookUrl).not.toHaveBeenCalled()
+    const slackCall = fetchMock.mock.calls.find(
+      ([input]) => String(input) === 'https://slack.com/api/chat.postMessage',
+    )
+    const slackBody = JSON.parse(
+      String((slackCall?.[1] as RequestInit | undefined)?.body),
+    ) as { text: string }
+    expect(slackBody.text).toContain('<@UAMP123>')
+    expect(slackBody.text).toContain(
+      'OpenAI supplied an initial explanation; Amp review was requested by policy.',
+    )
+  })
+
+  it('rejects the report when Slack does not accept the message', async () => {
+    mocks.generateObject.mockResolvedValue({
+      object: {
+        severity: 'low',
+        summary: 'The worker was offline when TaskRouter attempted assignment.',
+        evidence: [],
+        missingData: [],
+        needsAmpEscalation: false,
+        escalationReason: null,
+        twilioCallInfoRequested: false,
+      },
+      usage: { inputTokens: 80, outputTokens: 40, totalTokens: 120 },
+    })
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      if (
+        String(input).startsWith('https://vercel.com/api/logs/request-logs')
+      ) {
+        return Response.json({ rows: [] })
+      }
+      return Response.json({ ok: false, error: 'channel_not_found' })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(
+      submitIssueReport({
+        input: {
+          requestId: '98765432-1234-4234-8234-123456789012',
+          title: 'Worker appears offline',
+          description: 'The worker cannot receive calls and appears offline.',
+          occurredAt: new Date().toISOString(),
+          lookbackMinutes: 30,
+        },
+        reporter: { id: 'user-1', email: 'user@example.com' },
+      }),
+    ).rejects.toMatchObject({
+      name: 'IssueReportDeliveryError',
+      status: 502,
+      publicMessage: 'The issue could not be delivered to Slack.',
+    })
     expect(
-      fetchMock.mock.calls.some(([input]) =>
-        String(input).startsWith('https://webhooks.ampcode.com/'),
+      fetchMock.mock.calls.filter(
+        ([input]) => String(input) === 'https://slack.com/api/chat.postMessage',
       ),
-    ).toBe(false)
+    ).toHaveLength(1)
   })
 
   it('retrieves only the employee account call context when OpenAI is unavailable', async () => {
@@ -484,7 +547,9 @@ describe('issue reporting diagnostics', () => {
     mocks.generateObject.mockRejectedValue(new Error('OpenAI unavailable'))
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response(null, { status: 202 })),
+      vi.fn(async () =>
+        Response.json({ ok: true, channel: 'CAMP123', ts: '345.678' }),
+      ),
     )
 
     const result = await submitIssueReport({
@@ -545,8 +610,13 @@ describe('issue reporting diagnostics', () => {
       },
       usage: { inputTokens: 80, outputTokens: 40, totalTokens: 120 },
     })
-    const fetchMock = vi.fn(async () => {
-      throw new Error('No provider should be called')
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      void input
+      return Response.json({
+        ok: true,
+        channel: 'CAMP123',
+        ts: '456.789',
+      })
     })
     vi.stubGlobal('fetch', fetchMock)
 
@@ -561,7 +631,10 @@ describe('issue reporting diagnostics', () => {
       reporter: { id: 'user-1', email: 'user@example.com' },
     })
 
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'https://slack.com/api/chat.postMessage',
+    )
     expect(result.unavailableSources).toEqual(['Vercel'])
     const [{ prompt, system }] = mocks.generateObject.mock.calls[0]
     expect(prompt).toContain(
@@ -590,8 +663,16 @@ describe('issue reporting diagnostics', () => {
       usage: { inputTokens: 80, outputTokens: 40, totalTokens: 120 },
     })
     const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
-      void input
-      return Response.json({ rows: [] })
+      if (
+        String(input).startsWith('https://vercel.com/api/logs/request-logs')
+      ) {
+        return Response.json({ rows: [] })
+      }
+      return Response.json({
+        ok: true,
+        channel: 'CAMP123',
+        ts: '567.890',
+      })
     })
     vi.stubGlobal('fetch', fetchMock)
 
@@ -628,7 +709,9 @@ describe('issue reporting diagnostics', () => {
     mocks.generateObject.mockRejectedValue(new Error('OpenAI unavailable'))
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response(null, { status: 202 })),
+      vi.fn(async () =>
+        Response.json({ ok: true, channel: 'CAMP123', ts: '876.543' }),
+      ),
     )
 
     const result = await submitIssueReport({
@@ -649,6 +732,6 @@ describe('issue reporting diagnostics', () => {
     expect(result.diagnosis.twilioCallInfoRequested).toBe(false)
     expect(result.diagnosis.twilioCallContext).toBeNull()
     expect(result.ampEscalated).toBe(true)
-    expect(mocks.requireAmpWebhookUrl).toHaveBeenCalledOnce()
+    expect(mocks.requireSlackCredentials).toHaveBeenCalled()
   })
 })

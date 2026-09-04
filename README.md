@@ -53,7 +53,7 @@ Vercel's native Git integration owns deployments: pull requests receive preview 
 
 ## Admin issue reporting
 
-Signed-in employees can open **Report an Issue** from the dashboard sidebar. A report collects a bounded diagnostic window from Twilio and the current Vercel deployment, scopes provider records to the reporting employee's phone number, Twilio client identity, worker SID, and related Call SIDs, and redacts credentials while retaining operational email addresses and phone numbers. OpenAI returns only a reason for the issue, never a fix. When an employee asks for information about a Twilio call they had, the result includes only contact details and call records tied to that employee's account. The finding remains available when the employee navigates away and returns during the same browser session; logging out or moving the Twilio worker to Offline clears it. The event-driven Amp Orb is notified only when OpenAI requests engineering help or OpenAI triage is unavailable. Administrators can review and resolve retained reports from the Admin Panel.
+Signed-in employees can open **Report an Issue** from the dashboard sidebar. A report collects a bounded diagnostic window from Twilio and the current Vercel deployment, scopes provider records to the reporting employee's phone number, Twilio client identity, worker SID, and related Call SIDs, and redacts credentials while retaining operational email addresses and phone numbers. OpenAI returns only a reason for the issue, never a fix. When an employee asks for information about a Twilio call they had, the result includes only contact details and call records tied to that employee's account. The finding remains available when the employee navigates away and returns during the same browser session; logging out or moving the Twilio worker to Offline clears it. Every accepted report is posted as a new message in the configured Slack channel with the account-scoped diagnostic logs and an explicit Amp mention. Administrators can review and resolve retained reports from the Admin Panel.
 
 Each employee account can save one issue every 16 hours. The database keeps at most the newest 100 reported issues and deletes any report older than 30 days. Cleanup runs after each saved report, during issue-list and resolution requests, and from the daily maintenance cron.
 
@@ -62,12 +62,15 @@ Configure these server-only environment variables:
 ```bash
 OPENAI_API_KEY=
 VERCEL_API_TOKEN=
-AMP_ISSUE_WEBHOOK_URL=
+VERCEL_TEAM_ID=
+SLACK_USER_TOKEN=
+SLACK_AMP_CHANNEL_ID=
+SLACK_AMP_USER_ID=
 ```
 
 `VERCEL_PROJECT_ID` and `VERCEL_DEPLOYMENT_ID` come from Vercel system environment variables; enable **Project Settings → Environment Variables → Enable access to System Environment Variables**. `VERCEL_TEAM_ID` is **not** a system variable: copy the team ID from **Team Settings → General** and add it manually next to `VERCEL_API_TOKEN`, which needs Runtime Logs access for that team. If the deployment ID is unavailable, logs are collected for the whole project instead of the current deployment. When any of these are missing, the report's diagnostic bundle names the missing variable in `vercel.warnings` and the admin panel lists Vercel as an unavailable source.
 
-Load `.amp/plugins/issue-report-webhook.ts` in the Orb thread that should investigate escalated reports, then set its private durable webhook URL as `AMP_ISSUE_WEBHOOK_URL`. The URL is a credential: keep it server-only and never commit or print it. The sender uses each report ID as its idempotency key, and the plugin validates the versioned payload before waking its owning thread.
+For Slack, add the `chat:write` **User Token Scope** to an internal Slack app, reinstall it as the Slack user linked to Amp, and use its user OAuth token for `SLACK_USER_TOKEN`. Add `@Amp` to the Slack channel that should receive issue reports, then use that channel's `C...` or `G...` ID for `SLACK_AMP_CHANNEL_ID`. This integration rejects direct-message `D...` IDs because Amp documents channel and thread mentions as its supported trigger. `SLACK_AMP_USER_ID` is the installed Amp app's `U...` member ID. Keep the token server-only and never commit or print it. Slack attributes each automated report to the user who authorized the token.
 
 ## Billboard market data
 
