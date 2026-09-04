@@ -65,7 +65,7 @@ const sourceCards = [
   {
     icon: Bot,
     label: 'Amp',
-    detail: 'Orb escalation only when OpenAI requests engineering help',
+    detail: 'Mentioned in Slack with account-scoped logs for every report',
   },
 ]
 
@@ -112,8 +112,8 @@ function PendingReportStatus({ isPending }: { isPending: boolean }) {
       />
       <AlertTitle>Analyzing the issue</AlertTitle>
       <AlertDescription className="text-amber-100/70">
-        Log APIs may take a few seconds. OpenAI will decide whether the issue
-        needs Amp engineering help.
+        Log APIs may take a few seconds. OpenAI will triage the evidence before
+        the report is sent to Amp in Slack.
       </AlertDescription>
     </Alert>
   )
@@ -262,7 +262,7 @@ function CompletedReportStatus({
         <div className="flex items-center justify-between gap-3">
           <CardTitle className="flex items-center gap-2 text-emerald-100">
             <CheckCircle2 aria-hidden="true" className="size-5" />
-            {result.ampEscalated ? 'Escalated to Amp' : 'Explanation complete'}
+            Sent to Amp in Slack
           </CardTitle>
           <Badge variant={severityVariant(result.diagnosis.severity)}>
             {result.diagnosis.severity}
@@ -285,9 +285,7 @@ function CompletedReportStatus({
         <UnavailableSources sources={result.unavailableSources} />
         <div className="flex items-center gap-2 text-xs text-emerald-100/60">
           <MessageSquareText aria-hidden="true" className="size-4" />
-          {result.ampEscalated
-            ? 'The issue-monitoring Orb was notified directly.'
-            : 'OpenAI found a reason, so the Amp Orb was not started.'}
+          Amp was mentioned with the account-scoped diagnostic logs.
         </div>
       </CardContent>
     </Card>
@@ -395,11 +393,7 @@ export default function IssueReportClient({
         const report = await handleApiResponse<IssueReportResponse>(response)
         persistIssueReport(reporterEmail, report)
         setResult(report)
-        showSuccessToast(
-          report.ampEscalated
-            ? `${report.reportId} escalated to Amp`
-            : `${report.reportId} diagnosed without Amp escalation`,
-        )
+        showSuccessToast(`${report.reportId} sent to Amp in Slack`)
         form.reset()
         setOccurredAt(toLocalDateTimeInput(new Date()))
         setRequestId(crypto.randomUUID())
@@ -443,7 +437,7 @@ export default function IssueReportClient({
               Capture what happened once. The system gathers the surrounding
               evidence and asks OpenAI why it happened. If you request details
               about a Twilio call, only records tied to your account are shown.
-              Amp is only started when OpenAI needs engineering help.
+              Every report is sent to Amp in Slack with the diagnostic logs.
             </p>
           </div>
           <div className="flex items-center gap-2 text-xs text-slate-500">

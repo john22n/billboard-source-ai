@@ -663,7 +663,7 @@ function ReportedIssuesTab({
                         }
                       >
                         {issue.diagnosis.needsAmpEscalation
-                          ? 'Escalated to Amp'
+                          ? 'Amp review recommended'
                           : 'Explained by OpenAI'}
                       </Badge>
                       <span className="font-mono text-xs text-muted-foreground">
@@ -727,7 +727,7 @@ function ReportedIssuesTab({
                       />
                       <div className="space-y-1">
                         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                          Why Amp was asked
+                          Why deeper review was recommended
                         </p>
                         <p className="text-sm text-muted-foreground">
                           {issue.diagnosis.escalationReason ??

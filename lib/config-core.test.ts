@@ -49,7 +49,9 @@ describe('server config', () => {
       VERCEL_PROJECT_ID: 'project-id',
       VERCEL_DEPLOYMENT_ID: 'deployment-id',
       VERCEL_TEAM_ID: 'team-id',
-      AMP_ISSUE_WEBHOOK_URL: 'https://webhooks.ampcode.com/example',
+      SLACK_USER_TOKEN: 'slack-user-token',
+      SLACK_AMP_CHANNEL_ID: 'CAMP123',
+      SLACK_AMP_USER_ID: 'UAMP123',
     })
 
     expect(config.openai.requireApiKey()).toBe('openai-key')
@@ -81,9 +83,11 @@ describe('server config', () => {
       deploymentId: 'deployment-id',
       teamId: 'team-id',
     })
-    expect(config.amp.requireIssueWebhookUrl()).toBe(
-      'https://webhooks.ampcode.com/example',
-    )
+    expect(config.slack.requireIssueReportingCredentials()).toEqual({
+      userToken: 'slack-user-token',
+      ampChannelId: 'CAMP123',
+      ampUserId: 'UAMP123',
+    })
   })
 
   it('requires the Vercel team ID but treats the deployment ID as optional', () => {
