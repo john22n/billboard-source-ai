@@ -18,18 +18,10 @@ import { isValidTwilioWebhook } from '@/lib/twilio-webhook'
 import twilio from 'twilio'
 import { recordOverflowAttempt } from '@/lib/call-attempt-outcomes'
 import { serverConfig } from '@/lib/config'
-
-function isVoiceAgentWindow(now: Date): boolean {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/Chicago',
-    weekday: 'short',
-    hour: 'numeric',
-    hourCycle: 'h23',
-  }).formatToParts(now)
-  const day = parts.find((part) => part.type === 'weekday')?.value
-  const hour = Number(parts.find((part) => part.type === 'hour')?.value)
-  return (day === 'Sat' || day === 'Sun') && hour >= 9 && hour < 13
-}
+import {
+  isVoiceAgentWindow,
+  voiceAgentResponse,
+} from '@/lib/voice-agent-routing'
 
 const escapeXml = (s: string): string =>
   s
@@ -109,15 +101,7 @@ export async function POST(req: Request) {
     // Redirect the live call to external TwiML, not an assignment callback or
     // the media WebSocket. Task cleanup above still runs for either destination.
     if (useVoiceAgent) {
-      const response = new twilio.twiml.VoiceResponse()
-      response.redirect(
-        { method: 'POST' },
-        'https://voicemail-agent.john22n-iii.com/',
-      )
-      return new Response(response.toString(), {
-        status: 200,
-        headers: { 'Content-Type': 'text/xml' },
-      })
+      return voiceAgentResponse()
     }
 
     // Record the terminal overflow attempt (production-only, attributed only if

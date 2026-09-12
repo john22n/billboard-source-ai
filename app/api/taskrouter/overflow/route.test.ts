@@ -19,6 +19,10 @@ vi.mock('@/lib/twilio-webhook', () => ({ isValidTwilioWebhook: mocks.valid }))
 vi.mock('@/lib/call-attempt-outcomes', () => ({
   recordOverflowAttempt: mocks.record,
 }))
+vi.mock(
+  '@/lib/voice-agent-routing',
+  () => import('../../../../lib/voice-agent-routing'),
+)
 vi.mock('@/lib/config', () => ({ serverConfig: { twilio: mocks.config } }))
 vi.mock('twilio', async (importOriginal) => {
   const actual = await importOriginal<{ default: typeof import('twilio') }>()

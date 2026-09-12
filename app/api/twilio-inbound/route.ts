@@ -1,5 +1,5 @@
 // app/api/twilio-inbound/route.ts
-// Handles incoming Twilio calls and enqueues them into TaskRouter
+// Weekend AI coverage bypasses TaskRouter; other incoming calls are enqueued.
 import { db } from '@/db'
 import { user } from '@/db/schema'
 import { eq } from 'drizzle-orm'
@@ -10,6 +10,10 @@ import {
   serverConfig,
 } from '@/lib/config'
 import { isValidTwilioWebhook } from '@/lib/twilio-webhook'
+import {
+  isVoiceAgentWindow,
+  voiceAgentResponse,
+} from '@/lib/voice-agent-routing'
 
 async function countMainCall(isProduction: boolean) {
   if (!isProduction) return
@@ -78,10 +82,17 @@ async function POST(req: Request) {
     const CallSid = formData.get('CallSid')
     const From = formData.get('From')
     const To = formData.get('To') as string
-    const workflowSid = serverConfig.taskRouter.requireWorkflowSid()
     const companyRoutingNumber =
       serverConfig.twilio.mainNumber ?? '+18338547126'
 
+    // Main and direct-number callers go straight to AI during weekend coverage.
+    // Do not look up reps or require TaskRouter configuration in this path.
+    if (isVoiceAgentWindow(new Date())) {
+      if (To === companyRoutingNumber) await countMainCall(isProduction)
+      return voiceAgentResponse()
+    }
+
+    const workflowSid = serverConfig.taskRouter.requireWorkflowSid()
     const routing = await resolveRouting(To, companyRoutingNumber, isProduction)
     if (routing instanceof Response) {
       return routing
