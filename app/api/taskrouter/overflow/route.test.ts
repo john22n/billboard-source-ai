@@ -97,10 +97,12 @@ describe('terminal overflow routing', () => {
         '<Redirect method="POST">https://voicemail-agent.john22n-iii.com/</Redirect>',
       )
       expect(xml).not.toContain('<Dial')
+      expect(xml).toContain('<Recording channels="dual" track="both"')
       expect(mocks.record).not.toHaveBeenCalled()
     } else {
       expect(xml).toContain('<Dial callerId="+15559876543">+15551234567</Dial>')
       expect(xml).not.toContain('<Redirect')
+      expect(xml).not.toContain('<Recording')
       expect(mocks.record).toHaveBeenCalledWith({
         callSid: 'CA123',
         taskSid: 'WT123',

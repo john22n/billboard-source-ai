@@ -101,7 +101,7 @@ export async function POST(req: Request) {
     // Redirect the live call to external TwiML, not an assignment callback or
     // the media WebSocket. Task cleanup above still runs for either destination.
     if (useVoiceAgent) {
-      return voiceAgentResponse()
+      return voiceAgentResponse(req.url)
     }
 
     // Record the terminal overflow attempt (production-only, attributed only if

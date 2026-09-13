@@ -75,7 +75,16 @@ describe('inbound weekend AI coverage', () => {
     expect(xml).toContain(
       '<Redirect method="POST">https://voicemail-agent.john22n-iii.com/</Redirect>',
     )
-    expect(xml).not.toMatch(/<Enqueue|<Dial|<Say/)
+    expect(xml).not.toMatch(/<Enqueue|<Dial/)
+    expect(xml).toContain(
+      '<Say>This call will be recorded and transcribed.</Say>',
+    )
+    expect(xml).toContain('<Recording channels="dual" track="both"')
+    expect(xml).toContain(
+      'recordingStatusCallback="https://app.example/api/twilio/voicemail-ai-recording#rc=3&amp;rp=ct,rt,5xx"',
+    )
+    expect(xml.indexOf('<Say>')).toBeLessThan(xml.indexOf('<Start>'))
+    expect(xml.indexOf('<Start>')).toBeLessThan(xml.indexOf('<Redirect'))
     expect(mocks.workflow).not.toHaveBeenCalled()
     expect(mocks.select).not.toHaveBeenCalled()
     expect(mocks.count).toHaveBeenCalledTimes(to === '+15551111111' ? 1 : 0)
@@ -92,6 +101,7 @@ describe('inbound weekend AI coverage', () => {
     expect(xml).toContain('<Enqueue workflowSid="WW123"')
     expect(xml).toContain(`"callType":"${callType}"`)
     expect(xml).not.toContain('<Redirect')
+    expect(xml).not.toContain('<Recording')
     expect(mocks.select).toHaveBeenCalledTimes(callType === 'direct' ? 1 : 0)
     expect(mocks.count).toHaveBeenCalledTimes(callType === 'main' ? 1 : 0)
   })

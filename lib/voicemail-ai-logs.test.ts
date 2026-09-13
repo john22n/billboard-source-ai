@@ -20,6 +20,8 @@ function clientFor(options: {
   recordings?: unknown[] | Error
   recordingCallSid?: string
   transcriptions?: unknown[] | Error
+  aiTranscripts?: unknown[] | Error
+  sentences?: unknown[]
   nextPageUrl?: string
 }) {
   const call = {
@@ -59,7 +61,15 @@ function clientFor(options: {
       .mockResolvedValue({ callSid: options.recordingCallSid ?? callSid }),
     transcriptions,
   }
-  return { calls, recordings: vi.fn(() => recording) }
+  const transcripts = Object.assign(
+    vi.fn(() => ({ sentences: { list: listResult(options.sentences) } })),
+    { list: listResult(options.aiTranscripts) },
+  )
+  return {
+    calls,
+    recordings: vi.fn(() => recording),
+    intelligence: { v2: { transcripts } },
+  }
 }
 
 const aiEvent = {
@@ -229,6 +239,15 @@ describe('voicemail AI log provider', () => {
             status: 'completed',
           },
         ],
+        aiTranscripts: [{ sid: 'GT1', status: 'completed' }],
+        sentences: [
+          {
+            startTime: '1.0',
+            sentenceIndex: 0,
+            mediaChannel: 1,
+            transcript: 'I need a billboard.',
+          },
+        ],
       }) as never,
     )
     expect(detail.errors).toEqual([
@@ -246,6 +265,11 @@ describe('voicemail AI log provider', () => {
         status: 'completed',
         transcriptions: [
           { sid: 'TR1', text: 'Please call back.', status: 'completed' },
+          {
+            sid: 'GT1',
+            text: 'Channel 1: I need a billboard.',
+            status: 'completed',
+          },
         ],
       },
     ])
