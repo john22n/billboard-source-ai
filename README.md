@@ -51,6 +51,24 @@ The GitHub Actions workflow in `.github/workflows/ci-cd.yml`:
 
 Vercel's native Git integration owns deployments: pull requests receive preview deployments and pushes to `main` produce production deployments. GitHub Actions does not require Vercel credentials and does not build or deploy the application.
 
+## Admin voicemail AI logs
+
+The **Voicemail AI** admin tab reads the last 21 days of Twilio call history.
+Calls are included only when Twilio Call Events show a request to
+`voicemail-agent.john22n-iii.com`; weekend timing alone is not proof of an AI call.
+Use **Check older calls** to scan additional batches within the same date range.
+Expand a call for Twilio notifications, recordings, and existing recording
+transcripts. All three API endpoints require an admin session, and audio is
+proxied with server-side Twilio credentials rather than exposing credentials
+to the browser. No database migration or Twilio configuration change is needed.
+
+Call Events may not appear until 15 minutes after a call ends. Missing provider
+resources and bounded result limits appear as notices, not as proof that no
+errors occurred. This feature does not enable recording/transcription, restore
+deleted media, or retrieve AI transcripts stored only in Nutshell. The older
+Twilio recording-transcription API is deprecated but can still return existing
+transcripts. No new transcripts are generated or billed by this tab.
+
 ## Admin issue reporting
 
 Signed-in employees can open **Report an Issue** from the dashboard sidebar. A report collects a bounded diagnostic window from Twilio and the current Vercel deployment, scopes provider records to the reporting employee's phone number, Twilio client identity, worker SID, and related Call SIDs, and redacts credentials while retaining operational email addresses and phone numbers. OpenAI returns only a reason for the issue, never a fix. When an employee asks for information about a Twilio call they had, the result includes only contact details and call records tied to that employee's account. The finding remains available when the employee navigates away and returns during the same browser session; logging out or moving the Twilio worker to Offline clears it. Every accepted report is posted as a new message in the configured Slack channel with the account-scoped diagnostic logs and an explicit Amp mention. Administrators can review and resolve retained reports from the Admin Panel.
