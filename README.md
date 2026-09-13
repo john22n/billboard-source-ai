@@ -101,3 +101,13 @@ OPENAI_API_KEY=
 ```
 
 The cron runs at both possible UTC equivalents and performs the sync only during the matching Central-time hour, so daylight saving time does not shift the local schedule.
+
+## Weekend voicemail AI recordings and transcripts
+
+Saturday/Sunday calls routed through this app from 9 AM inclusive to 1 PM exclusive in `America/Chicago` hear a recording/transcription notice, start a dual-channel Twilio recording, and redirect to the AI agent. The recording continues through the AI conversation. Calls sent directly to the agent's hostname bypass this routing and recording setup.
+
+Before deploying, create a Twilio Conversation Intelligence (classic) Service in the same account as `TWILIO_ACCOUNT_SID`, with unique name `weekend-voicemail-ai`, language `en-US`, **AutoTranscribe disabled**, and **DataLogging disabled**. The callback resolves this unique name; no additional Vercel environment variable is needed. Do not enable account-wide automatic transcription, which would transcribe ordinary sales calls too.
+
+Twilio posts completed recordings to the signature-validated `/api/twilio/voicemail-ai-recording` endpoint. It verifies recording ownership and requests an Intelligence transcript using the Recording SID, with the Call SID as its customer key. Callback retries do not create additional transcripts. Connection/read failures and 5xx responses have bounded Twilio retries; persistent failures appear in Vercel logs as `Voicemail AI transcription request failed`. After resolving the cause, replay the recording callback using Twilio's signed webhook mechanism or request the transcript for that Recording SID through the Intelligence API.
+
+The admin Voicemail AI tab shows recording audio, legacy Twilio transcripts, and Intelligence transcript text/status for the existing rolling 21-day call window. Refresh after transcription completes; Call Events may take 15 minutes to appear. A 21-day display window is not a Twilio deletion policy. Recording/storage/transcription charges apply, and old unrecorded calls cannot be recovered. Verify the spoken notice meets the business's recording-consent requirements before release.

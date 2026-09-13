@@ -89,7 +89,7 @@ async function POST(req: Request) {
     // Do not look up reps or require TaskRouter configuration in this path.
     if (isVoiceAgentWindow(new Date())) {
       if (To === companyRoutingNumber) await countMainCall(isProduction)
-      return voiceAgentResponse()
+      return voiceAgentResponse(req.url)
     }
 
     const workflowSid = serverConfig.taskRouter.requireWorkflowSid()

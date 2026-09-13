@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import twilio from 'twilio'
 import { z } from 'zod'
+import { getVoicemailAITranscripts } from './voicemail-ai-transcripts'
 import type {
   VoicemailAICall,
   VoicemailAIDetail,
@@ -273,6 +274,9 @@ export async function getVoicemailAIDetail(
           `Transcriptions were unavailable for recording ${recording.sid}.`,
         )
       }
+      transcriptions.push(
+        ...(await getVoicemailAITranscripts(client, recording.sid, warnings)),
+      )
       return {
         sid: recording.sid,
         duration:
