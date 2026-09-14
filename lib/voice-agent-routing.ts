@@ -14,7 +14,6 @@ export function isVoiceAgentWindow(now: Date): boolean {
 
 export function voiceAgentResponse(requestUrl: string): Response {
   const response = new twilio.twiml.VoiceResponse()
-  response.say('This call will be recorded and transcribed.')
   response.start().recording({
     channels: 'dual',
     track: 'both',
