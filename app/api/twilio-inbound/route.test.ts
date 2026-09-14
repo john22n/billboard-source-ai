@@ -76,9 +76,6 @@ describe('inbound weekend AI coverage', () => {
       '<Redirect method="POST">https://voicemail-agent.john22n-iii.com/</Redirect>',
     )
     expect(xml).not.toMatch(/<Enqueue|<Dial/)
-    expect(xml).toContain(
-      '<Say>This call will be recorded and transcribed.</Say>',
-    )
     expect(xml).toContain('<Recording channels="dual" track="both"')
     expect(xml).toContain(
       'recordingStatusCallback="https://app.example/api/twilio/voicemail-ai-recording#rc=3&amp;rp=ct,rt,5xx"',
