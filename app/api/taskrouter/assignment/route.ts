@@ -7,6 +7,78 @@
 
 import { serverConfig } from '@/lib/config'
 import { isValidTwilioWebhook } from '@/lib/twilio-webhook'
+import { getUserCellPhoneByEmail } from '@/lib/dal'
+
+function overflowResponse(
+  appUrl: string,
+  task: { call_sid?: string; from?: string },
+  taskSid: string,
+  workspaceSid: string,
+  availableActivitySid: string,
+) {
+  if (!task.call_sid) {
+    console.error('No call_sid in task attributes; cannot redirect to overflow')
+    return Response.json({ instruction: 'reject' })
+  }
+  const overflowUrl = new URL(`${appUrl}/api/taskrouter/overflow`)
+  overflowUrl.searchParams.set('taskSid', taskSid)
+  overflowUrl.searchParams.set('workspaceSid', workspaceSid)
+  overflowUrl.searchParams.set('callSid', task.call_sid)
+  if (task.from) overflowUrl.searchParams.set('callerFrom', task.from)
+  serverConfig.app.addVercelBypassToken(overflowUrl)
+
+  // The overflow handler completes the task after fetching its attributes.
+  return Response.json({
+    instruction: 'redirect',
+    call_sid: task.call_sid,
+    url: overflowUrl.toString(),
+    accept: true,
+    post_work_activity_sid: availableActivitySid,
+  })
+}
+
+function simultaneousRingResponse(
+  appUrl: string,
+  context: {
+    taskSid: string
+    workspaceSid: string
+    workerSid: string
+    reservationSid: string
+    availableActivitySid: string
+  },
+  worker: { email?: string; contact_uri?: string },
+  task: { call_sid?: string; from?: string },
+  cellPhone: string | null,
+) {
+  if (!cellPhone) return null
+  if (!task.call_sid) {
+    console.error('No call_sid in task attributes; using browser conference')
+    return null
+  }
+
+  const simDialUrl = new URL(`${appUrl}/api/taskrouter/simultaneous-dial`)
+  simDialUrl.search = new URLSearchParams({
+    taskSid: context.taskSid,
+    workspaceSid: context.workspaceSid,
+    workerSid: context.workerSid,
+    reservationSid: context.reservationSid,
+    clientIdentity: (worker.contact_uri ?? `client:${worker.email}`).replace(
+      /^client:/,
+      '',
+    ),
+    cellPhone,
+    callerFrom: task.from ?? '',
+  }).toString()
+  serverConfig.app.addVercelBypassToken(simDialUrl)
+
+  return Response.json({
+    instruction: 'redirect',
+    call_sid: task.call_sid,
+    url: simDialUrl.toString(),
+    accept: true,
+    post_work_activity_sid: context.availableActivitySid,
+  })
+}
 
 export async function POST(req: Request) {
   if (!(await isValidTwilioWebhook(req))) {
@@ -29,8 +101,6 @@ export async function POST(req: Request) {
     let workerAttrs: {
       email?: string
       contact_uri?: string
-      simultaneous_ring?: boolean
-      cell_phone?: string
     } = {}
     let taskAttrs: {
       call_sid?: string
@@ -63,33 +133,13 @@ export async function POST(req: Request) {
     // Billboard Source AI voicemail flow.
     if (workerAttrs.email === 'voicemail@system') {
       console.log('📤 Terminal worker assigned - redirecting to overflow')
-
-      const overflowUrl = new URL(`${appUrl}/api/taskrouter/overflow`)
-      overflowUrl.searchParams.set('taskSid', taskSid)
-      overflowUrl.searchParams.set('workspaceSid', workspaceSid)
-      if (taskAttrs.call_sid)
-        overflowUrl.searchParams.set('callSid', taskAttrs.call_sid)
-      if (taskAttrs.from)
-        overflowUrl.searchParams.set('callerFrom', taskAttrs.from)
-      serverConfig.app.addVercelBypassToken(overflowUrl)
-
-      const callSid = taskAttrs.call_sid
-      if (!callSid) {
-        console.error('❌ No call_sid in task attributes - cannot redirect')
-        return Response.json({ instruction: 'reject' })
-      }
-
-      const instruction = {
-        instruction: 'redirect',
-        call_sid: callSid,
-        url: overflowUrl.toString(),
-        accept: true,
-        post_work_activity_sid: availableActivitySid,
-      }
-
-      // Note: the /overflow handler completes the task; we do not complete it
-      // here so the redirect can fetch attributes if needed.
-      return Response.json(instruction)
+      return overflowResponse(
+        appUrl,
+        taskAttrs,
+        taskSid,
+        workspaceSid,
+        availableActivitySid,
+      )
     }
 
     // ── MARK SALES REP AS OFFERED ────────────────────────────────────────────
@@ -136,43 +186,23 @@ export async function POST(req: Request) {
     }
 
     // ── SIMULTANEOUS RING ────────────────────────────────────────────────────
-    if (workerAttrs.simultaneous_ring && workerAttrs.cell_phone) {
-      console.log(
-        '📱 Worker has simultaneous_ring=true — using parallel dial instead of conference',
-      )
-
-      const callSid = taskAttrs.call_sid
-
-      if (!callSid) {
-        console.error(
-          '❌ No call_sid in task attributes — falling through to conference for simultaneous-ring worker',
-        )
-      } else {
-        const clientIdentity = (
-          workerAttrs.contact_uri ?? `client:${workerAttrs.email}`
-        ).replace(/^client:/, '')
-
-        const simDialUrl = new URL(`${appUrl}/api/taskrouter/simultaneous-dial`)
-        simDialUrl.searchParams.set('taskSid', taskSid)
-        simDialUrl.searchParams.set('workspaceSid', workspaceSid)
-        simDialUrl.searchParams.set('clientIdentity', clientIdentity)
-        simDialUrl.searchParams.set('cellPhone', workerAttrs.cell_phone)
-        simDialUrl.searchParams.set('callerFrom', taskAttrs.from ?? '')
-        simDialUrl.searchParams.set('workerSid', workerSid)
-        simDialUrl.searchParams.set('reservationSid', reservationSid)
-        serverConfig.app.addVercelBypassToken(simDialUrl)
-
-        const simRingInstruction = {
-          instruction: 'redirect',
-          call_sid: callSid,
-          url: simDialUrl.toString(),
-          accept: true,
-          post_work_activity_sid: availableActivitySid,
-        }
-
-        return Response.json(simRingInstruction)
-      }
-    }
+    // Read the account on each offer so saving/removing a cell takes effect
+    // without syncing TaskRouter attributes. Legacy worker flags are ignored.
+    const cellPhone = await getUserCellPhoneByEmail(workerAttrs.email)
+    const simultaneous = simultaneousRingResponse(
+      appUrl,
+      {
+        taskSid,
+        workspaceSid,
+        workerSid,
+        reservationSid,
+        availableActivitySid,
+      },
+      workerAttrs,
+      taskAttrs,
+      cellPhone,
+    )
+    if (simultaneous) return simultaneous
     // ── END SIMULTANEOUS RING ────────────────────────────────────────────────
 
     // ── NORMAL CONFERENCE ────────────────────────────────────────────────────

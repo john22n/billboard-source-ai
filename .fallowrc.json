@@ -4,7 +4,9 @@
   "entry": ["src/index.{ts,tsx,js,jsx}", "src/main.{ts,tsx,js,jsx}"],
   "ignoreDependencies": [
     // Loaded by FlatCompat through the "next/*" config names in eslint.config.mjs.
-    "eslint-config-next"
+    "eslint-config-next",
+    // Next.js uses react-dom at runtime; the direct import is in DOM tests.
+    "react-dom"
   ],
   "duplicates": {
     // Hide pair-only clones; focus on widespread copy-paste

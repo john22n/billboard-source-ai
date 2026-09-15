@@ -22,6 +22,7 @@ export const user = pgTable(
     password: varchar('password', { length: 64 }),
     role: varchar('role', { length: 20 }).default('user'),
     twilioPhoneNumber: varchar('twilio_phone_number', { length: 20 }),
+    cellPhoneNumber: varchar('cell_phone_number', { length: 16 }),
     taskRouterWorkerSid: varchar('taskrouter_worker_sid', { length: 34 }),
     workerActivity: varchar('worker_activity', { length: 20 }).default(
       'offline',
