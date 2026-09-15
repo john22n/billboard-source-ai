@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { SignupForm } from '@/components/sign-up'
 import {
@@ -39,8 +39,10 @@ import {
 import {
   deleteUsers,
   updateTwilioPhone,
+  updateCellPhone,
   resetCallCounts,
 } from '@/actions/user-actions'
+import { normalizeCellPhone } from '@/lib/cell-phone'
 import { useRouter } from 'next/navigation'
 import type { User, NutshellLead, StoredIssueDiagnosis } from '@/db/schema'
 import {
@@ -265,6 +267,79 @@ function AdminHeader({
   )
 }
 
+function CellPhoneInput({ user, disabled }: { user: User; disabled: boolean }) {
+  const [value, setValue] = useState(user.cellPhoneNumber ?? '')
+  const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const saved = useRef(user.cellPhoneNumber ?? '')
+  const inFlight = useRef(false)
+  const router = useRouter()
+  const errorId = `cell-phone-error-${user.id}`
+
+  async function save() {
+    if (inFlight.current) return
+    try {
+      const phone = normalizeCellPhone(value) ?? ''
+      setError(null)
+      setValue(phone)
+      if (phone === saved.current) return
+      inFlight.current = true
+      setSaving(true)
+      const result = await updateCellPhone(user.id, phone)
+      if (!result.success) {
+        setError(result.message ?? 'Failed to save cell phone number')
+        return
+      }
+      saved.current = phone
+      showSuccessToast(phone ? 'Cell phone saved' : 'Cell phone removed')
+      router.refresh()
+    } catch (error) {
+      setError(getErrorMessage(error))
+    } finally {
+      inFlight.current = false
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="min-w-44 max-w-56 space-y-1">
+      <Input
+        type="tel"
+        aria-label={`Cell phone for ${user.email}`}
+        autoComplete="tel"
+        className="h-8"
+        placeholder="+1 303 555 0123"
+        value={value}
+        onChange={(event) => setValue(event.target.value)}
+        onBlur={() => void save()}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault()
+            event.currentTarget.blur()
+          }
+        }}
+        disabled={disabled || saving}
+        aria-invalid={!!error}
+        aria-describedby={error ? errorId : undefined}
+      />
+      {error && (
+        <p
+          id={errorId}
+          role="alert"
+          className="text-xs text-destructive whitespace-normal"
+        >
+          {error}
+        </p>
+      )}
+      {saving && (
+        <span role="status" className="text-xs text-muted-foreground">
+          Saving…
+        </span>
+      )}
+    </div>
+  )
+}
+
 interface UsersTabProps {
   initialUsers: User[]
   selectedUsers: string[]
@@ -303,6 +378,7 @@ function UsersTab({
             <TableHead>Email</TableHead>
             <TableHead>Role</TableHead>
             <TableHead>Twilio Phone</TableHead>
+            <TableHead>Cell Phone</TableHead>
             <TableHead className="text-right">
               <div className="flex items-center justify-end gap-2">
                 <Button
@@ -330,7 +406,7 @@ function UsersTab({
           {initialUsers.length === 0 ? (
             <TableRow>
               <TableCell
-                colSpan={7}
+                colSpan={8}
                 className="text-center text-muted-foreground"
               >
                 No users found
@@ -373,6 +449,9 @@ function UsersTab({
                     }
                     disabled={isPending}
                   />
+                </TableCell>
+                <TableCell>
+                  <CellPhoneInput user={user} disabled={isPending} />
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
                   <span className="font-medium">

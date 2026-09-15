@@ -53,6 +53,21 @@ export const getUserByEmail = cache(async (email: string) => {
   }
 })
 
+export async function getUserCellPhoneByEmail(email?: string) {
+  if (!email) return null
+  try {
+    const [account] = await db
+      .select({ cellPhoneNumber: user.cellPhoneNumber })
+      .from(user)
+      .where(eq(user.email, email))
+      .limit(1)
+    return account?.cellPhoneNumber ?? null
+  } catch {
+    console.error('Error getting user cell phone; using browser-only dialing')
+    return null
+  }
+}
+
 export async function createPendingLog(
   userId: string,
   sessionId: string,
@@ -135,6 +150,18 @@ export async function updateUserTwilioPhone(
     .where(eq(user.id, userId))
     .returning()
   return result[0] || null
+}
+
+export async function updateUserCellPhone(
+  userId: string,
+  cellPhoneNumber: string | null,
+) {
+  const [updated] = await db
+    .update(user)
+    .set({ cellPhoneNumber })
+    .where(eq(user.id, userId))
+    .returning()
+  return updated ?? null
 }
 
 export function getCurrentOpenAICostRange(now = new Date()) {

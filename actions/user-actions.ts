@@ -3,10 +3,36 @@
 import {
   deleteUsersByIds,
   updateUserTwilioPhone,
+  updateUserCellPhone,
   resetAllCallCounts,
 } from '@/lib/dal'
 import { getSession } from '@/lib/auth'
 import { revalidatePath } from 'next/cache'
+import { normalizeCellPhone } from '@/lib/cell-phone'
+
+export async function updateCellPhone(userId: string, value: string) {
+  const session = await getSession()
+  if (!session?.userId) return { success: false, message: 'Unauthorized' }
+  if (session.role !== 'admin') {
+    return { success: false, message: 'Admin access required' }
+  }
+
+  let phone: string | null
+  try {
+    phone = normalizeCellPhone(value)
+  } catch {
+    return { success: false, message: 'Enter a valid cell phone number.' }
+  }
+
+  try {
+    const updated = await updateUserCellPhone(userId, phone)
+    if (!updated) return { success: false, message: 'User not found' }
+    revalidatePath('/admin')
+    return { success: true, phone }
+  } catch {
+    return { success: false, message: 'Failed to save cell phone number' }
+  }
+}
 
 export async function deleteUsers(ids: string[]) {
   try {
