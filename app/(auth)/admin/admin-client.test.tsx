@@ -4,8 +4,15 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { User } from '@/db/schema'
 
-const mocks = vi.hoisted(() => ({ save: vi.fn(), refresh: vi.fn() }))
-vi.mock('@/actions/user-actions', () => ({ updateCellPhone: mocks.save }))
+const mocks = vi.hoisted(() => ({
+  save: vi.fn(),
+  twilio: vi.fn(),
+  refresh: vi.fn(),
+}))
+vi.mock('@/actions/user-actions', () => ({
+  updateCellPhone: mocks.save,
+  updateTwilioPhone: mocks.twilio,
+}))
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: mocks.refresh }),
 }))
@@ -23,7 +30,7 @@ const account: User = {
   email: 'rep@example.com',
   password: null,
   role: 'user',
-  twilioPhoneNumber: null,
+  twilioPhoneNumber: '+12025550128',
   cellPhoneNumber: '+13035550124',
   taskRouterWorkerSid: null,
   workerActivity: 'offline',
@@ -42,6 +49,7 @@ beforeEach(async () => {
     vi.fn(async () => Response.json({ issues: [], availability: {} })),
   )
   mocks.save.mockResolvedValue({ success: true })
+  mocks.twilio.mockResolvedValue({ success: true })
   container = document.createElement('div')
   document.body.append(container)
   root = createRoot(container)
@@ -90,13 +98,46 @@ it('validates on Enter, saves a normalized number once, and ignores unchanged bl
     )
   })
   expect(mocks.save).toHaveBeenCalledExactlyOnceWith('rep', '+13035550123')
-  expect(input.value).toBe('+13035550123')
+  expect(input.value).toBe('(303) 555-0123')
   expect(mocks.refresh).toHaveBeenCalledOnce()
   await act(async () => {
     input.focus()
     input.blur()
   })
   expect(mocks.save).toHaveBeenCalledTimes(1)
+})
+
+it('formats stored US numbers without saving on unchanged blur', async () => {
+  expect(input.value).toBe('(303) 555-0124')
+  await act(async () => {
+    input.focus()
+    input.blur()
+  })
+  input = container.querySelector<HTMLInputElement>(
+    '[aria-label="Twilio phone number"]',
+  )!
+  expect(input.value).toBe('(202) 555-0128')
+  await type('2025550128')
+  await act(async () => input.blur())
+  expect(input.value).toBe('(202) 555-0128')
+  expect(mocks.save).not.toHaveBeenCalled()
+  expect(mocks.twilio).not.toHaveBeenCalled()
+})
+
+it('saves edited US Twilio numbers in E.164 format', async () => {
+  input = container.querySelector<HTMLInputElement>(
+    '[aria-label="Twilio phone number"]',
+  )!
+  await type('(415) 555-0129')
+  await act(async () => input.blur())
+  expect(mocks.twilio).toHaveBeenCalledExactlyOnceWith('rep', '+14155550129')
+})
+
+it('preserves international cell numbers', async () => {
+  await type('+442079460018')
+  await act(async () => input.blur())
+  expect(input.value).toBe('+442079460018')
+  expect(mocks.save).toHaveBeenCalledExactlyOnceWith('rep', '+442079460018')
 })
 
 it('rejects invalid input on blur and allows clearing the saved number', async () => {

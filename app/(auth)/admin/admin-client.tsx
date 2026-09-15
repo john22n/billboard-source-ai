@@ -43,6 +43,7 @@ import {
   resetCallCounts,
 } from '@/actions/user-actions'
 import { normalizeCellPhone } from '@/lib/cell-phone'
+import { parsePhoneNumberFromString } from 'libphonenumber-js/max'
 import { useRouter } from 'next/navigation'
 import type { User, NutshellLead, StoredIssueDiagnosis } from '@/db/schema'
 import {
@@ -267,8 +268,18 @@ function AdminHeader({
   )
 }
 
+function formatUSPhone(value: string | null) {
+  const phone = parsePhoneNumberFromString(value ?? '', {
+    defaultCountry: 'US',
+    extract: false,
+  })
+  return phone?.country === 'US' && phone.isValid() && !phone.ext
+    ? phone.formatNational()
+    : (value ?? '')
+}
+
 function CellPhoneInput({ user, disabled }: { user: User; disabled: boolean }) {
-  const [value, setValue] = useState(user.cellPhoneNumber ?? '')
+  const [value, setValue] = useState(formatUSPhone(user.cellPhoneNumber))
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const saved = useRef(user.cellPhoneNumber ?? '')
@@ -281,7 +292,7 @@ function CellPhoneInput({ user, disabled }: { user: User; disabled: boolean }) {
     try {
       const phone = normalizeCellPhone(value) ?? ''
       setError(null)
-      setValue(phone)
+      setValue(formatUSPhone(phone))
       if (phone === saved.current) return
       inFlight.current = true
       setSaving(true)
@@ -308,7 +319,7 @@ function CellPhoneInput({ user, disabled }: { user: User; disabled: boolean }) {
         aria-label={`Cell phone for ${user.email}`}
         autoComplete="tel"
         className="h-8"
-        placeholder="+1 303 555 0123"
+        placeholder="(303) 555-0123"
         value={value}
         onChange={(event) => setValue(event.target.value)}
         onBlur={() => void save()}
@@ -431,9 +442,12 @@ function UsersTab({
                     type="tel"
                     aria-label="Twilio phone number"
                     autoComplete="tel"
-                    className="h-8 w-32"
-                    placeholder="+1234567890"
-                    value={phoneEdits[user.id] ?? user.twilioPhoneNumber ?? ''}
+                    className="h-8 w-44"
+                    placeholder="(303) 555-0123"
+                    value={
+                      phoneEdits[user.id] ??
+                      formatUSPhone(user.twilioPhoneNumber)
+                    }
                     onChange={(e) =>
                       setPhoneEdits((prev) => ({
                         ...prev,
@@ -1164,8 +1178,20 @@ function useUserController() {
   }
 
   const handlePhoneUpdate = (userId: string, currentValue: string | null) => {
-    const newValue = phoneEdits[userId]
-    if (newValue === undefined || newValue === (currentValue ?? '')) return
+    const edit = phoneEdits[userId]
+    if (edit === undefined) return
+    const phone = parsePhoneNumberFromString(edit, {
+      defaultCountry: 'US',
+      extract: false,
+    })
+    const newValue =
+      phone?.country === 'US' && phone.isValid() && !phone.ext
+        ? phone.number
+        : edit
+    if (newValue === (currentValue ?? '')) {
+      setPhoneEdits((prev) => ({ ...prev, [userId]: formatUSPhone(newValue) }))
+      return
+    }
 
     runUserAction(updateTwilioPhone(userId, newValue), () => {
       setPhoneEdits((prev) => {
