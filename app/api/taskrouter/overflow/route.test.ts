@@ -67,19 +67,28 @@ describe('terminal overflow routing', () => {
   afterEach(() => vi.useRealTimers())
 
   it.each([
-    ['2026-09-12T13:59:59Z', false], // Saturday CDT 08:59:59
-    ['2026-09-12T14:00:00Z', true],
-    ['2026-09-12T17:59:59Z', true],
-    ['2026-09-12T18:00:00Z', false],
-    ['2026-09-13T14:00:00Z', true], // Sunday
+    ['2026-09-12T10:59:59Z', false], // Saturday CDT 05:59:59
+    ['2026-09-12T11:00:00Z', true], // Saturday CDT 06:00
+    ['2026-09-13T02:59:59Z', true], // Saturday CDT 21:59:59
+    ['2026-09-13T03:00:00Z', false], // Saturday CDT 22:00
+    ['2026-09-13T10:59:59Z', false], // Sunday CDT 05:59:59
+    ['2026-09-13T11:00:00Z', true],
+    ['2026-09-14T02:59:59Z', true], // Sunday evening, Monday UTC
+    ['2026-09-14T03:00:00Z', false],
     ['2026-09-11T15:00:00Z', false], // Friday
     ['2026-09-14T15:00:00Z', false], // Monday
-    ['2026-01-10T14:59:59Z', false], // Saturday CST
-    ['2026-01-10T15:00:00Z', true],
-    ['2026-01-11T18:59:59Z', true],
-    ['2026-01-11T19:00:00Z', false],
-    ['2026-03-08T14:00:00Z', true], // DST begins
-    ['2026-11-01T15:00:00Z', true], // DST ends
+    ['2026-01-10T11:59:59Z', false], // Saturday CST 05:59:59
+    ['2026-01-10T12:00:00Z', true],
+    ['2026-01-11T03:59:59Z', true], // Saturday CST 21:59:59
+    ['2026-01-11T04:00:00Z', false],
+    ['2026-01-11T11:59:59Z', false], // Sunday CST 05:59:59
+    ['2026-01-11T12:00:00Z', true],
+    ['2026-01-12T03:59:59Z', true],
+    ['2026-01-12T04:00:00Z', false],
+    ['2026-03-08T10:59:59Z', false], // DST begins: before 6am CDT
+    ['2026-03-08T11:00:00Z', true],
+    ['2026-11-01T11:59:59Z', false], // DST ends: before 6am CST
+    ['2026-11-01T12:00:00Z', true],
   ])('routes at %s (voice agent: %s)', async (time, voiceAgent) => {
     vi.setSystemTime(new Date(time))
     const response = await POST(request())

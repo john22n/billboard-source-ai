@@ -4,7 +4,7 @@ import { isValidTwilioWebhook } from '@/lib/twilio-webhook'
  * Overflow TwiML Handler (Feature 3)
  *
  * Terminal handoff after the allowed Sales Rep Call Attempts are exhausted.
- * Redirects to the voice agent Saturday/Sunday 9am–1pm Central (DST-aware).
+ * Redirects to the voice agent Saturday/Sunday 6am–10pm Central (DST-aware).
  * Otherwise dials the configured Overflow Number (TWILIO_OVERFLOW_NUMBER).
  *
  * The Overflow Number is terminal and external to Billboard Source AI:

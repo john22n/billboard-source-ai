@@ -9,7 +9,7 @@ export function isVoiceAgentWindow(now: Date): boolean {
   }).formatToParts(now)
   const day = parts.find((part) => part.type === 'weekday')?.value
   const hour = Number(parts.find((part) => part.type === 'hour')?.value)
-  return (day === 'Sat' || day === 'Sun') && hour >= 9 && hour < 13
+  return (day === 'Sat' || day === 'Sun') && hour >= 6 && hour < 22
 }
 
 export function voiceAgentResponse(requestUrl: string): Response {

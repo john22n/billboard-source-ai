@@ -104,7 +104,7 @@ The cron runs at both possible UTC equivalents and performs the sync only during
 
 ## Weekend voicemail AI recordings and transcripts
 
-Saturday/Sunday calls routed through this app from 9 AM inclusive to 1 PM exclusive in `America/Chicago` hear a recording/transcription notice, start a dual-channel Twilio recording, and redirect to the AI agent. The recording continues through the AI conversation. Calls sent directly to the agent's hostname bypass this routing and recording setup.
+Saturday/Sunday calls routed through this app from 6 AM inclusive to 10 PM exclusive in `America/Chicago` hear a recording/transcription notice, start a dual-channel Twilio recording, and redirect to the AI agent. The recording continues through the AI conversation. Calls sent directly to the agent's hostname bypass this routing and recording setup.
 
 Before deploying, create a Twilio Conversation Intelligence (classic) Service in the same account as `TWILIO_ACCOUNT_SID`, with unique name `weekend-voicemail-ai`, language `en-US`, **AutoTranscribe disabled**, and **DataLogging disabled**. The callback resolves this unique name; no additional Vercel environment variable is needed. Do not enable account-wide automatic transcription, which would transcribe ordinary sales calls too.
 
