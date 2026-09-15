@@ -57,10 +57,12 @@ describe('inbound weekend AI coverage', () => {
   afterEach(() => vi.useRealTimers())
 
   it.each([
-    ['2026-09-12T14:00:00Z', '+15551111111'], // Saturday 9am CDT, main
-    ['2026-09-12T17:59:59Z', '+15552222222'], // Saturday before 1pm, direct
-    ['2026-09-13T14:00:00Z', '+15552222222'], // Sunday 9am CDT
-    ['2026-01-11T15:00:00Z', '+15551111111'], // Sunday 9am CST
+    ['2026-09-12T11:00:00Z', '+15551111111'], // Saturday 6am CDT, main
+    ['2026-09-13T02:59:59Z', '+15552222222'], // Saturday before 10pm CDT, direct
+    ['2026-09-13T11:00:00Z', '+15552222222'], // Sunday 6am CDT
+    ['2026-09-14T02:59:59Z', '+15551111111'], // Sunday before 10pm CDT (Monday UTC)
+    ['2026-01-11T12:00:00Z', '+15551111111'], // Sunday 6am CST
+    ['2026-01-12T03:59:59Z', '+15552222222'], // Sunday before 10pm CST
   ])('bypasses reps and TaskRouter at %s for %s', async (time, to) => {
     vi.setSystemTime(new Date(time))
     mocks.workflow.mockImplementation(() => {
@@ -88,9 +90,12 @@ describe('inbound weekend AI coverage', () => {
   })
 
   it.each([
-    ['2026-09-12T13:59:59Z', '+15551111111', 'main'],
-    ['2026-09-12T18:00:00Z', '+15552222222', 'direct'],
-    ['2026-09-13T18:00:00Z', '+15551111111', 'main'],
+    ['2026-09-12T10:59:59Z', '+15551111111', 'main'], // Saturday before 6am CDT
+    ['2026-09-13T03:00:00Z', '+15552222222', 'direct'], // Saturday 10pm CDT
+    ['2026-09-13T10:59:59Z', '+15552222222', 'direct'], // Sunday before 6am CDT
+    ['2026-09-14T03:00:00Z', '+15551111111', 'main'], // Sunday 10pm CDT
+    ['2026-01-11T11:59:59Z', '+15551111111', 'main'], // Sunday before 6am CST
+    ['2026-01-12T04:00:00Z', '+15552222222', 'direct'], // Sunday 10pm CST
     ['2026-09-14T15:00:00Z', '+15552222222', 'direct'],
   ])('keeps normal routing at %s for %s', async (time, to, callType) => {
     vi.setSystemTime(new Date(time))
