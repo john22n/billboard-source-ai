@@ -400,6 +400,7 @@ function requestBody(
     revision: text,
     logo: state.brand?.logo || null,
     logoReceipt: state.brand?.receipt || null,
+    brandNotes: state.brand?.notes || '',
   }
 }
 

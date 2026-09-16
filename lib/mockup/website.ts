@@ -47,7 +47,7 @@ export async function fetchPublicWebsite(
         family: pinned.family,
         headers: {
           'User-Agent': 'BillboardSource-BrandReview/1.0',
-          Accept: 'text/html,image/png,image/jpeg,image/webp',
+          Accept: 'text/html,text/css,image/png,image/jpeg,image/webp',
           'Accept-Encoding': 'identity',
         },
         lookup: (_host, _options, callback) =>
@@ -105,7 +105,9 @@ export async function reviewWebsite(website: string) {
     }
   try {
     const page = await fetchPublicWebsite(
-      /^https?:\/\//i.test(website) ? website : `https://${website}`,
+      /^https?:\/\//i.test(website)
+        ? website.replace(/^http:/i, 'https:')
+        : `https://${website}`,
     )
     if (page.type !== 'text/html') throw new Error('Not an HTML website')
     const $ = load(page.bytes.toString('utf8'))
@@ -122,12 +124,20 @@ export async function reviewWebsite(website: string) {
         ),
       )
       .slice(0, 3)
-    const logo = await retrieveLogo(
-      candidates.map((el) => $(el).attr('src')),
-      page.url,
-    )
+    const [logo, linkedStyles] = await Promise.all([
+      retrieveLogo(
+        candidates.map((el) => $(el).attr('src')),
+        page.url,
+      ),
+      retrieveStyles(
+        $('link[rel~="stylesheet"][href]')
+          .toArray()
+          .map((el) => $(el).attr('href')!),
+        page.url,
+      ),
+    ])
     const colors = $('meta[name="theme-color"]').attr('content') || ''
-    const styles = $('style').text().slice(0, 4000)
+    const styles = `${styleEvidence($('style').text())}\n${linkedStyles}`
     $('script,style,nav,footer,noscript').remove()
     return {
       text: `${$('title').text()}\n${$('meta[name="description"]').attr('content') || ''}\nTheme color: ${colors}\nStyles: ${styles}\n${$('body').text().replace(/\s+/g, ' ').slice(0, 12000)}`,
@@ -144,6 +154,42 @@ export async function reviewWebsite(website: string) {
         'The website could not be safely reviewed. The advertiser name will appear as text; no invented logo.',
     }
   }
+}
+
+function styleEvidence(css: string) {
+  return (
+    css.match(
+      /(?:--[\w-]{1,100}|color|background(?:-color)?|font-family|font-weight)\s{0,20}:[^;{}]{1,500}/gi,
+    ) || []
+  )
+    .slice(0, 120)
+    .join('; ')
+    .slice(0, 6000)
+}
+
+async function retrieveStyles(sources: string[], website: URL) {
+  const urls = sources.flatMap((src) => {
+    try {
+      const url = new URL(src, website)
+      return url.origin === website.origin ? [url.href] : []
+    } catch {
+      return []
+    }
+  })
+  const styles = await Promise.all(
+    [...new Set(urls)].slice(0, 2).map(async (url) => {
+      try {
+        // No redirects or CSS imports: same-site evidence only, with the same SSRF checks.
+        const response = await fetchPublicWebsite(url, 200_000, 0)
+        return response.type === 'text/css'
+          ? styleEvidence(response.bytes.toString('utf8'))
+          : ''
+      } catch {
+        return ''
+      }
+    }),
+  )
+  return styles.join('\n')
 }
 
 async function retrieveLogo(sources: (string | undefined)[], website: URL) {

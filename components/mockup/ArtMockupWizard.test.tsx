@@ -111,6 +111,40 @@ it('preserves the selected image on revision failure and fences late responses a
   expect(useMockupStore.getState().state.intake).toEqual(freshIntake())
 })
 
+it.each(['alpine.example', ''])(
+  'sends brand evidence and exact approved contact copy (%s)',
+  async (contact) => {
+    const brand = {
+      notes: 'Navy #123456 and gold #fedc98.',
+      logo: null,
+      receipt: null,
+      fallback: '',
+    }
+    useMockupStore.getState().update({
+      intake: {
+        ...useMockupStore.getState().state.intake,
+        website: 'alpine.example',
+      },
+      summary: { ...summary, contact },
+      brand,
+    })
+    vi.mocked(fetch).mockResolvedValueOnce(
+      Response.json({ image, remaining: 9 }),
+    )
+    await act(async () => root.render(<ArtMockupWizard />))
+    expect(
+      (container.querySelector('#mockup-contact') as HTMLInputElement).value,
+    ).toBe(contact)
+    await act(async () => button('Generate mockup').click())
+    expect(
+      JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string),
+    ).toMatchObject({
+      summary: { contact },
+      brandNotes: brand.notes,
+    })
+  },
+)
+
 it('blocks the wrong advertiser and requires explicit confirmation to retry the exact lead', async () => {
   useMockupStore.getState().update({
     image,

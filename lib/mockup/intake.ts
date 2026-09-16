@@ -32,6 +32,33 @@ export const summarySchema = z.object({
   caution: z.string().max(600),
 })
 export type Summary = z.infer<typeof summarySchema>
+
+/** The supplied website is proposed copy; approval edits remain authoritative. */
+export function includeWebsiteCopy(
+  summary: Summary,
+  website: string | null,
+  omitWebsite: boolean,
+): Summary {
+  const address = (website || '')
+    .trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/$/, '')
+  if (!address || omitWebsite) return summary
+  const copy =
+    `${summary.headline} ${summary.supporting} ${summary.contact}`.toLowerCase()
+  if (copy.includes(address.toLowerCase())) return summary
+  const contact = [summary.contact, address].filter(Boolean).join(' · ')
+  if (contact.length > 500)
+    return {
+      ...summary,
+      caution:
+        `The website and contact details exceed the copy limit. Add a shorter website address in the contact field before generating. ${summary.caution}`
+          .trim()
+          .slice(0, 600),
+    }
+  return { ...summary, contact }
+}
+
 export type Brand = {
   notes: string
   fallback: string

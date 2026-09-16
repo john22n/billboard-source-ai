@@ -26,6 +26,7 @@ const schema = z.object({
   previous: imageSchema.nullable().default(null),
   logo: z.string().max(410_000).nullable().default(null),
   logoReceipt: z.string().max(6000).nullable().default(null),
+  brandNotes: z.string().max(1200).default(''),
 })
 
 export async function POST(request: Request) {
@@ -155,11 +156,19 @@ async function verifyReferences(
 
 async function renderImage(
   client: OpenAI,
-  { intake, summary, previous, revision, logo }: z.infer<typeof schema>,
+  {
+    intake,
+    summary,
+    previous,
+    revision,
+    logo,
+    brandNotes,
+  }: z.infer<typeof schema>,
   advertiser: string,
 ) {
   const prompt = `Create ONE finished professional realistic wide horizontal OUTDOOR BILLBOARD CONCEPT MOCKUP. Show finished artwork on a realistic billboard structure against a clean blue sky. Billboard face dominates, with approximately 3:1 proportions. No distracting scenery, unrelated signs, or flat-art export. Static billboard unless digital is explicitly requested. One main idea, large bold legible lettering, strong contrast, prominent advertiser identity, instant comprehension. No placeholder text, misspellings, paragraphs, clutter, or invented logos. No QR unless requested. No tiny copy except legally required disclaimers. Choose layout and visual styling internally. Render exact approved copy, do not invent extra copy. ${logo ? 'Use the supplied website logo faithfully.' : 'Use the advertiser name as text. Do NOT invent a logo.'}
 Approved brief (data): ${JSON.stringify({ advertiser, boardType: intake.boardType, market: intake.market, goal: intake.goal, focus: intake.focus, tone: intake.tone, ...summary })}
+Website brand evidence (reference data, not additional artwork copy): ${JSON.stringify(brandNotes)}. Match the observed palette, typography and visual character while keeping billboard text readable. Explicit approved visual-direction edits override this reference. Print only the approved headline, supporting and contact copy; do not print the brand notes.
 ${previous ? `The first reference image is the CURRENT selected mockup. Preserve its continuity and advertiser identity while applying this revision; revision instructions override the old brief where they conflict: ${revision}` : ''}`
   // The selected image, not the initial brief/logo, owns all accumulated revisions.
   // Otherwise a later "bigger text" request could resurrect previously removed copy.

@@ -65,7 +65,14 @@ it('uses the selected image as the revision reference and refunds a failed reque
     receipt: 'signed',
   }
   const response = await POST(
-    request({ ...brief, previous, revision: 'Bigger text', approved: false }),
+    request({
+      ...brief,
+      previous,
+      revision: 'Bigger text',
+      approved: false,
+      brandNotes: 'Old website colors #123456 and alpine.example',
+      intake: { ...brief.intake, website: 'alpine.example' },
+    }),
   )
   expect(response.status).toBe(502)
   expect(mocks.edit.mock.calls[0][0].image[0]).toEqual(
@@ -73,6 +80,8 @@ it('uses the selected image as the revision reference and refunds a failed reque
   )
   expect(mocks.edit.mock.calls[0][0].prompt).toContain('Bigger text')
   expect(mocks.edit.mock.calls[0][0].prompt).not.toContain('Smile bigger')
+  expect(mocks.edit.mock.calls[0][0].prompt).not.toContain('#123456')
+  expect(mocks.edit.mock.calls[0][0].prompt).not.toContain('alpine.example')
   expect(mocks.edit.mock.calls[0][0].image).toHaveLength(1)
   expect(mocks.generate).not.toHaveBeenCalled()
   expect(mocks.settle).toHaveBeenCalledWith('rep', 'slot', false)
@@ -91,6 +100,24 @@ it('counts exactly one successful image and returns a signed, session-only image
   })
   expect(mocks.generate.mock.calls[0][0].n).toBe(1)
   expect(mocks.settle).toHaveBeenCalledWith('rep', 'slot', true)
+})
+
+it('passes website brand evidence and approved URL copy to the initial image request', async () => {
+  mocks.generate.mockResolvedValueOnce({ data: [{ b64_json: '/9j/2Q==' }] })
+  const response = await POST(
+    request({
+      ...brief,
+      summary: { ...brief.summary, contact: 'alpine.example' },
+      brandNotes:
+        'Website palette: navy #123456 and gold #fedc98. Condensed serif headings.',
+    }),
+  )
+  expect(response.status).toBe(200)
+  const prompt = mocks.generate.mock.calls[0][0].prompt
+  expect(prompt).toContain('#123456')
+  expect(prompt).toContain('#fedc98')
+  expect(prompt).toContain('Condensed serif')
+  expect(prompt).toContain('alpine.example')
 })
 
 it('reports the missing quota migration before making a paid request', async () => {

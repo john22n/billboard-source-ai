@@ -10,6 +10,13 @@ vi.mock('@/lib/config', () => ({
 vi.mock('@/lib/rate-limit', () => ({
   rateLimit: async () => ({ allowed: true }),
 }))
+vi.mock('@/lib/mockup/website', () => ({
+  reviewWebsite: async () => ({
+    text: 'Website colors: #123456 and #fedc98. Georgia headings.',
+    logo: null,
+    fallback: '',
+  }),
+}))
 import { POST } from './route'
 
 afterEach(() => {
@@ -105,7 +112,9 @@ it('requests strict extraction and summary schemas through the real SDK', async 
     .fn<typeof globalThis.fetch>()
     .mockResolvedValueOnce(modelResponse(JSON.stringify(answers)))
     .mockResolvedValueOnce(
-      modelResponse(JSON.stringify({ summary, brandNotes: '' })),
+      modelResponse(
+        JSON.stringify({ summary, brandNotes: '', omitWebsite: false }),
+      ),
     )
   vi.stubGlobal('fetch', fetch)
   const response = await POST(
@@ -135,6 +144,50 @@ it('requests strict extraction and summary schemas through the real SDK', async 
     )
   }
 })
+
+it.each([false, true])(
+  'proposes website copy unless explicitly omitted (%s)',
+  async (omitWebsite) => {
+    const summary = {
+      headline: 'Alpine',
+      supporting: '',
+      contact: '555-0123',
+      direction: 'Navy and gold',
+      caution: '',
+    }
+    const fetch = vi.fn(async () =>
+      modelResponse(
+        JSON.stringify({
+          summary,
+          brandNotes: 'Navy #123456 and gold #fedc98.',
+          omitWebsite,
+        }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetch)
+    const response = await POST(
+      new Request('http://localhost/api/mockup/intake', {
+        method: 'POST',
+        body: JSON.stringify({
+          intake: {
+            ...freshIntake(),
+            advertiser: 'Alpine',
+            website: 'https://alpine.example/',
+          },
+          review: true,
+        }),
+      }),
+    )
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      summary: {
+        contact: omitWebsite ? '555-0123' : '555-0123 · alpine.example',
+      },
+      brand: { notes: 'Navy #123456 and gold #fedc98.' },
+    })
+    expect(JSON.stringify(fetch.mock.calls)).toContain('Georgia headings')
+  },
+)
 
 it.each([
   ['invalid JSON', 'private invalid JSON', 'AI_JSONParseError'],
