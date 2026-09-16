@@ -54,17 +54,22 @@ export async function POST(request: Request) {
       { status: 400 },
     )
   let token: string | undefined
+  let stage = 'configuration'
   try {
     const client = new OpenAI({
       apiKey: serverConfig.openai.requireApiKey(),
       maxRetries: 0,
       timeout: 180_000,
     })
+    stage = 'reference-validation'
     await verifyReferences(session, input.data, advertiser)
+    stage = 'quota-reservation'
     const reservation = await reserveImage(session.userId)
     token = reservation.token
+    stage = 'image-rendering'
     const dataUrl = await renderImage(client, input.data, advertiser)
     const id = randomUUID()
+    stage = 'image-signing'
     const receipt = await signArtifact(
       session,
       'image',
@@ -72,6 +77,7 @@ export async function POST(request: Request) {
       advertiser,
       id,
     )
+    stage = 'quota-settlement'
     await settleImage(session.userId, token, true)
     token = undefined
     return NextResponse.json(
@@ -83,11 +89,25 @@ export async function POST(request: Request) {
     )
   } catch (error) {
     if (token) await settleImage(session.userId, token, false).catch(() => {})
-    return imageFailure(error)
+    return imageFailure(error, stage)
   }
 }
 
-function imageFailure(error: unknown) {
+function imageFailure(error: unknown, stage: string) {
+  const metadata = generationFailureDetails(error)
+  console.error('Mockup generation failed', {
+    stage,
+    errorType: error instanceof Error ? error.name : 'UnknownError',
+    ...metadata,
+  })
+  if (stage === 'quota-reservation' && metadata.code === '42P01')
+    return NextResponse.json(
+      {
+        error:
+          'Image generation is not set up in this environment. An administrator must apply the mockup quota database migration. No image request was sent.',
+      },
+      { status: 503 },
+    )
   const limited =
     error instanceof Error && error.message.startsWith('Another mockup')
   return NextResponse.json(
@@ -98,6 +118,18 @@ function imageFailure(error: unknown) {
     },
     { status: limited ? 429 : 502 },
   )
+}
+
+function generationFailureDetails(error: unknown) {
+  // Log only metadata, never SQL, prompts, provider messages, or image data.
+  const details = z
+    .object({
+      code: z.string().max(100).nullable().optional(),
+      status: z.number().optional(),
+      request_id: z.string().max(200).optional(),
+    })
+    .safeParse(error instanceof Error && error.cause ? error.cause : error)
+  return details.success ? details.data : {}
 }
 
 async function verifyReferences(

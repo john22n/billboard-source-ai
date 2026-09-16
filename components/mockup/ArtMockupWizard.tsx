@@ -15,7 +15,12 @@ import { Label } from '@/components/ui/label'
 import { useMockupStore } from '@/stores/mockupStore'
 import { useFormStore } from '@/stores/formStore'
 import { getErrorMessage } from '@/lib/error-handling'
-import { nextQuestion, questions, type MockupState } from '@/lib/mockup/intake'
+import {
+  nextQuestion,
+  questions,
+  type MockupState,
+  type Question,
+} from '@/lib/mockup/intake'
 import { ApprovalSummary } from './ApprovalSummary'
 import { AttachMockup } from './AttachMockup'
 
@@ -75,7 +80,7 @@ function MockupConversation() {
         })
         setRemaining(result.remaining)
       } else {
-        update(intakeReply(result, messages))
+        update(intakeReply(result, messages, question))
       }
       setDraft('')
     } catch (err) {
@@ -401,8 +406,12 @@ function requestBody(
 function intakeReply(
   result: Pick<MockupState, 'intake' | 'summary' | 'brand'>,
   messages: MockupState['messages'],
+  previousQuestion: Question | undefined,
 ): Partial<MockupState> {
   const next = nextQuestion(result.intake)
+  const reply = next
+    ? questions[next]
+    : 'Here’s your brief. Edit anything you need, then choose Generate mockup.'
   return {
     intake: result.intake,
     summary: result.summary || null,
@@ -411,9 +420,10 @@ function intakeReply(
       ...messages,
       {
         role: 'assistant',
-        text: next
-          ? questions[next]
-          : 'Here’s your brief. Edit anything you need, then choose Generate mockup.',
+        text:
+          next && next === previousQuestion
+            ? 'I couldn’t match that response to the current question. Please rephrase your answer, or say “skip” to move on.'
+            : reply,
       },
     ],
   }

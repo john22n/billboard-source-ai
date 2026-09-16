@@ -124,6 +124,9 @@ it('requests strict extraction and summary schemas through the real SDK', async 
     summary,
   })
   expect(fetch).toHaveBeenCalledTimes(2)
+  expect(fetch.mock.calls[0][1]!.body).toContain(
+    'What is the advertiser’s name?',
+  )
   for (const [, init] of fetch.mock.calls) {
     const body = JSON.parse(init!.body as string)
     expect(body.text.format.strict).toBe(true)

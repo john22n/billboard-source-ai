@@ -92,3 +92,54 @@ it('counts exactly one successful image and returns a signed, session-only image
   expect(mocks.generate.mock.calls[0][0].n).toBe(1)
   expect(mocks.settle).toHaveBeenCalledWith('rep', 'slot', true)
 })
+
+it('reports the missing quota migration before making a paid request', async () => {
+  const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+  mocks.reserve.mockRejectedValueOnce(
+    new Error('Private SQL and user data', {
+      cause: Object.assign(new Error('Private database connection'), {
+        code: '42P01',
+      }),
+    }),
+  )
+  const response = await POST(request(brief))
+  expect(response.status).toBe(503)
+  expect(await response.json()).toEqual({
+    error:
+      'Image generation is not set up in this environment. An administrator must apply the mockup quota database migration. No image request was sent.',
+  })
+  expect(mocks.generate).not.toHaveBeenCalled()
+  expect(mocks.settle).not.toHaveBeenCalled()
+  expect(log).toHaveBeenCalledWith('Mockup generation failed', {
+    stage: 'quota-reservation',
+    errorType: 'Error',
+    code: '42P01',
+  })
+  expect(JSON.stringify(log.mock.calls)).not.toContain('Private')
+  log.mockRestore()
+})
+
+it('records provider metadata without leaking its message and restores the quota slot', async () => {
+  const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+  mocks.generate.mockRejectedValueOnce(
+    Object.assign(new Error('Private image prompt and credentials'), {
+      status: 403,
+      code: 'permission_denied',
+      request_id: 'req_image',
+    }),
+  )
+  const response = await POST(request(brief))
+  expect(response.status).toBe(502)
+  expect(log).toHaveBeenCalledWith('Mockup generation failed', {
+    stage: 'image-rendering',
+    errorType: 'Error',
+    status: 403,
+    code: 'permission_denied',
+    request_id: 'req_image',
+  })
+  expect(mocks.settle).toHaveBeenCalledWith('rep', 'slot', false)
+  expect(JSON.stringify([log.mock.calls, await response.json()])).not.toContain(
+    'Private',
+  )
+  log.mockRestore()
+})

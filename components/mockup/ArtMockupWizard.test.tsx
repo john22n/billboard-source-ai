@@ -7,7 +7,7 @@ import { AttachMockup } from './AttachMockup'
 import { ApprovalSummary } from './ApprovalSummary'
 import { useMockupSession } from '@/hooks/useMockupSession'
 import { useMockupStore } from '@/stores/mockupStore'
-import { freshIntake } from '@/lib/mockup/intake'
+import { freshIntake, questions } from '@/lib/mockup/intake'
 
 let root: Root
 let container: HTMLDivElement
@@ -141,6 +141,54 @@ function SessionProbe() {
   useMockupSession()
   return null
 }
+
+it('asks for clarification instead of repeating a question when extraction makes no progress', async () => {
+  const intake = useMockupStore.getState().state.intake
+  useMockupStore
+    .getState()
+    .update({ messages: [{ role: 'assistant', text: questions.website }] })
+  vi.mocked(fetch).mockResolvedValueOnce(Response.json({ intake }))
+  await act(async () => root.render(<ArtMockupWizard />))
+  const textarea = container.querySelector('textarea')!
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      'value',
+    )!.set!.call(textarea, 'I do not remember it')
+    textarea.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await act(async () =>
+    container
+      .querySelector('form')!
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
+  )
+  const messages = useMockupStore.getState().state.messages
+  expect(
+    messages.filter((message) => message.text === questions.website),
+  ).toHaveLength(1)
+  expect(messages.at(-1)?.text).toContain('rephrase')
+  expect(useMockupStore.getState().state.intake.website).toBeNull()
+  vi.mocked(fetch).mockResolvedValueOnce(
+    Response.json({ intake: { ...intake, website: '' } }),
+  )
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      'value',
+    )!.set!.call(textarea, 'skip')
+    textarea.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await act(async () =>
+    container
+      .querySelector('form')!
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
+  )
+  expect(useMockupStore.getState().state.messages.at(-1)?.text).toBe(
+    questions.goal,
+  )
+  expect(useMockupStore.getState().state.intake.advertiser).toBe('Alpine')
+})
+
 it('clears active images when the authentication session expires', async () => {
   useMockupStore.getState().update({ image })
   vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 401 }))
