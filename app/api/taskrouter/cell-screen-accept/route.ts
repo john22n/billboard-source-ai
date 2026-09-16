@@ -5,7 +5,7 @@ import { isValidTwilioWebhook } from '@/lib/twilio-webhook'
  *
  * Called by Twilio after the worker presses a key in the cell-screen <Gather>.
  *
- * - Digit "1" → return empty <Response/> → Twilio bridges the call through
+ * - Digit "1" → complete screening → Twilio bridges the call through
  * - Anything else → <Hangup/> → cell leg drops → no-answer path kicks in
  */
 
@@ -17,13 +17,18 @@ export async function POST(req: Request) {
     const formData = await req.formData()
     const digit = formData.get('Digits') as string | null
 
-    console.log('📱 [CellScreenAccept] Digit pressed:', digit)
+    console.log('📱 [CellScreenAccept] Digit received', {
+      at: new Date().toISOString(),
+      digit,
+      callSid: String(formData.get('CallSid') ?? '').slice(-8),
+      parentCallSid: String(formData.get('ParentCallSid') ?? '').slice(-8),
+    })
 
     if (digit === '1') {
       console.log('✅ [CellScreenAccept] Accepted — bridging call')
-      // Empty response tells Twilio to connect the call
+      // Complete screening with explicit TwiML before Twilio bridges the leg.
       return new Response(
-        '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+        '<?xml version="1.0" encoding="UTF-8"?><Response><Say>Connecting.</Say></Response>',
         { status: 200, headers: { 'Content-Type': 'text/xml' } },
       )
     }
