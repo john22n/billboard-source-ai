@@ -26,9 +26,8 @@ export async function POST(req: Request) {
 
     if (digit === '1') {
       console.log('✅ [CellScreenAccept] Accepted — bridging call')
-      // Complete screening with explicit TwiML before Twilio bridges the leg.
       return new Response(
-        '<?xml version="1.0" encoding="UTF-8"?><Response><Say>Connecting.</Say></Response>',
+        '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
         { status: 200, headers: { 'Content-Type': 'text/xml' } },
       )
     }

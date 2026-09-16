@@ -22,7 +22,9 @@ describe('cell screening acceptance', () => {
 
   it('completes screening when the rep presses 1', async () => {
     const response = await POST(request('1'))
-    expect(await response.text()).toContain('<Say>Connecting.</Say>')
+    expect(await response.text()).toBe(
+      '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+    )
   })
 
   it('hangs up the child leg for another digit', async () => {
