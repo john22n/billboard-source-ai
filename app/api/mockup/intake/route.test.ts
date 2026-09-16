@@ -25,6 +25,7 @@ vi.mock('ai', () => ({
       focus: null,
       required: null,
       tone: 'Bold',
+      boardType: null,
     }),
   }),
 }))

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createOpenAI } from '@ai-sdk/openai'
-import { APICallError, generateObject } from 'ai'
+import { APICallError, generateObject, NoObjectGeneratedError } from 'ai'
 import { z } from 'zod'
 import { getSession } from '@/lib/auth'
 import { serverConfig } from '@/lib/config'
@@ -53,8 +53,9 @@ export async function POST(request: Request) {
       stage = 'answer-extraction'
       const result = await generateObject({
         model,
+        providerOptions: { openai: { strictJsonSchema: true } },
         schema: intakeSchema.extend({
-          boardType: z.string().max(100).nullable().default(null),
+          boardType: z.string().max(100).nullable(),
         }),
         maxRetries: 0,
         abortSignal: AbortSignal.timeout(40_000),
@@ -78,6 +79,7 @@ export async function POST(request: Request) {
     stage = 'approval-summary'
     const result = await generateObject({
       model,
+      providerOptions: { openai: { strictJsonSchema: true } },
       schema: z.object({
         summary: summarySchema,
         brandNotes: z.string().max(1200),
@@ -146,6 +148,17 @@ function logIntakeFailure(error: unknown, stage: string) {
     errorType: error instanceof Error ? error.name : 'UnknownError',
     statusCode: provider?.statusCode,
     requestId: provider?.responseHeaders?.['x-request-id'],
+    ...objectFailureDetails(error),
     ...details,
   })
+}
+
+function objectFailureDetails(error: unknown) {
+  if (!NoObjectGeneratedError.isInstance(error)) return {}
+  return {
+    requestId: error.response?.headers?.['x-request-id'],
+    causeType: error.cause instanceof Error ? error.cause.name : undefined,
+    finishReason: error.finishReason,
+    hasText: error.text !== undefined,
+  }
 }
