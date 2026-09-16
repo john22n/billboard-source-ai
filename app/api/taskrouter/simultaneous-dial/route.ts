@@ -66,9 +66,15 @@ export async function POST(req: Request) {
 
     // ── browser client status callback ───────────────────────────────────────
     const clientStatusUrl = new URL(`${appUrl}/api/taskrouter/client-status`)
-    clientStatusUrl.searchParams.set('cellPhone', cellPhone)
+    clientStatusUrl.searchParams.set('leg', 'browser')
     clientStatusUrl.searchParams.set('taskSid', taskSid)
     serverConfig.app.addVercelBypassToken(clientStatusUrl)
+
+    // ── cell child-leg status callback ───────────────────────────────────────
+    const cellStatusUrl = new URL(`${appUrl}/api/taskrouter/client-status`)
+    cellStatusUrl.searchParams.set('leg', 'cell')
+    cellStatusUrl.searchParams.set('taskSid', taskSid)
+    serverConfig.app.addVercelBypassToken(cellStatusUrl)
 
     // ── cell screening URL ────────────────────────────────────────────────────
     const cellScreenUrl = new URL(`${appUrl}/api/taskrouter/cell-screen`)
@@ -102,6 +108,9 @@ export async function POST(req: Request) {
       <Parameter name="callerFrom" value="${escapeXml(callerFrom)}"/>
     </Client>
     <Number url="${escapeXml(cellScreenUrl.toString())}"
+            statusCallback="${escapeXml(cellStatusUrl.toString())}"
+            statusCallbackEvent="initiated ringing answered completed"
+            statusCallbackMethod="POST"
             method="POST">${escapeXml(cellPhone)}</Number>
   </Dial>
 </Response>`
