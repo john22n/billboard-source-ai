@@ -5,7 +5,6 @@ import { serverConfig } from '@/lib/config'
 import { imageSchema } from '@/lib/mockup/intake'
 import { attachMockup, searchMockupLeads } from '@/lib/mockup/nutshell'
 import { verifyImage } from '@/lib/mockup/receipts'
-import { rateLimit } from '@/lib/rate-limit'
 
 export const maxDuration = 90
 
@@ -23,16 +22,11 @@ export async function GET(request: Request) {
       { status: 400 },
     )
   try {
-    if (!(await rateLimit('mockup-search', session.userId, 30, 60)).allowed)
-      return NextResponse.json(
-        { error: 'Please wait a minute.' },
-        { status: 429 },
-      )
     const credentials = Buffer.from(
       `${session.email}:${serverConfig.nutshell.requireApiKey()}`,
     ).toString('base64')
     return NextResponse.json(
-      { leads: await searchMockupLeads(q, credentials) },
+      { leads: await searchMockupLeads(q, credentials, session.email) },
       { headers: { 'Cache-Control': 'no-store' } },
     )
   } catch {
@@ -64,11 +58,6 @@ export async function POST(request: Request) {
     )
   try {
     await verifyImage(session, input.data.image)
-    if (!(await rateLimit('mockup-attach', session.userId, 10, 60)).allowed)
-      return NextResponse.json(
-        { error: 'Please wait a minute.' },
-        { status: 429 },
-      )
     const credentials = Buffer.from(
       `${session.email}:${serverConfig.nutshell.requireApiKey()}`,
     ).toString('base64')
