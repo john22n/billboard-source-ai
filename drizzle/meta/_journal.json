@@ -43,6 +43,13 @@
       "when": 1789510450636,
       "tag": "0005_user_cell_phone",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789605000000,
+      "tag": "0006_mockup_quotas",
+      "breakpoints": true
     }
   ]
 }

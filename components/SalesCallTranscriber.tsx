@@ -34,6 +34,9 @@ import {
 } from '@/lib/error-handling'
 import { useFormStore } from '@/stores/formStore'
 import { isAutoLogoutDue, useAutoLogout } from '@/hooks/useAutoLogout'
+import { useMockupSession } from '@/hooks/useMockupSession'
+import { useMockupStore } from '@/stores/mockupStore'
+import { ArtMockupWizard } from '@/components/mockup/ArtMockupWizard'
 
 type NutshellFormData = ReturnType<
   ReturnType<typeof useFormStore.getState>['getFormData']
@@ -53,6 +56,7 @@ function buildNutshellPayload(
   additionalContacts: AdditionalContacts,
 ) {
   return {
+    mockupImage: useMockupStore.getState().state.image || undefined,
     name: valueOrEmpty(formData.name),
     phone: valueOrEmpty(formData.phone),
     email: valueOrEmpty(formData.email),
@@ -92,6 +96,8 @@ function buildNutshellPayload(
 type NutshellResult = {
   error?: string
   missingFields?: unknown
+  leadId?: number
+  imageAttachmentFailed?: boolean
 }
 
 type NutshellResponseActions = {
@@ -108,8 +114,11 @@ function handleNutshellResponse(
 ) {
   if (response.ok) {
     actions.updateSubmissionStatus('success')
-    actions.updateSubmissionMessage('Lead created')
-    showSuccessToast('Lead sent to Nutshell')
+    const message = result.imageAttachmentFailed
+      ? 'Lead created; image could not be attached. Retry in Art Mockup Wizard.'
+      : 'Lead created'
+    actions.updateSubmissionMessage(message)
+    showSuccessToast(message)
     actions.clearAll()
     return
   }
@@ -643,7 +652,7 @@ function TabbedBody(props: TabbedBodyProps) {
         onValueChange={() => setSidePanel('pricing')}
         className="w-full flex-1 flex flex-col gap-0 min-h-0 overflow-hidden"
       >
-        <TabsList className="grid w-full grid-cols-5 mb-2 bg-slate-100 p-0.5 sm:p-1 rounded-lg h-8 sm:h-9 flex-shrink-0">
+        <TabsList className="grid w-full grid-cols-6 mb-2 bg-slate-100 p-0.5 sm:p-1 rounded-lg h-8 sm:h-9 flex-shrink-0">
           <TabsTrigger
             value="form"
             className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs"
@@ -679,7 +688,20 @@ function TabbedBody(props: TabbedBodyProps) {
             <span className="hidden sm:inline">Transcript</span>
             <span className="sm:hidden">Trans</span>
           </TabsTrigger>
+          <TabsTrigger
+            value="mockup"
+            className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs"
+          >
+            <span className="hidden sm:inline">Art Mockup Wizard</span>
+            <span className="sm:hidden">Art</span>
+          </TabsTrigger>
         </TabsList>
+        <TabsContent
+          value="mockup"
+          className="mt-0 flex-1 min-h-0 overflow-hidden"
+        >
+          <ArtMockupWizard />
+        </TabsContent>
         <TabsContent
           value="form"
           forceMount
@@ -1069,6 +1091,15 @@ function useNutshellSubmission(
         ),
       })
       const result: NutshellResult = await response.json()
+      if (response.ok) {
+        useMockupStore
+          .getState()
+          .recordSubmittedLead(
+            result.leadId,
+            formData.entityName,
+            !!result.imageAttachmentFailed,
+          )
+      }
       handleNutshellResponse(response, result, {
         updateSubmissionStatus: setNutshellStatus,
         updateSubmissionMessage: setNutshellMessage,
@@ -1279,6 +1310,7 @@ export default function SalesCallTranscriber({
 }: {
   sessionIssuedAt: number
 }) {
+  useMockupSession()
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const [billboardContext, setBillboardContext] = useState<string>('')
   const [isLoadingBillboard, setIsLoadingBillboard] = useState(false)
