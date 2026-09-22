@@ -157,6 +157,12 @@ export const appMetrics = pgTable('app_metrics', {
 
 export type AppMetrics = InferSelectModel<typeof appMetrics>
 
+// Global administrator-managed instructions, separate from advertiser content.
+export const artWizardSettings = pgTable('art_wizard_settings', {
+  id: integer('id').primaryKey().default(1),
+  imageGenerationPrompt: text('image_generation_prompt').notNull(),
+})
+
 // Fixed-size buckets used for serverless-safe abuse controls. A key is reused
 // across windows so this table grows only with the number of identities/scopes.
 export const rateLimitBuckets = pgTable(

@@ -34,6 +34,10 @@ import {
 } from '@/lib/error-handling'
 import { useFormStore } from '@/stores/formStore'
 import { isAutoLogoutDue, useAutoLogout } from '@/hooks/useAutoLogout'
+import { useMockupSession } from '@/hooks/useMockupSession'
+import { useMockupStore } from '@/stores/mockupStore'
+import { ArtMockupWizard } from '@/components/mockup/ArtMockupWizard'
+import { useDashboardStore } from '@/stores/dashboardStore'
 
 type NutshellFormData = ReturnType<
   ReturnType<typeof useFormStore.getState>['getFormData']
@@ -53,6 +57,7 @@ function buildNutshellPayload(
   additionalContacts: AdditionalContacts,
 ) {
   return {
+    mockupImage: useMockupStore.getState().state.image || undefined,
     name: valueOrEmpty(formData.name),
     phone: valueOrEmpty(formData.phone),
     email: valueOrEmpty(formData.email),
@@ -92,6 +97,8 @@ function buildNutshellPayload(
 type NutshellResult = {
   error?: string
   missingFields?: unknown
+  leadId?: number
+  imageAttachmentFailed?: boolean
 }
 
 type NutshellResponseActions = {
@@ -108,8 +115,11 @@ function handleNutshellResponse(
 ) {
   if (response.ok) {
     actions.updateSubmissionStatus('success')
-    actions.updateSubmissionMessage('Lead created')
-    showSuccessToast('Lead sent to Nutshell')
+    const message = result.imageAttachmentFailed
+      ? 'Lead created; image could not be attached. Download it from Creative Studio. Do not resubmit the Lead Form.'
+      : 'Lead created'
+    actions.updateSubmissionMessage(message)
+    showSuccessToast(message)
     actions.clearAll()
     return
   }
@@ -614,6 +624,8 @@ function LeadActions({
 }
 
 function TabbedBody(props: TabbedBodyProps) {
+  const activeTab = useDashboardStore((state) => state.activeTab)
+  const setActiveTab = useDashboardStore((state) => state.setActiveTab)
   const [sidePanel, setSidePanel] = useState<
     'pricing' | 'google-map' | 'bsi-map' | 'inventory'
   >('pricing')
@@ -639,11 +651,17 @@ function TabbedBody(props: TabbedBodyProps) {
   return (
     <CardContent className="px-1.5 pb-1.5 pt-2 sm:px-2 sm:pb-2 flex flex-col flex-1 min-h-0 overflow-hidden">
       <Tabs
-        defaultValue="form"
-        onValueChange={() => setSidePanel('pricing')}
+        value={activeTab}
+        onValueChange={(tab) => {
+          setActiveTab(tab)
+          setSidePanel('pricing')
+        }}
         className="w-full flex-1 flex flex-col gap-0 min-h-0 overflow-hidden"
       >
-        <TabsList className="grid w-full grid-cols-5 mb-2 bg-slate-100 p-0.5 sm:p-1 rounded-lg h-8 sm:h-9 flex-shrink-0">
+        <TabsList
+          aria-label="Form views"
+          className="grid w-full grid-cols-5 mb-2 bg-slate-100 p-0.5 sm:p-1 rounded-lg h-8 sm:h-9 flex-shrink-0"
+        >
           <TabsTrigger
             value="form"
             className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs"
@@ -673,13 +691,21 @@ function TabbedBody(props: TabbedBodyProps) {
             <span className="sm:hidden">Inv</span>
           </TabsTrigger>
           <TabsTrigger
-            value="transcript"
+            value="mockup"
             className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs"
           >
-            <span className="hidden sm:inline">Transcript</span>
-            <span className="sm:hidden">Trans</span>
+            <span className="hidden sm:inline">Creative Studio</span>
+            <span className="sm:hidden whitespace-normal leading-tight">
+              Creative Studio
+            </span>
           </TabsTrigger>
         </TabsList>
+        <TabsContent
+          value="mockup"
+          className="mt-0 flex-1 min-h-0 overflow-hidden"
+        >
+          <ArtMockupWizard />
+        </TabsContent>
         <TabsContent
           value="form"
           forceMount
@@ -823,9 +849,13 @@ function TabbedBody(props: TabbedBodyProps) {
         </TabsContent>
         <TabsContent
           value="transcript"
+          id="dashboard-transcript"
+          aria-label="Transcript"
+          aria-labelledby={undefined}
           className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col"
         >
-          <div className="h-full overflow-hidden">
+          <h2 className="mb-2 px-2 text-sm font-semibold">Transcript</h2>
+          <div className="flex-1 min-h-0 overflow-hidden">
             <TranscriptView
               key={`transcript-${resetTrigger}`}
               ref={scrollRef}
@@ -1069,6 +1099,16 @@ function useNutshellSubmission(
         ),
       })
       const result: NutshellResult = await response.json()
+      if (response.ok && result.leadId) {
+        useMockupStore.getState().update({
+          lastLead: {
+            id: Number(result.leadId),
+            name: formData.entityName || 'Submitted lead',
+            advertiser: formData.entityName || '',
+          },
+          attachmentFailed: !!result.imageAttachmentFailed,
+        })
+      }
       handleNutshellResponse(response, result, {
         updateSubmissionStatus: setNutshellStatus,
         updateSubmissionMessage: setNutshellMessage,
@@ -1279,6 +1319,7 @@ export default function SalesCallTranscriber({
 }: {
   sessionIssuedAt: number
 }) {
+  useMockupSession()
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const [billboardContext, setBillboardContext] = useState<string>('')
   const [isLoadingBillboard, setIsLoadingBillboard] = useState(false)
