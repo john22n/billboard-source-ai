@@ -10,6 +10,13 @@ vi.mock('@/lib/config', () => ({
 vi.mock('@/lib/rate-limit', () => ({
   rateLimit: async () => ({ allowed: true }),
 }))
+vi.mock('@/lib/mockup/website', () => ({
+  reviewWebsite: async () => ({
+    text: 'Website colors: #123456 and #fedc98. Georgia headings.',
+    logo: null,
+    fallback: '',
+  }),
+}))
 import { POST } from './route'
 
 const fetcher = vi.fn<typeof fetch>()
@@ -167,7 +174,7 @@ it('also enforces strict output for the approval summary', async () => {
     direction: 'Bold',
     caution: '',
   }
-  generated = { summary, brandNotes: 'Name only' }
+  generated = { summary, brandNotes: 'Name only', omitWebsite: false }
   const response = await POST(
     request({
       intake: { ...freshIntake(), advertiser: 'Alpine', website: '' },
@@ -183,6 +190,39 @@ it('also enforces strict output for the approval summary', async () => {
   const format = JSON.parse(String(fetcher.mock.calls[0][1]?.body)).text.format
   expect(format.strict).toBe(true)
 })
+
+it.each([false, true])(
+  'includes website contact by default unless explicitly omitted (%s)',
+  async (omitWebsite) => {
+    generated = {
+      summary: {
+        headline: 'Alpine',
+        supporting: '',
+        contact: '555-0123',
+        direction: 'Navy #123456 with gold #fedc98 accents',
+        caution: '',
+      },
+      brandNotes: 'Georgia headings.',
+      omitWebsite,
+    }
+    const response = await POST(
+      request({
+        intake: {
+          ...freshIntake(),
+          advertiser: 'Alpine',
+          website: 'https://alpine.example/',
+        },
+        review: true,
+      }),
+    )
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      summary: {
+        contact: omitWebsite ? '555-0123' : '555-0123 · alpine.example',
+      },
+    })
+  },
+)
 
 it('logs the failure type without exposing provider credentials or advertiser content', async () => {
   const log = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -203,9 +243,14 @@ it('logs the failure type without exposing provider credentials or advertiser co
     request({ intake: freshIntake(), message: 'Confidential advertiser' }),
   )
   expect(response.status).toBe(502)
-  expect(log).toHaveBeenCalledWith('Mockup brief preparation failed', {
-    errorType: 'AI_APICallError',
-  })
+  expect(log).toHaveBeenCalledWith(
+    'Mockup intake failed',
+    expect.objectContaining({
+      stage: 'answer-extraction',
+      errorType: 'AI_APICallError',
+      code: 'invalid_api_key',
+    }),
+  )
   expect(JSON.stringify(log.mock.calls)).not.toContain('private-test-key')
   expect(await response.json()).toEqual({
     error:

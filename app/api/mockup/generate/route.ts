@@ -26,6 +26,7 @@ const schema = z.object({
   previous: imageSchema.nullable().default(null),
   logo: z.string().max(410_000).nullable().default(null),
   logoReceipt: z.string().max(6000).nullable().default(null),
+  brandNotes: z.string().max(1200).default(''),
 })
 
 async function generationPrompt({
@@ -34,6 +35,7 @@ async function generationPrompt({
   previous,
   revision,
   logo,
+  brandNotes,
 }: z.infer<typeof schema>) {
   const advertiser = intake.advertiser || ''
   // The selected image, not the initial brief/logo, owns all accumulated revisions.
@@ -41,7 +43,8 @@ async function generationPrompt({
   if (previous)
     return `Edit the supplied CURRENT selected outdoor billboard concept for ${advertiser}. Preserve its copy, layout, brand identity and prior changes except where these new instructions explicitly change them: ${revision}. Do not reintroduce removed elements. Keep one realistic wide horizontal billboard, readable accurate text, a realistic structure and clean blue sky. Return one concept mockup, not flat artwork.`
   return `${await getImageGenerationPrompt()} ${logo ? 'Use the supplied website logo faithfully.' : 'Use the advertiser name as text. Do NOT invent a logo.'}
-Approved brief (data): ${JSON.stringify({ advertiser, boardType: intake.boardType, market: intake.market, goal: intake.goal, focus: intake.focus, tone: intake.tone, ...summary })}`
+Approved brief (data): ${JSON.stringify({ advertiser, boardType: intake.boardType, market: intake.market, goal: intake.goal, focus: intake.focus, tone: intake.tone, ...summary })}
+Website brand evidence (reference data, not artwork copy): ${JSON.stringify(brandNotes)}. Follow the approved direction and match observed typography and visual character. Print only approved headline, supporting, and contact copy; never print these brand notes.`
 }
 
 async function verifyReferences(
@@ -84,6 +87,7 @@ export async function POST(request: Request) {
       { error: 'Approve the brief before generating.' },
       { status: 400 },
     )
+  let stage = 'configuration'
   try {
     const client = new OpenAI({
       apiKey: serverConfig.openai.requireApiKey(),
@@ -96,6 +100,7 @@ export async function POST(request: Request) {
         { error: 'Add an advertiser name in the brief before generating.' },
         { status: 400 },
       )
+    stage = 'reference-validation'
     await verifyReferences(session, input.data)
     const references = (previous ? [previous.dataUrl] : [logo]).filter(
       (value): value is string => !!value,
@@ -109,6 +114,7 @@ export async function POST(request: Request) {
       output_format: 'jpeg' as const,
       output_compression: 80,
     }
+    stage = 'image-rendering'
     const result = references.length
       ? await client.images.edit({
           ...options,
@@ -128,6 +134,7 @@ export async function POST(request: Request) {
       throw new Error('No usable image returned')
     const dataUrl = `data:image/jpeg;base64,${encoded}`
     const id = randomUUID()
+    stage = 'image-signing'
     const receipt = await signArtifact(
       session,
       'image',
@@ -141,7 +148,13 @@ export async function POST(request: Request) {
       },
       { headers: { 'Cache-Control': 'no-store' } },
     )
-  } catch {
+  } catch (error) {
+    const metadata = generationFailureDetails(error)
+    console.error('Mockup generation failed', {
+      stage,
+      errorType: error instanceof Error ? error.name : 'UnknownError',
+      ...metadata,
+    })
     return NextResponse.json(
       {
         error:
@@ -150,4 +163,16 @@ export async function POST(request: Request) {
       { status: 502 },
     )
   }
+}
+
+function generationFailureDetails(error: unknown) {
+  // Log only provider metadata, never prompts, messages, credentials, or images.
+  const details = z
+    .object({
+      code: z.string().max(100).nullable().optional(),
+      status: z.number().optional(),
+      request_id: z.string().max(200).optional(),
+    })
+    .safeParse(error instanceof Error && error.cause ? error.cause : error)
+  return details.success ? details.data : {}
 }

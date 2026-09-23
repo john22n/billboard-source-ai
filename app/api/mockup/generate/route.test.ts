@@ -111,6 +111,44 @@ it('passes the approved website palette to image generation as visual direction'
   expect(prompt).toContain('#f9e7c4')
 })
 
+it('passes website brand evidence and approved URL copy to the initial image request', async () => {
+  mocks.generate.mockResolvedValueOnce({ data: [{ b64_json: '/9j/2Q==' }] })
+  const response = await POST(
+    request({
+      ...brief,
+      summary: { ...brief.summary, contact: 'alpine.example' },
+      brandNotes: 'Website uses condensed serif headings.',
+    }),
+  )
+  expect(response.status).toBe(200)
+  const prompt = mocks.generate.mock.calls[0][0].prompt
+  expect(prompt).toContain('condensed serif')
+  expect(prompt).toContain('alpine.example')
+})
+
+it('records safe provider metadata without leaking its message', async () => {
+  const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+  mocks.generate.mockRejectedValueOnce(
+    Object.assign(new Error('Private image prompt and credentials'), {
+      status: 403,
+      code: 'permission_denied',
+      request_id: 'req_image',
+    }),
+  )
+  const response = await POST(request(brief))
+  expect(response.status).toBe(502)
+  expect(log).toHaveBeenCalledWith('Mockup generation failed', {
+    stage: 'image-rendering',
+    errorType: 'Error',
+    status: 403,
+    code: 'permission_denied',
+    request_id: 'req_image',
+  })
+  expect(JSON.stringify([log.mock.calls, await response.json()])).not.toContain(
+    'Private',
+  )
+})
+
 it('allows more than ten generations and revisions without consulting quota storage', async () => {
   mocks.generate.mockResolvedValue({ data: [{ b64_json: '/9j/2Q==' }] })
   mocks.edit.mockResolvedValue({ data: [{ b64_json: '/9j/2Q==' }] })

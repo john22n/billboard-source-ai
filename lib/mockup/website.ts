@@ -126,12 +126,12 @@ async function findWebsiteLogo($: CheerioAPI, url: URL) {
   return null
 }
 
-function colorEvidence(css: string) {
-  // Keep custom properties (including HSL channels) and their color usages,
-  // rather than spending the evidence budget on layout rules and font data.
+function styleEvidence(css: string) {
+  // Keep palette and typography declarations rather than spending the
+  // evidence budget on unrelated layout rules or font-file data.
   return (
     css.match(
-      /(?:^|[;{}])\s*(?:--[\w-]+|[\w-]*color|background(?:-image)?|fill|stroke)\s*:[^;{}]+/gi,
+      /(?:^|[;{}])\s*(?:--[\w-]+|[\w-]*color|background(?:-image)?|fill|stroke|font-family|font-weight)\s*:[^;{}]+/gi,
     ) || []
   )
     .join('; ')
@@ -143,8 +143,17 @@ async function websiteStyles($: CheerioAPI, url: URL) {
     .toArray()
     .map((el) => $(el).attr('style'))
     .join('; ')
-  const embedded = colorEvidence(`${$('style').text()}\n${inline}`)
-  const links = $('link[rel~="stylesheet"][href]').toArray().slice(0, 3)
+  const embedded = styleEvidence(`${$('style').text()}\n${inline}`)
+  const links = $('link[rel~="stylesheet"][href]')
+    .toArray()
+    .filter((el) => {
+      try {
+        return new URL($(el).attr('href')!, url).origin === url.origin
+      } catch {
+        return false
+      }
+    })
+    .slice(0, 3)
   const linked = await Promise.all(
     links.map(async (el) => {
       try {
@@ -155,7 +164,7 @@ async function websiteStyles($: CheerioAPI, url: URL) {
           1,
         )
         return css.type === 'text/css'
-          ? colorEvidence(css.bytes.toString('utf8'))
+          ? styleEvidence(css.bytes.toString('utf8'))
           : ''
       } catch {
         return '' // A failed stylesheet must not discard the page's other evidence.
@@ -176,7 +185,9 @@ export async function reviewWebsite(website: string) {
     }
   try {
     const page = await fetchPublicWebsite(
-      /^https?:\/\//i.test(website) ? website : `https://${website}`,
+      /^https?:\/\//i.test(website)
+        ? website.replace(/^http:/i, 'https:')
+        : `https://${website}`,
     )
     if (page.type !== 'text/html') throw new Error('Not an HTML website')
     const $ = load(page.bytes.toString('utf8'))

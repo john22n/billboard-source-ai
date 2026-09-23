@@ -1099,15 +1099,14 @@ function useNutshellSubmission(
         ),
       })
       const result: NutshellResult = await response.json()
-      if (response.ok && result.leadId) {
-        useMockupStore.getState().update({
-          lastLead: {
-            id: Number(result.leadId),
-            name: formData.entityName || 'Submitted lead',
-            advertiser: formData.entityName || '',
-          },
-          attachmentFailed: !!result.imageAttachmentFailed,
-        })
+      if (response.ok) {
+        useMockupStore
+          .getState()
+          .recordSubmittedLead(
+            result.leadId,
+            formData.entityName,
+            !!result.imageAttachmentFailed,
+          )
       }
       handleNutshellResponse(response, result, {
         updateSubmissionStatus: setNutshellStatus,

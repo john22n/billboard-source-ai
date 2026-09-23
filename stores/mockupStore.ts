@@ -12,6 +12,11 @@ type Store = {
   storageWarning: string
   initialize: (key: string) => void
   update: (change: Partial<MockupState>) => void
+  recordSubmittedLead: (
+    id: number | undefined,
+    advertiser: string | null | undefined,
+    attachmentFailed: boolean,
+  ) => void
   start: (lead?: Record<string, unknown>) => void
   clear: () => void
 }
@@ -56,6 +61,17 @@ export const useMockupStore = create<Store>((set, get) => ({
           'This browser could not preserve the mockup for refresh. Download the image before leaving this page.',
       })
     }
+  },
+  recordSubmittedLead(id, advertiser, attachmentFailed) {
+    if (!id) return
+    get().update({
+      lastLead: {
+        id: Number(id),
+        name: advertiser || 'Submitted lead',
+        advertiser: advertiser || '',
+      },
+      attachmentFailed,
+    })
   },
   start(lead) {
     set({ epoch: get().epoch + 1, busy: false })

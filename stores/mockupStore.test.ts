@@ -8,6 +8,17 @@ beforeEach(() => {
 })
 
 describe('active mockup lifecycle', () => {
+  it('remembers the exact created lead for attachment retry and does not invent a lead ID', () => {
+    useMockupStore.getState().recordSubmittedLead(42, 'Alpine', true)
+    expect(useMockupStore.getState().state).toMatchObject({
+      lastLead: { id: 42, name: 'Alpine', advertiser: 'Alpine' },
+      attachmentFailed: true,
+    })
+    useMockupStore.getState().recordSubmittedLead(undefined, 'Other', false)
+    expect(useMockupStore.getState().state.lastLead?.id).toBe(42)
+    expect(useMockupStore.getState().state.attachmentFailed).toBe(true)
+  })
+
   it('waits until the wizard opens to import the current lead', () => {
     useMockupStore.getState().initialize('rep:1')
     expect(useMockupStore.getState().state.started).toBe(false)
