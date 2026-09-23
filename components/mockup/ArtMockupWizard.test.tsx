@@ -152,16 +152,17 @@ it('sends the latest copy request and retains the selected image and draft on fa
   )
 })
 
-it('requires initial approval, shows the exact edited copy, and disables generation while pending', async () => {
+it('keeps a read-only summary and requires approval before generating', async () => {
   useMockupStore.getState().update({ summary })
   const generate = vi.fn()
   await act(async () =>
     root.render(<ApprovalSummary busy={false} onGenerate={generate} />),
   )
   expect(generate).not.toHaveBeenCalled()
-  expect(
-    (container.querySelector('#mockup-headline') as HTMLInputElement).value,
-  ).toBe('Smile bigger')
+  expect(container.querySelector('input, textarea')).toBeNull()
+  expect(container.textContent).toContain('Smile bigger')
+  expect(container.textContent).toContain('Bold')
+  expect(container.textContent).toContain('Alpine')
   await act(async () => button('Generate mockup').click())
   expect(generate).toHaveBeenCalledTimes(1)
   await act(async () =>
