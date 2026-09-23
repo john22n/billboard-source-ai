@@ -92,6 +92,25 @@ it('returns a signed, session-only image without quota metadata', async () => {
   expect(mocks.database).not.toHaveBeenCalled()
 })
 
+it('passes the approved website palette to image generation as visual direction', async () => {
+  mocks.generate.mockResolvedValueOnce({ data: [{ b64_json: '/9j/2Q==' }] })
+  const response = await POST(
+    request({
+      ...brief,
+      summary: {
+        ...brief.summary,
+        direction:
+          'Website palette: navy #14283f background, orange #ed7b32 accents, cream #f9e7c4 text.',
+      },
+    }),
+  )
+  expect(response.status).toBe(200)
+  const prompt = mocks.generate.mock.calls[0][0].prompt
+  expect(prompt).toContain('#14283f')
+  expect(prompt).toContain('#ed7b32')
+  expect(prompt).toContain('#f9e7c4')
+})
+
 it('allows more than ten generations and revisions without consulting quota storage', async () => {
   mocks.generate.mockResolvedValue({ data: [{ b64_json: '/9j/2Q==' }] })
   mocks.edit.mockResolvedValue({ data: [{ b64_json: '/9j/2Q==' }] })
