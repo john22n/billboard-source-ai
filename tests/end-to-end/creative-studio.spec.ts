@@ -67,6 +67,8 @@ test('Creative Studio completes intake, approves edited copy, retries a revision
   page,
   context,
 }) => {
+  // The first dashboard navigation also compiles Next's client bundle on CI.
+  test.setTimeout(60_000)
   const token = await new SignJWT({ userId })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()

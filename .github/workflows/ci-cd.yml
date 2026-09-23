@@ -80,7 +80,7 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
 
       - name: Run browser tests
-        run: pnpm test:e2e
+        run: pnpm test:e2e --fail-on-flaky-tests
 
       - name: Upload Playwright reports and failure artifacts
         if: ${{ !cancelled() }}
