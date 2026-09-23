@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   CallNotEligibleError,
-  InvalidCursorError,
   getVoicemailAIDetail,
   hasAIEvent,
   listVoicemailAICalls,
@@ -22,12 +21,11 @@ function clientFor(options: {
   transcriptions?: unknown[] | Error
   aiTranscripts?: unknown[] | Error
   sentences?: unknown[]
-  nextPageUrl?: string
 }) {
   const call = {
     sid: callSid,
     direction: 'inbound',
-    startTime: new Date('2026-09-10T12:00:00.000Z'),
+    startTime: new Date('2026-09-12T12:00:00.000Z'),
     dateCreated: now,
     from: '+15550000001',
     to: '+15550000002',
@@ -48,10 +46,7 @@ function clientFor(options: {
   const calls = Object.assign(
     vi.fn(() => context),
     {
-      page: vi.fn().mockResolvedValue({
-        instances: [call],
-        nextPageUrl: options.nextPageUrl,
-      }),
+      list: vi.fn().mockResolvedValue([call]),
     },
   )
   const transcriptions = { list: listResult(options.transcriptions) }
@@ -91,33 +86,93 @@ describe('voicemail AI log provider', () => {
     expect(hasAIEvent([{ request: { url: 'not a url' } }])).toBe(false)
   })
 
-  it('filters direction and preserves the fixed rolling range in a signed cursor', async () => {
-    const firstClient = clientFor({
-      events: [aiEvent],
-      nextPageUrl: '/2010-04-01/Accounts/AC/Calls.json?PageToken=token-2',
-    })
-    const first = await listVoicemailAICalls(
-      credentials,
-      null,
-      now,
-      firstClient as never,
-    )
-    expect(first.calls).toHaveLength(1)
-    expect(first.since).toBe('2026-08-23T12:00:00.000Z')
-    expect(first.nextCursor).toBeTruthy()
+  it('queries only Central weekends and returns the whole rolling window without a cursor', async () => {
+    const client = clientFor({ events: [aiEvent] })
+    const result = await listVoicemailAICalls(credentials, now, client as never)
+    expect(result.calls).toHaveLength(1)
+    expect(result.since).toBe('2026-08-23T12:00:00.000Z')
+    expect(result).not.toHaveProperty('nextCursor')
+    expect(client.calls.list.mock.calls).toEqual([
+      [
+        {
+          startTimeAfter: new Date('2026-08-23T12:00:00Z'),
+          startTimeBefore: new Date('2026-08-24T05:00:00Z'),
+          pageSize: 1000,
+        },
+      ],
+      [
+        {
+          startTimeAfter: new Date('2026-08-29T05:00:00Z'),
+          startTimeBefore: new Date('2026-08-31T05:00:00Z'),
+          pageSize: 1000,
+        },
+      ],
+      [
+        {
+          startTimeAfter: new Date('2026-09-05T05:00:00Z'),
+          startTimeBefore: new Date('2026-09-07T05:00:00Z'),
+          pageSize: 1000,
+        },
+      ],
+      [
+        {
+          startTimeAfter: new Date('2026-09-12T05:00:00Z'),
+          startTimeBefore: now,
+          pageSize: 1000,
+        },
+      ],
+    ])
+  })
 
-    const secondClient = clientFor({ events: [aiEvent] })
-    const second = await listVoicemailAICalls(
-      credentials,
-      first.nextCursor,
-      new Date('2027-01-01'),
-      secondClient as never,
-    )
-    expect(second.since).toBe(first.since)
-    expect(second.until).toBe(first.until)
-    expect(secondClient.calls.page).toHaveBeenCalledWith(
-      expect.objectContaining({ pageToken: 'token-2' }),
-    )
+  it.each([
+    ['2026-03-10T12:00:00Z', '2026-03-07T06:00:00Z', '2026-03-09T05:00:00Z'],
+    ['2026-11-03T12:00:00Z', '2026-10-31T05:00:00Z', '2026-11-02T06:00:00Z'],
+  ])('uses both DST boundary offsets for %s', async (date, start, end) => {
+    const client = clientFor({})
+    await listVoicemailAICalls(credentials, new Date(date), client as never)
+    expect(client.calls.list).toHaveBeenCalledWith({
+      startTimeAfter: new Date(start),
+      startTimeBefore: new Date(end),
+      pageSize: 1000,
+    })
+  })
+
+  it('returns older AI calls after more than 50 unrelated calls, newest first', async () => {
+    const client = clientFor({ events: [aiEvent] })
+    const base = {
+      direction: 'inbound',
+      from: '+15550000001',
+      to: '+15550000002',
+      status: 'completed',
+      duration: '17',
+    }
+    client.calls.list.mockResolvedValue([
+      ...Array.from({ length: 60 }, (_, i) => ({
+        ...base,
+        sid: `unrelated-${i}`,
+        startTime: new Date('2026-09-13T10:00:00Z'),
+      })),
+      { ...base, sid: 'older-ai', startTime: new Date('2026-09-06T12:00:00Z') },
+      {
+        ...base,
+        sid: 'sunday-ai',
+        startTime: new Date('2026-09-13T11:00:00Z'),
+      },
+    ])
+    const context = client.calls()
+    client.calls.mockImplementation((...args: unknown[]) => ({
+      ...context,
+      events: {
+        list: vi
+          .fn()
+          .mockResolvedValue(String(args[0]).endsWith('-ai') ? [aiEvent] : []),
+      },
+    }))
+    const result = await listVoicemailAICalls(credentials, now, client as never)
+    expect(result.calls.map((call) => call.sid)).toEqual([
+      'sunday-ai',
+      'older-ai',
+    ])
   })
 
   it('rejects detail outside 21 days even when events match', async () => {
@@ -182,6 +237,11 @@ describe('voicemail AI log provider', () => {
     ['2026-08-23T12:00:00Z', 'inbound', 1],
     ['2026-09-13T12:00:01Z', 'inbound', 0],
     ['2026-09-12T12:00:00Z', 'outbound-api', 0],
+    ['2026-09-12T04:59:59Z', 'inbound', 0],
+    ['2026-09-12T05:00:00Z', 'inbound', 1],
+    ['2026-09-07T04:59:59Z', 'inbound', 1],
+    ['2026-09-07T05:00:00Z', 'inbound', 0],
+    ['2026-09-10T12:00:00Z', 'inbound', 0],
   ])(
     'enforces call range and direction: %s %s',
     async (date, direction, count) => {
@@ -189,29 +249,11 @@ describe('voicemail AI log provider', () => {
         call: { startTime: new Date(date), direction },
         events: [aiEvent],
       })
-      const page = await listVoicemailAICalls(
-        credentials,
-        null,
-        now,
-        client as never,
-      )
+      const page = await listVoicemailAICalls(credentials, now, client as never)
       expect(page.calls).toHaveLength(count)
       expect(client.calls).toHaveBeenCalledTimes(count)
     },
   )
-
-  it('rejects tampered cursors before contacting Twilio', async () => {
-    const client = clientFor({})
-    await expect(
-      listVoicemailAICalls(
-        credentials,
-        'arbitrary.invalid',
-        now,
-        client as never,
-      ),
-    ).rejects.toBeInstanceOf(InvalidCursorError)
-    expect(client.calls.page).not.toHaveBeenCalled()
-  })
 
   it('returns error details and existing Twilio transcripts without request credentials', async () => {
     const detail = await getVoicemailAIDetail(

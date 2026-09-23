@@ -7,9 +7,8 @@ import { isValidTwilioWebhook } from '@/lib/twilio-webhook'
  * attempt finishes — regardless of outcome.
  *
  * Routing logic:
- *   - completed (duration >= 4s)  → clean hangup (genuine answer)
- *   - completed (duration < 4s)   → treat as no-answer (carrier voicemail)
- *   - completed (duration = null) → treat as no-answer (rejected during screening)
+ *   - DialBridged=true            → clean hangup after the bridged call ends
+ *   - completed but not bridged   → treat as no-answer (screening did not connect)
  *   - canceled / no-answer        → reset worker to back of queue, re-enqueue with
  *                                   retried=true + excluded_workers so TaskRouter
  *                                   skips cell user on the next attempt
@@ -34,12 +33,6 @@ import {
 } from '@/lib/taskrouter-retry-routing'
 import { serverConfig } from '@/lib/config'
 
-// Only trust "completed" as a genuine answer if the call lasted at least this long.
-// - null duration = rejected during call screening prompt → re-enqueue
-// - duration < 4s = carrier voicemail answered → re-enqueue
-// - duration >= 4s = real human answered → hang up cleanly
-const GENUINE_ANSWER_THRESHOLD_SECONDS = 4
-
 const HANGUP_TWIML =
   '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>'
 
@@ -55,15 +48,16 @@ function twimlResponse(body: string) {
 function logDialResult(
   dialCallStatus: string | null,
   durationSeconds: number | null,
+  dialBridged: boolean,
+  dialCallSid: string | null,
 ) {
-  console.log('═══════════════════════════════════════════')
-  console.log('📱 SIMULTANEOUS DIAL COMPLETE')
-  console.log('DialCallStatus:', dialCallStatus)
-  console.log(
-    'DialCallDuration:',
-    durationSeconds != null ? `${durationSeconds}s` : 'n/a',
-  )
-  console.log('═══════════════════════════════════════════')
+  console.log('📱 [SimultaneousDial] Complete', {
+    at: new Date().toISOString(),
+    status: dialCallStatus,
+    durationSeconds,
+    bridged: dialBridged,
+    dialCallSid: dialCallSid?.slice(-8),
+  })
 }
 
 async function resetWorkerToBack(
@@ -147,7 +141,7 @@ async function handleGenuineAnswer(options: {
   taskSid: string | null
   workerSid: string
   reservationSid: string
-  durationSeconds: number
+  durationSeconds: number | null
   availableActivitySid: string
 }) {
   const {
@@ -161,7 +155,7 @@ async function handleGenuineAnswer(options: {
   } = options
 
   console.log(
-    `📞 DialCallStatus="completed" duration=${durationSeconds}s — genuine answer, hanging up cleanly`,
+    `📞 DialBridged=true duration=${durationSeconds ?? 'unknown'}s — bridged call ended, hanging up cleanly`,
   )
   // Simultaneous ring is authoritative here because reservation.accepted fires
   // early, when Twilio redirects rather than when the rep actually answers.
@@ -177,15 +171,13 @@ async function handleGenuineAnswer(options: {
 
 function normalizeDialCallStatus(
   dialCallStatus: string | null,
-  durationSeconds: number | null,
+  dialBridged: boolean,
 ) {
   if (dialCallStatus && dialCallStatus !== 'completed') return dialCallStatus
 
-  const reason =
-    durationSeconds === null
-      ? 'null duration (rejected during screening)'
-      : `duration=${durationSeconds}s < ${GENUINE_ANSWER_THRESHOLD_SECONDS}s (carrier voicemail)`
-  console.log(`⚠️ "completed" but ${reason} — treating as no-answer`)
+  console.log(
+    `⚠️ DialCallStatus="${dialCallStatus ?? 'unknown'}" but DialBridged=${dialBridged} — treating as no-answer`,
+  )
   return 'no-answer'
 }
 
@@ -248,11 +240,13 @@ export async function POST(req: Request) {
     const formData = await req.formData()
     const rawDialCallStatus = formData.get('DialCallStatus') as string | null
     const dialCallDuration = formData.get('DialCallDuration') as string | null
+    const dialBridged = formData.get('DialBridged') === 'true'
+    const dialCallSid = formData.get('DialCallSid') as string | null
     const durationSeconds = dialCallDuration
       ? parseInt(dialCallDuration, 10)
       : null
 
-    logDialResult(rawDialCallStatus, durationSeconds)
+    logDialResult(rawDialCallStatus, durationSeconds, dialBridged, dialCallSid)
 
     const appUrl = serverConfig.app.baseUrlFromRequest(req.url)
     const { accountSid, authToken } =
@@ -263,12 +257,7 @@ export async function POST(req: Request) {
       'available',
     ] as const)
 
-    const isGenuineAnswer =
-      (!rawDialCallStatus || rawDialCallStatus === 'completed') &&
-      durationSeconds != null &&
-      durationSeconds >= GENUINE_ANSWER_THRESHOLD_SECONDS
-
-    if (isGenuineAnswer) {
+    if (dialBridged) {
       await handleGenuineAnswer({
         client,
         workspaceSid,
@@ -283,7 +272,7 @@ export async function POST(req: Request) {
 
     const dialCallStatus = normalizeDialCallStatus(
       rawDialCallStatus,
-      durationSeconds,
+      dialBridged,
     )
     const taskAttributes = await fetchAndCompleteMissedTask(
       client,

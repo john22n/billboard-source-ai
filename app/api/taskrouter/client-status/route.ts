@@ -1,21 +1,17 @@
 import { isValidTwilioWebhook } from '@/lib/twilio-webhook'
 
 /**
- * Client Status Callback — Simultaneous Ring
+ * Child-leg Status Callback — Simultaneous Ring
  *
- * Fired by Twilio for every status change on the <Client> noun leg inside
- * the simultaneous-dial <Dial>. When the browser client rejects or dismisses
- * the call (CallStatus = "no-answer" | "canceled" | "busy"), this handler
- * immediately cancels the outbound cell phone leg via the REST API so it
- * stops ringing instead of waiting for the full 20s timeout.
+ * Fired by Twilio for every browser and cell child-leg status change inside
+ * the simultaneous-dial <Dial>. This callback is observational only: <Dial>
+ * owns cancellation of losing legs, avoiding a race where a browser status
+ * callback cancels a cell leg while the rep is completing call screening.
  *
  * Query parameters (set by simultaneous-dial/route.ts):
- *   cellPhone — E.164 cell number to cancel
+ *   leg       — "browser" or "cell"
  *   taskSid   — TaskRouter Task SID (for logging)
  */
-
-import twilio from 'twilio'
-import { serverConfig } from '@/lib/config'
 
 export async function POST(req: Request) {
   if (!(await isValidTwilioWebhook(req)))
@@ -23,52 +19,15 @@ export async function POST(req: Request) {
 
   try {
     const url = new URL(req.url)
-    const cellPhone = url.searchParams.get('cellPhone')
-
     const formData = await req.formData()
-    const callStatus = formData.get('CallStatus') as string | null
-
-    console.log('═══════════════════════════════════════════')
-    console.log('📱 CLIENT STATUS CALLBACK')
-    console.log('CallStatus:', callStatus)
-    console.log('═══════════════════════════════════════════')
-
-    // Only act when the browser leg ended without answering
-    const browserRejected =
-      callStatus === 'no-answer' ||
-      callStatus === 'canceled' ||
-      callStatus === 'busy'
-
-    if (browserRejected && cellPhone) {
-      console.log(
-        `🚫 Browser leg "${callStatus}" — canceling cell leg to ${cellPhone.replace(/\d(?=\d{4})/g, '*')}`,
-      )
-
-      const { accountSid, authToken } =
-        serverConfig.twilio.requireAccountCredentials()
-      const client = twilio(accountSid, authToken)
-
-      // Find all active outbound calls to the cell number and cancel them.
-      // We filter by `to` and `status=ringing` to avoid touching unrelated calls.
-      const activeCalls = await client.calls.list({
-        to: cellPhone,
-        status: 'ringing',
-      })
-
-      console.log(`   Found ${activeCalls.length} ringing call(s) to cell`)
-
-      await Promise.all(
-        activeCalls.map((call) =>
-          client
-            .calls(call.sid)
-            .update({ status: 'canceled' })
-            .then(() => console.log('   ✅ Canceled cell leg'))
-            .catch(() => console.error('   ❌ Failed to cancel cell leg')),
-        ),
-      )
-    } else {
-      console.log(`ℹ️ CallStatus="${callStatus}" — no action needed`)
-    }
+    console.log('📱 [SimultaneousDialLeg] Status update', {
+      at: new Date().toISOString(),
+      leg: url.searchParams.get('leg') ?? 'unknown',
+      status: formData.get('CallStatus'),
+      callSid: String(formData.get('CallSid') ?? '').slice(-8),
+      parentCallSid: String(formData.get('ParentCallSid') ?? '').slice(-8),
+      taskSid: url.searchParams.get('taskSid')?.slice(-8),
+    })
 
     // Always return 204 — Twilio doesn't need TwiML from a statusCallback
     return new Response(null, { status: 204 })

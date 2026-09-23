@@ -142,6 +142,11 @@ export async function POST(req: Request) {
       )
     }
 
+    // Start the account lookup while TaskRouter attributes are updated below.
+    // Neither operation depends on the other, so this removes one network
+    // round trip from the assignment's critical path.
+    const cellPhonePromise = getUserCellPhoneByEmail(workerAttrs.email)
+
     // ── MARK SALES REP AS OFFERED ────────────────────────────────────────────
     // Append this worker to excluded_workers so the next routing target
     // (Feature 3) tries a DISTINCT Sales Rep and never re-rings the same one.
@@ -188,7 +193,7 @@ export async function POST(req: Request) {
     // ── SIMULTANEOUS RING ────────────────────────────────────────────────────
     // Read the account on each offer so saving/removing a cell takes effect
     // without syncing TaskRouter attributes. Legacy worker flags are ignored.
-    const cellPhone = await getUserCellPhoneByEmail(workerAttrs.email)
+    const cellPhone = await cellPhonePromise
     const simultaneous = simultaneousRingResponse(
       appUrl,
       {
