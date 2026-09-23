@@ -31,7 +31,7 @@ export async function POST(req: Request) {
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Gather numDigits="1" action="${escapeXml(acceptUrl.toString())}" method="POST" timeout="5">
-    <Say voice="Polly.Matthew">Sales call. Press 1.</Say>
+    <Say voice="Polly.Matthew">Incoming sales call. Press 1 to accept.</Say>
   </Gather>
   <Hangup/>
 </Response>`
