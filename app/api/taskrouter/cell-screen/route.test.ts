@@ -36,7 +36,7 @@ describe('cell screening', () => {
 
     expect(response.status).toBe(200)
     expect(xml).toContain('timeout="5"')
-    expect(xml).toContain('Sales call. Press 1.')
+    expect(xml).toContain('Incoming sales call. Press 1 to accept.')
     expect(xml).toContain('/api/taskrouter/cell-screen-accept')
   })
 
