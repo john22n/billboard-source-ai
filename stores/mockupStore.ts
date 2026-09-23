@@ -9,6 +9,9 @@ type Store = {
   sessionKey: string | null
   epoch: number
   busy: boolean
+  draft: string
+  error: string
+  setDraft: (draft: string) => void
   storageWarning: string
   initialize: (key: string) => void
   update: (change: Partial<MockupState>) => void
@@ -26,6 +29,9 @@ export const useMockupStore = create<Store>((set, get) => ({
   sessionKey: null,
   epoch: 0,
   busy: false,
+  draft: '',
+  error: '',
+  setDraft: (draft) => set({ draft }),
   storageWarning: '',
   initialize(key) {
     if (get().sessionKey === key) return
@@ -42,7 +48,14 @@ export const useMockupStore = create<Store>((set, get) => ({
     } catch {
       // A browser can deny access entirely. update() reports the persistence warning.
     }
-    set({ sessionKey: key, state, epoch: get().epoch + 1, busy: false })
+    set({
+      sessionKey: key,
+      state,
+      epoch: get().epoch + 1,
+      busy: false,
+      draft: '',
+      error: '',
+    })
     get().update({})
   },
   update(change) {
@@ -74,7 +87,7 @@ export const useMockupStore = create<Store>((set, get) => ({
     })
   },
   start(lead) {
-    set({ epoch: get().epoch + 1, busy: false })
+    set({ epoch: get().epoch + 1, busy: false, draft: '', error: '' })
     get().update({
       ...restart(),
       ...(lead ? { intake: importLead(lead) } : {}),
@@ -91,6 +104,8 @@ export const useMockupStore = create<Store>((set, get) => ({
       sessionKey: null,
       epoch: get().epoch + 1,
       busy: false,
+      draft: '',
+      error: '',
       storageWarning: '',
     })
   },

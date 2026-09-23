@@ -203,6 +203,13 @@ for (const placement of ['Form views', 'Lead tools']) {
       await tools.getByRole('tab', { name: 'Pricing', exact: true }).click()
       await tab.click()
       await expect(draft).toHaveValue('Unsaved website draft')
+      const views = page.getByRole('tablist', { name: 'Form views' })
+      await views.getByRole('tab', { name: 'Creative Studio' }).click()
+      await expect(draft).toHaveValue('Unsaved website draft')
+      await draft.fill('Edited in full Studio')
+      await views.getByRole('tab', { name: 'Lead Form & Pricing' }).click()
+      await tab.click()
+      await expect(draft).toHaveValue('Edited in full Studio')
       await tools.getByRole('button', { name: 'Choose map' }).click()
       await expect(
         page.getByRole('menuitemradio', { name: 'Google Map', exact: true }),
@@ -221,7 +228,7 @@ for (const placement of ['Form views', 'Lead tools']) {
         page.getByRole('heading', { name: 'BSI Map', exact: true }),
       ).toBeVisible()
       await tab.click()
-      await expect(draft).toHaveValue('Unsaved website draft')
+      await expect(draft).toHaveValue('Edited in full Studio')
     } else {
       await studio
         .getByRole('button', { name: 'Start Mockup', exact: true })
@@ -311,6 +318,21 @@ for (const placement of ['Form views', 'Lead tools']) {
       'download',
       `billboard-concept-${image.id}.jpg`,
     )
+    if (placement === 'Lead tools') {
+      const views = page.getByRole('tablist', { name: 'Form views' })
+      await views.getByRole('tab', { name: 'Creative Studio' }).click()
+      await expect(revision).toHaveValue('Make the headline larger')
+      await expect(studio.getByRole('alert')).toContainText(
+        'Your selected image is unchanged',
+      )
+      await expect(selected).toHaveAttribute('src', image.dataUrl)
+      await views.getByRole('tab', { name: 'Lead Form & Pricing' }).click()
+      await tab.click()
+      await expect(revision).toHaveValue('Make the headline larger')
+      await expect(studio.getByRole('alert')).toContainText(
+        'Your selected image is unchanged',
+      )
+    }
     await studio.getByRole('button', { name: 'Generate revision' }).click()
     await expect(download).toHaveAttribute(
       'download',
