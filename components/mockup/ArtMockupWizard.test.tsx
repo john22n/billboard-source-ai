@@ -152,17 +152,20 @@ it('sends the latest copy request and retains the selected image and draft on fa
   )
 })
 
-it('keeps a read-only summary and requires approval before generating', async () => {
-  useMockupStore.getState().update({ summary })
+it('keeps only the orange summary and generate button, without the review section', async () => {
+  useMockupStore
+    .getState()
+    .update({ summary: { ...summary, caution: 'Keep the headline short.' } })
   const generate = vi.fn()
   await act(async () =>
     root.render(<ApprovalSummary busy={false} onGenerate={generate} />),
   )
   expect(generate).not.toHaveBeenCalled()
   expect(container.querySelector('input, textarea')).toBeNull()
-  expect(container.textContent).toContain('Smile bigger')
-  expect(container.textContent).toContain('Bold')
-  expect(container.textContent).toContain('Alpine')
+  expect(container.textContent).toContain('Keep the headline short.')
+  expect(container.textContent).not.toContain('Smile bigger')
+  expect(container.textContent).not.toContain('Visual direction')
+  expect(container.textContent).not.toContain('Billboard summary')
   await act(async () => button('Generate mockup').click())
   expect(generate).toHaveBeenCalledTimes(1)
   await act(async () =>
