@@ -9,7 +9,6 @@ export interface VoicemailAICall {
 
 export interface VoicemailAIPage {
   calls: VoicemailAICall[]
-  nextCursor: string | null
   since: string
   until: string
   warnings: string[]

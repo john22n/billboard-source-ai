@@ -13,7 +13,6 @@ vi.mock('@/lib/config', () => ({
   },
 }))
 vi.mock('@/lib/voicemail-ai-logs', () => ({
-  InvalidCursorError: class extends Error {},
   listVoicemailAICalls: mocks.list,
 }))
 
@@ -27,28 +26,30 @@ describe('GET /api/admin/voicemail-ai', () => {
     [{ userId: 'u', role: 'user' }, 403],
   ])('enforces the admin gate', async (session, status) => {
     mocks.getSession.mockResolvedValue(session)
-    const response = await GET(
-      new Request('https://app.test/api/admin/voicemail-ai'),
-    )
+    const response = await GET()
     expect(response.status).toBe(status)
     expect(mocks.list).not.toHaveBeenCalled()
   })
 
-  it('passes only an opaque cursor to the provider', async () => {
+  it('returns the complete server-filtered history without a cursor', async () => {
     mocks.getSession.mockResolvedValue({ userId: 'u', role: 'admin' })
     mocks.list.mockResolvedValue({
       calls: [],
-      nextCursor: null,
       since: '',
       until: '',
       warnings: [],
     })
-    await GET(
-      new Request('https://app.test/api/admin/voicemail-ai?cursor=opaque'),
-    )
-    expect(mocks.list).toHaveBeenCalledWith(
-      { accountSid: 'AC', authToken: 'token' },
-      'opaque',
-    )
+    const response = await GET()
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store')
+    expect(await response.json()).toEqual({
+      calls: [],
+      since: '',
+      until: '',
+      warnings: [],
+    })
+    expect(mocks.list).toHaveBeenCalledWith({
+      accountSid: 'AC',
+      authToken: 'token',
+    })
   })
 })
