@@ -400,7 +400,7 @@ function intakeReply(
   const next = nextQuestion(result.intake)
   const reply = next
     ? questions[next]
-    : 'Here’s your brief. Edit anything you need, then choose Generate mockup.'
+    : 'Here’s your summary. When you’re ready, choose Generate mockup.'
   return {
     intake: result.intake,
     summary: result.summary || null,

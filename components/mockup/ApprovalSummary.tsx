@@ -2,12 +2,8 @@
 
 import Image from 'next/image'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
-import { Label } from '@/components/ui/label'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { useMockupStore } from '@/stores/mockupStore'
-import type { Summary } from '@/lib/mockup/intake'
 
 export function ApprovalSummary({
   onGenerate,
@@ -16,11 +12,9 @@ export function ApprovalSummary({
   onGenerate: () => void
   busy: boolean
 }) {
-  const { state, update } = useMockupStore()
+  const { state } = useMockupStore()
   const { summary, intake, brand } = state
   if (!summary) return null
-  const edit = (key: keyof Summary, value: string) =>
-    update({ summary: { ...summary, [key]: value } })
   const wordCount =
     `${summary.headline} ${summary.supporting} ${summary.contact}`
       .trim()
@@ -28,76 +22,29 @@ export function ApprovalSummary({
   return (
     <Card className="shadow-none">
       <CardHeader>
-        <CardTitle className="text-lg">Review your billboard</CardTitle>
+        <CardTitle className="text-lg">Billboard summary</CardTitle>
         <p className="text-sm text-muted-foreground">
-          Edit the exact copy below. No image request starts until you approve.
+          No image request starts until you choose Generate mockup.
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="mockup-advertiser">Advertiser name</Label>
-          <Input
-            id="mockup-advertiser"
-            value={intake.advertiser || ''}
-            disabled={busy}
-            onChange={(e) =>
-              update({
-                intake: { ...intake, advertiser: e.target.value },
-                brand: {
-                  notes: '',
-                  logo: null,
-                  receipt: null,
-                  fallback:
-                    'Advertiser name edited. Using the name as text; no logo.',
-                },
-              })
-            }
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="mockup-headline">Headline</Label>
-          <Input
-            id="mockup-headline"
-            value={summary.headline}
-            maxLength={200}
-            disabled={busy}
-            onChange={(e) => edit('headline', e.target.value)}
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="mockup-supporting">
-            Supporting / required copy (exact text)
-          </Label>
-          <Textarea
-            id="mockup-supporting"
-            value={summary.supporting}
-            maxLength={2000}
-            disabled={busy}
-            onChange={(e) => edit('supporting', e.target.value)}
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="mockup-contact">
-            Contact details on the billboard
-          </Label>
-          <Input
-            id="mockup-contact"
-            value={summary.contact}
-            maxLength={500}
-            disabled={busy}
-            onChange={(e) => edit('contact', e.target.value)}
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="mockup-direction">Tone and visual direction</Label>
-          <Textarea
-            id="mockup-direction"
-            value={summary.direction}
-            maxLength={1000}
-            disabled={busy}
-            onChange={(e) => edit('direction', e.target.value)}
-          />
-        </div>
+        <dl className="space-y-3 text-sm">
+          {[
+            ['Advertiser', intake.advertiser],
+            ['Headline', summary.headline],
+            ['Supporting copy', summary.supporting],
+            ['Contact details', summary.contact],
+            ['Visual direction', summary.direction],
+          ].map(
+            ([label, value]) =>
+              value && (
+                <div key={label} className="space-y-1">
+                  <dt className="font-medium text-muted-foreground">{label}</dt>
+                  <dd className="whitespace-pre-wrap break-words">{value}</dd>
+                </div>
+              ),
+          )}
+        </dl>
         {brand?.logo && (
           <div className="rounded-md border p-3">
             <Image
