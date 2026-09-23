@@ -20,7 +20,7 @@ env:
 jobs:
   quality:
     name: Lint, typecheck, and test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
@@ -49,7 +49,7 @@ jobs:
 
   e2e:
     name: Playwright browser tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
@@ -84,7 +84,7 @@ jobs:
 
       - name: Upload Playwright reports and failure artifacts
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: playwright-results
           path: |
@@ -94,7 +94,7 @@ jobs:
 
   security:
     name: Dependency security
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
