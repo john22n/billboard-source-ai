@@ -55,10 +55,12 @@ Vercel's native Git integration owns deployments: pull requests receive preview 
 
 ## Admin voicemail AI logs
 
-The **Voicemail AI** admin tab reads the last 21 days of Twilio call history.
+The **Voicemail AI** admin tab reads Saturday and Sunday calls from the last
+21 days of Twilio call history, using Central Time weekend boundaries.
 Calls are included only when Twilio Call Events show a request to
 `voicemail-agent.john22n-iii.com`; weekend timing alone is not proof of an AI call.
-Use **Check older calls** to scan additional batches within the same date range.
+The server queries only weekend ranges and follows all Twilio pages before
+returning the verified calls, newest first. No manual batching is needed.
 Expand a call for Twilio notifications, recordings, and existing recording
 transcripts. All three API endpoints require an admin session, and audio is
 proxied with server-side Twilio credentials rather than exposing credentials
