@@ -152,6 +152,43 @@ it('sends the latest copy request and retains the selected image and draft on fa
   )
 })
 
+it('shares pending drafts and failures across Studio views and clears them on restart', async () => {
+  let finish!: (response: Response) => void
+  vi.mocked(fetch).mockReturnValueOnce(
+    new Promise<Response>((resolve) => {
+      finish = resolve
+    }),
+  )
+  await act(async () => root.render(<ArtMockupWizard key="outer" />))
+  await send('alpine.example')
+  await act(async () => root.render(<ArtMockupWizard key="inline" />))
+  expect(container.querySelector('textarea')?.value).toBe('alpine.example')
+  expect(container.querySelector('textarea')?.disabled).toBe(true)
+  await act(async () =>
+    finish(Response.json({ error: 'Try again later.' }, { status: 502 })),
+  )
+  expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+    'Try again later.',
+  )
+  await act(async () =>
+    root.render(
+      <>
+        <ArtMockupWizard key="inline" />
+        <ArtMockupWizard key="outer" />
+      </>,
+    ),
+  )
+  expect(
+    Array.from(container.querySelectorAll('textarea'), (el) => el.value),
+  ).toEqual(['alpine.example', 'alpine.example'])
+  expect(container.querySelectorAll('[role="alert"]')).toHaveLength(2)
+  await act(async () => button('Start Mockup').click())
+  expect(
+    Array.from(container.querySelectorAll('textarea'), (el) => el.value),
+  ).toEqual(['', ''])
+  expect(container.querySelectorAll('[role="alert"]')).toHaveLength(0)
+})
+
 it('keeps only the orange summary and generate button, without the review section', async () => {
   useMockupStore
     .getState()
