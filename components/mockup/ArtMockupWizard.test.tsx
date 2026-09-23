@@ -267,10 +267,11 @@ it.each(['alpine.example', ''])(
 it('blocks the wrong advertiser and requires explicit confirmation to retry the exact lead', async () => {
   useMockupStore.getState().update({
     image,
+    attachmentFailed: true,
     lastLead: { id: 9, name: 'Wrong company', advertiser: 'Other' },
   })
   await act(async () => root.render(<AttachMockup />))
-  await act(async () => button('Add to existing Nutshell lead').click())
+  await act(async () => button('Retry image attachment').click())
   expect(button('Confirm & attach image').disabled).toBe(true)
   expect(fetch).not.toHaveBeenCalled()
   await act(async () => button('Close').click())
