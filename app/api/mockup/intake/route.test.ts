@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { freshIntake } from '@/lib/mockup/intake'
+import { freshIntake, intakeSchema, nextQuestion } from '@/lib/mockup/intake'
 
 vi.mock('@/lib/auth', () => ({
   getSession: async () => ({ userId: 'rep', sessionStartedAt: 123 }),
@@ -75,6 +75,57 @@ function request(body: unknown) {
     body: JSON.stringify(body),
   })
 }
+
+it.each([
+  'website and website content',
+  'website',
+  'Paid for by Example PAC',
+  'x'.repeat(4000),
+])(
+  'preserves required-copy answers without re-extracting advertiser facts (%s)',
+  async (message) => {
+    const intake = {
+      ...freshIntake(),
+      advertiser: 'Example AI',
+      website: 'https://example.com',
+      goal: 'Awareness',
+      market: 'Denver',
+      focus: 'AI Integration',
+    }
+    // Reproduce the provider misclassifying the reply and dropping required copy.
+    generated = { ...freshIntake(), website: 'website', boardType: null }
+    const response = await POST(request({ intake, message }))
+    expect(response.status).toBe(200)
+    const body = await response.json()
+    expect(body.intake).toEqual({ ...intake, required: message })
+    expect(intakeSchema.safeParse(body.intake).success).toBe(true)
+    expect(nextQuestion(body.intake)).toBe('tone')
+    expect(fetcher).not.toHaveBeenCalled()
+  },
+)
+
+it.each([
+  { message: 'skip', required: '', next: 'tone' },
+  { message: '   ', required: null, next: 'required' },
+])(
+  'handles empty and skipped required-copy answers ($message)',
+  async ({ message, required, next }) => {
+    const intake = {
+      ...freshIntake(),
+      advertiser: 'Example AI',
+      website: '',
+      goal: 'Awareness',
+      market: 'Denver',
+      focus: 'AI Integration',
+    }
+    const response = await POST(request({ intake, message }))
+    expect(response.status).toBe(200)
+    const body = await response.json()
+    expect(body.intake).toEqual({ ...intake, required })
+    expect(nextQuestion(body.intake)).toBe(next)
+    expect(fetcher).not.toHaveBeenCalled()
+  },
+)
 
 it.each([null, 'Static'])(
   'enforces complete output and preserves Digital unless board type is explicitly answered (%s)',
