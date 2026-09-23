@@ -46,6 +46,8 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 The GitHub Actions workflow in `.github/workflows/ci-cd.yml`:
 
 - lints, type-checks, and tests every pull request targeting `main`;
+- runs the login and Creative Studio Playwright tests in a separate job, using Chromium and disposable local PostgreSQL;
+- retains Playwright reports, failure screenshots, and retry traces for seven days;
 - audits dependencies for critical vulnerabilities; and
 - publishes an SPDX SBOM.
 
