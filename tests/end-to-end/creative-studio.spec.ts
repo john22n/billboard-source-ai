@@ -49,7 +49,8 @@ const summary = {
   contact: 'example.com',
   direction:
     'Navy #14283f background, orange #ed7b32 accents, cream #f9e7c4 text.',
-  caution: '',
+  caution:
+    'Keep the headline short and the website easy to read at driving speed.',
 }
 const image = {
   id: '11111111-1111-4111-8111-111111111111',
@@ -244,18 +245,20 @@ for (const placement of ['Form views', 'Lead tools']) {
     ).toHaveCount(1)
     await expect(
       studio.getByText('Billboard summary', { exact: true }),
+    ).toHaveCount(0)
+    await expect(
+      studio.getByText(summary.caution, { exact: true }),
     ).toBeVisible()
-    await expect(studio.getByText('example.com', { exact: true })).toBeVisible()
     await expect(
       studio.getByText(summary.direction, { exact: true }),
-    ).toBeVisible()
+    ).toHaveCount(0)
     await expect(
       studio.getByRole('textbox', { name: 'Headline', exact: true }),
     ).toHaveCount(0)
     expect(generations).toHaveLength(0)
 
     await page.screenshot({
-      path: testInfo.outputPath('readonly-summary.png'),
+      path: testInfo.outputPath('orange-summary.png'),
       animations: 'disabled',
     })
     await studio

@@ -238,7 +238,6 @@ it.each(['alpine.example', ''])(
       Response.json({ image, remaining: 9 }),
     )
     await act(async () => root.render(<ArtMockupWizard />))
-    expect(container.textContent).toContain(contact)
     await act(async () => button('Generate mockup').click())
     expect(
       JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string),
