@@ -103,9 +103,29 @@ describe('account-controlled simultaneous dialing', () => {
       expect(xml).toContain('<Identity>custom-identity</Identity>')
       expect(xml).toContain('method="POST">+13035550123</Number>')
       expect(xml).toContain('/api/taskrouter/cell-screen?')
+      expect(xml).toContain('leg=browser')
+      expect(xml).toContain('leg=cell')
+      expect(xml).toContain(
+        'statusCallbackEvent="initiated ringing answered completed"',
+      )
       expect(xml).toContain('reservationSid=WRreservation')
     },
   )
+
+  it('starts the cell lookup before the TaskRouter update finishes', async () => {
+    let finishUpdate: (value: object) => void = () => {}
+    mocks.update.mockReturnValue(
+      new Promise((resolve) => {
+        finishUpdate = resolve
+      }),
+    )
+
+    const response = POST(request())
+    await vi.waitFor(() => expect(mocks.user).toHaveBeenCalled())
+    finishUpdate({})
+
+    expect((await response).status).toBe(200)
+  })
 
   it('uses browser-only dialing without an account cell, ignoring stale worker flags', async () => {
     mocks.user.mockResolvedValue(null)
