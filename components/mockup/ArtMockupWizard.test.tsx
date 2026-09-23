@@ -174,6 +174,22 @@ it('keeps only the orange summary and generate button, without the review sectio
   expect(button('Generating mockup…').disabled).toBe(true)
 })
 
+it('shows download but no existing-lead action, retaining recovery for a failed lead attachment', async () => {
+  useMockupStore.getState().update({ image, summary })
+  await act(async () => root.render(<ArtMockupWizard />))
+  expect(container.textContent).not.toContain('Add to existing Nutshell lead')
+  expect(container.querySelector('a[download]')?.getAttribute('href')).toBe(
+    image.dataUrl,
+  )
+  await act(async () =>
+    useMockupStore.getState().update({
+      attachmentFailed: true,
+      lastLead: { id: 42, advertiser: 'Alpine', name: 'Alpine campaign' },
+    }),
+  )
+  expect(button('Retry image attachment')).toBeDefined()
+})
+
 it('preserves the selected image on revision failure and fences late responses after restart', async () => {
   useMockupStore.getState().update({ image, summary })
   vi.mocked(fetch).mockResolvedValueOnce(
