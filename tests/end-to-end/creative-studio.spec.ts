@@ -64,7 +64,7 @@ const revisedImage = {
 }
 
 for (const placement of ['Form views', 'Lead tools']) {
-  test(`Creative Studio in ${placement} completes intake, approves edited copy, retries a revision, and resets`, async ({
+  test(`Creative Studio in ${placement} completes intake, approves the summary, retries a revision, and resets`, async ({
     page,
     context,
   }, testInfo) => {
@@ -243,19 +243,21 @@ for (const placement of ['Form views', 'Lead tools']) {
       studio.getByRole('log').getByText(answers[5].question),
     ).toHaveCount(1)
     await expect(
-      studio.getByText('Review your billboard', { exact: true }),
+      studio.getByText('Billboard summary', { exact: true }),
+    ).toBeVisible()
+    await expect(studio.getByText('example.com', { exact: true })).toBeVisible()
+    await expect(
+      studio.getByText(summary.direction, { exact: true }),
     ).toBeVisible()
     await expect(
-      studio.getByRole('textbox', { name: 'Contact details on the billboard' }),
-    ).toHaveValue('example.com')
-    await expect(
-      studio.getByRole('textbox', { name: 'Tone and visual direction' }),
-    ).toHaveValue(summary.direction)
+      studio.getByRole('textbox', { name: 'Headline', exact: true }),
+    ).toHaveCount(0)
     expect(generations).toHaveLength(0)
 
-    await studio
-      .getByRole('textbox', { name: 'Headline', exact: true })
-      .fill('Make AI work for you')
+    await page.screenshot({
+      path: testInfo.outputPath('readonly-summary.png'),
+      animations: 'disabled',
+    })
     await studio
       .getByRole('button', { name: 'Generate mockup', exact: true })
       .click()
@@ -271,7 +273,7 @@ for (const placement of ['Form views', 'Lead tools']) {
         website: 'https://example.com',
         required: 'website and website content',
       },
-      summary: { ...summary, headline: 'Make AI work for you' },
+      summary,
     })
     const download = studio.getByRole('link', {
       name: 'Download selected mockup',
