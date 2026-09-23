@@ -7,7 +7,12 @@ const fixtures = vi.hoisted(
 )
 const requested = vi.hoisted(() => [] as string[])
 vi.mock('node:dns/promises', () => ({
-  lookup: async () => [{ address: '93.184.215.14', family: 4 }],
+  lookup: async (hostname: string) => [
+    {
+      address: hostname === 'private.example' ? '127.0.0.1' : '93.184.215.14',
+      family: 4,
+    },
+  ],
 }))
 vi.mock('node:https', () => ({
   request: (
@@ -54,7 +59,9 @@ it('reviews colors from linked CSS, inline styles, and theme metadata', async ()
   })
   fixtures.set('https://example.com/assets/brand.css', {
     type: 'text/css',
-    body: ':root { --brand-primary: #14283f; --brand-accent: #ed7b32; } .cta { background-color: var(--brand-accent); }',
+    body:
+      '.spacer { margin: 1px; }'.repeat(1000) +
+      ':root { --brand-primary: #14283f; --brand-accent: #ed7b32; } .cta { background-color: var(--brand-accent); }',
   })
   const result = await reviewWebsite('https://example.com')
   expect(result.text).toContain('#14283f')
@@ -76,6 +83,31 @@ it('bounds stylesheet requests and keeps useful evidence when CSS is unavailable
   expect(result.text).toContain('Useful advertiser facts')
   expect(requested).toHaveLength(4)
   expect(requested.some((url) => url.includes('127.0.0.1'))).toBe(false)
+})
+
+it('rejects private CSS redirects, wrong MIME types, and oversized stylesheets', async () => {
+  fixtures.set('https://example.com/', {
+    type: 'text/html',
+    body: '<link rel="stylesheet" href="/redirect.css"><link rel="stylesheet" href="/wrong.css"><link rel="stylesheet" href="/large.css"><body>Safe text</body>',
+  })
+  fixtures.set('https://example.com/redirect.css', {
+    type: 'text/css',
+    body: '',
+    location: 'https://private.example/secrets',
+  })
+  fixtures.set('https://example.com/wrong.css', {
+    type: 'text/html',
+    body: 'color: #badbad',
+  })
+  fixtures.set('https://example.com/large.css', {
+    type: 'text/css',
+    body: 'color: #badbad;' + 'x'.repeat(100_001),
+  })
+  const result = await reviewWebsite('https://example.com')
+  expect(requested).toContain('https://example.com/redirect.css')
+  expect(requested.some((url) => url.includes('private.example'))).toBe(false)
+  expect(result.text).not.toContain('#badbad')
+  expect(result.text).toContain('Safe text')
 })
 
 describe('website isolation', () => {

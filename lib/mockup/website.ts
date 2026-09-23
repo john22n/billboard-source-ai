@@ -47,7 +47,7 @@ export async function fetchPublicWebsite(
         family: pinned.family,
         headers: {
           'User-Agent': 'BillboardSource-BrandReview/1.0',
-          Accept: 'text/html,image/png,image/jpeg,image/webp',
+          Accept: 'text/html,text/css,image/png,image/jpeg,image/webp',
           'Accept-Encoding': 'identity',
         },
         lookup: (_host, _options, callback) =>
@@ -126,6 +126,45 @@ async function findWebsiteLogo($: CheerioAPI, url: URL) {
   return null
 }
 
+function colorEvidence(css: string) {
+  // Keep custom properties (including HSL channels) and their color usages,
+  // rather than spending the evidence budget on layout rules and font data.
+  return (
+    css.match(
+      /(?:^|[;{}])\s*(?:--[\w-]+|[\w-]*color|background(?:-image)?|fill|stroke)\s*:[^;{}]+/gi,
+    ) || []
+  )
+    .join('; ')
+    .slice(0, 6000)
+}
+
+async function websiteStyles($: CheerioAPI, url: URL) {
+  const inline = $('[style]')
+    .toArray()
+    .map((el) => $(el).attr('style'))
+    .join('; ')
+  const embedded = colorEvidence(`${$('style').text()}\n${inline}`)
+  const links = $('link[rel~="stylesheet"][href]').toArray().slice(0, 3)
+  const linked = await Promise.all(
+    links.map(async (el) => {
+      try {
+        // Each URL and redirect uses the same DNS-pinned public HTTPS checks as the page.
+        const css = await fetchPublicWebsite(
+          new URL($(el).attr('href')!, url).href,
+          100_000,
+          1,
+        )
+        return css.type === 'text/css'
+          ? colorEvidence(css.bytes.toString('utf8'))
+          : ''
+      } catch {
+        return '' // A failed stylesheet must not discard the page's other evidence.
+      }
+    }),
+  )
+  return [embedded, ...linked].join('\n')
+}
+
 /** Never searches the web. Logo candidates must be explicitly marked on the supplied site. */
 export async function reviewWebsite(website: string) {
   if (!website)
@@ -141,9 +180,11 @@ export async function reviewWebsite(website: string) {
     )
     if (page.type !== 'text/html') throw new Error('Not an HTML website')
     const $ = load(page.bytes.toString('utf8'))
-    const logo = await findWebsiteLogo($, page.url)
+    const [logo, styles] = await Promise.all([
+      findWebsiteLogo($, page.url),
+      websiteStyles($, page.url),
+    ])
     const colors = $('meta[name="theme-color"]').attr('content') || ''
-    const styles = $('style').text().slice(0, 4000)
     $('script,style,nav,footer,noscript').remove()
     return {
       text: `${$('title').text()}\n${$('meta[name="description"]').attr('content') || ''}\nTheme color: ${colors}\nStyles: ${styles}\n${$('body').text().replace(/\s+/g, ' ').slice(0, 12000)}`,

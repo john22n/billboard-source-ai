@@ -18,7 +18,7 @@ export const intakeSchema = z.object({
   goal: answer,
   market: answer,
   focus: answer,
-  required: answer,
+  required: z.string().max(4000).nullable(),
   tone: answer,
   boardType: z.string().max(100).default('Static'),
 })
