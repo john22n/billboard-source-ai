@@ -268,6 +268,12 @@ for (const placement of ['Form views', 'Lead tools']) {
       name: 'Selected outdoor billboard concept for Example AI',
     })
     await expect(selected).toBeVisible()
+    await expect(
+      studio.getByRole('button', {
+        name: 'Add to existing Nutshell lead',
+        exact: true,
+      }),
+    ).toHaveCount(0)
     expect(generations[0]).toMatchObject({
       approved: true,
       previous: null,

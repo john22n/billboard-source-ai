@@ -29,7 +29,7 @@ export function AttachMockup() {
   const [isPending, setIsPending] = useState(false)
   const [message, setMessage] = useState('')
   const image = state.image
-  if (!image) return null
+  if (!image || !state.attachmentFailed) return null
 
   async function search() {
     setIsPending(true)
@@ -81,12 +81,9 @@ export function AttachMockup() {
   }
   return (
     <>
-      {state.attachmentFailed && (
-        <p role="status" className="text-sm">
-          Lead created; image could not be attached. Download is still
-          available.
-        </p>
-      )}
+      <p role="status" className="text-sm">
+        Lead created; image could not be attached. Download is still available.
+      </p>
       <Button
         variant="outline"
         disabled={generating}
@@ -97,9 +94,7 @@ export function AttachMockup() {
           setMessage('')
         }}
       >
-        {state.attachmentFailed
-          ? 'Retry image attachment'
-          : 'Add to existing Nutshell lead'}
+        Retry image attachment
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl">
