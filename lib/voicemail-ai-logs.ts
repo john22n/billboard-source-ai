@@ -1,6 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto'
 import twilio from 'twilio'
-import { z } from 'zod'
 import { getVoicemailAITranscripts } from './voicemail-ai-transcripts'
 import type {
   VoicemailAICall,
@@ -11,7 +9,6 @@ import type {
 export const AI_HOSTNAME = 'voicemail-agent.john22n-iii.com'
 export const CALL_SID = /^CA[0-9a-fA-F]{32}$/
 export const RECORDING_SID = /^RE[0-9a-fA-F]{32}$/
-const PAGE_SIZE = 50
 const CHILD_LIMIT = 100
 const WINDOW_MS = 21 * 24 * 60 * 60 * 1000
 const AVAILABILITY_WARNING =
@@ -20,7 +17,6 @@ const AVAILABILITY_WARNING =
 type Credentials = { accountSid: string; authToken: string }
 type TwilioClient = ReturnType<typeof twilio>
 
-export class InvalidCursorError extends Error {}
 export class CallNotEligibleError extends Error {}
 
 function eventUrl(event: { request?: unknown }): string | null {
@@ -42,53 +38,35 @@ export function hasAIEvent(events: Array<{ request?: unknown }>): boolean {
   })
 }
 
-function cursorSignature(payload: string, secret: string) {
-  return createHmac('sha256', secret).update(payload).digest('base64url')
-}
-
-function encodeCursor(
-  data: { pageToken: string; since: string; until: string },
-  secret: string,
-) {
-  const payload = Buffer.from(JSON.stringify(data)).toString('base64url')
-  return `${payload}.${cursorSignature(payload, secret)}`
-}
-
-const cursorSchema = z.object({
-  pageToken: z.string().min(1),
-  since: z.string().datetime(),
-  until: z.string().datetime(),
+const centralHour = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/Chicago',
+  hour: 'numeric',
+  hourCycle: 'h23',
 })
+const DAY_MS = 24 * 60 * 60 * 1000
 
-function decodeCursor(cursor: string, secret: string) {
-  try {
-    const [payload, signature, extra] = cursor.split('.')
-    const expected = cursorSignature(payload, secret)
-    if (
-      extra ||
-      !signature ||
-      signature.length !== expected.length ||
-      !timingSafeEqual(Buffer.from(signature), Buffer.from(expected))
-    ) {
-      throw new Error('bad signature')
-    }
-    return cursorSchema.parse(
-      JSON.parse(Buffer.from(payload, 'base64url').toString()),
-    )
-  } catch {
-    throw new InvalidCursorError('Invalid cursor')
-  }
+function centralMidnight(date: Date) {
+  // At 06:00 UTC Chicago is either midnight (CST) or 01:00 (CDT).
+  // Resolve each boundary separately so DST weekends can be 47 or 49 hours.
+  const sixUTC = new Date(date.getTime() + 6 * 60 * 60 * 1000)
+  return new Date(
+    sixUTC.getTime() - Number(centralHour.format(sixUTC)) * 60 * 60 * 1000,
+  )
 }
 
-function pageToken(nextPageUrl?: string) {
-  if (!nextPageUrl) return null
-  try {
-    const url = new URL(nextPageUrl, 'https://api.twilio.com')
-    if (url.hostname !== 'api.twilio.com') return null
-    return url.searchParams.get('PageToken')
-  } catch {
-    return null
+function weekendRanges(since: Date, until: Date) {
+  const ranges: Array<{ start: Date; end: Date }> = []
+  const day = new Date(since)
+  day.setUTCHours(0, 0, 0, 0)
+  // Include the Saturday before a range that starts partway through a weekend.
+  day.setUTCDate(day.getUTCDate() - 7)
+  for (; day <= until; day.setUTCDate(day.getUTCDate() + 1)) {
+    if (day.getUTCDay() !== 6) continue
+    const start = centralMidnight(day)
+    const end = centralMidnight(new Date(day.getTime() + 2 * DAY_MS))
+    if (end > since && start <= until) ranges.push({ start, end })
   }
+  return ranges
 }
 
 function callDate(call: {
@@ -118,39 +96,38 @@ async function mapConcurrent<T, R>(
 
 export async function listVoicemailAICalls(
   credentials: Credentials,
-  cursor: string | null,
   now = new Date(),
   client: TwilioClient = twilio(credentials.accountSid, credentials.authToken, {
     timeout: 8_000,
   }),
 ): Promise<VoicemailAIPage> {
-  const range = cursor
-    ? decodeCursor(cursor, credentials.authToken)
-    : {
-        pageToken: undefined,
-        since: new Date(now.getTime() - WINDOW_MS).toISOString(),
-        until: now.toISOString(),
-      }
-  const page = await client.calls.page({
-    startTimeAfter: new Date(range.since),
-    startTimeBefore: new Date(range.until),
-    pageSize: PAGE_SIZE,
-    pageToken: range.pageToken,
+  const since = new Date(now.getTime() - WINDOW_MS)
+  const until = now
+  const ranges = weekendRanges(since, until)
+  const weekends = await mapConcurrent(ranges, 3, async ({ start, end }) => {
+    // The SDK follows every provider page on the server. Do not cap the total
+    // records: non-AI calls must never hide AI calls on a later Twilio page.
+    const calls = await client.calls.list({
+      startTimeAfter: new Date(Math.max(start.getTime(), since.getTime())),
+      startTimeBefore: new Date(Math.min(end.getTime(), until.getTime())),
+      pageSize: 1000,
+    })
+    return calls.filter((call) => {
+      const startedAt = callDate(call)
+      return (
+        call.direction === 'inbound' &&
+        startedAt !== null &&
+        startedAt >= start &&
+        startedAt < end &&
+        startedAt >= since &&
+        startedAt <= until
+      )
+    })
   })
-  // Defensively enforce the exact rolling timestamps before making the more
-  // expensive Events requests, even if provider filtering changes.
-  const since = new Date(range.since)
-  const until = new Date(range.until)
   const warnings = [AVAILABILITY_WARNING]
-  const inbound = page.instances.filter((call) => {
-    const startedAt = callDate(call)
-    return (
-      call.direction === 'inbound' &&
-      startedAt !== null &&
-      startedAt >= since &&
-      startedAt <= until
-    )
-  })
+  const inbound = [
+    ...new Map(weekends.flat().map((call) => [call.sid, call])).values(),
+  ]
   const checked = await mapConcurrent(inbound, 5, async (call) => {
     try {
       const events = await client
@@ -186,17 +163,11 @@ export async function listVoicemailAICalls(
       },
     ]
   })
-  const token = pageToken(page.nextPageUrl)
+  calls.sort((a, b) => b.startedAt.localeCompare(a.startedAt))
   return {
     calls,
-    nextCursor: token
-      ? encodeCursor(
-          { pageToken: token, since: range.since, until: range.until },
-          credentials.authToken,
-        )
-      : null,
-    since: range.since,
-    until: range.until,
+    since: since.toISOString(),
+    until: until.toISOString(),
     warnings,
   }
 }

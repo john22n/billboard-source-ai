@@ -260,30 +260,15 @@ function CallRow({ call }: { call: VoicemailAICall }) {
 
 function useVoicemailCalls() {
   const [data, setData] = useState<VoicemailAIPage | null>(null)
-  const [calls, setCalls] = useState<VoicemailAICall[]>([])
-  const [cursor, setCursor] = useState<string | null>(null)
   const [refresh, setRefresh] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   useEffect(() => {
     const controller = new AbortController()
-    const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''
-    readLogs<VoicemailAIPage>(
-      `/api/admin/voicemail-ai${query}`,
-      controller.signal,
-    )
+    readLogs<VoicemailAIPage>('/api/admin/voicemail-ai', controller.signal)
       .then((page) => {
         if (controller.signal.aborted) return
         setData(page)
-        setCalls((previous) =>
-          cursor
-            ? [
-                ...new Map(
-                  [...previous, ...page.calls].map((call) => [call.sid, call]),
-                ).values(),
-              ]
-            : page.calls,
-        )
       })
       .catch((cause) => {
         if (!controller.signal.aborted) setError(cause.message)
@@ -292,12 +277,10 @@ function useVoicemailCalls() {
         if (!controller.signal.aborted) setLoading(false)
       })
     return () => controller.abort()
-  }, [cursor, refresh])
+  }, [refresh])
   function reload() {
     setLoading(true)
     setError(null)
-    setCursor(null)
-    setCalls([])
     setData(null)
     setRefresh(refresh + 1)
   }
@@ -306,16 +289,11 @@ function useVoicemailCalls() {
     setError(null)
     setRefresh(refresh + 1)
   }
-  function loadOlder() {
-    setLoading(true)
-    setCursor(data?.nextCursor ?? null)
-  }
-  return { data, calls, loading, error, reload, retry, loadOlder }
+  return { data, calls: data?.calls ?? [], loading, error, reload, retry }
 }
 
 export default function VoicemailAITab() {
-  const { data, calls, loading, error, reload, retry, loadOlder } =
-    useVoicemailCalls()
+  const { data, calls, loading, error, reload, retry } = useVoicemailCalls()
   return (
     <section className="space-y-5" aria-label="Voicemail AI logs">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -324,7 +302,7 @@ export default function VoicemailAITab() {
             Voicemail AI logs
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Last 21 days · Call times shown in Central time
+            Saturdays and Sundays · Last 21 days · Central time
           </p>
         </div>
         <Button
@@ -363,13 +341,7 @@ export default function VoicemailAITab() {
           <CallRow key={call.sid} call={call} />
         ))}
       </div>
-      <CallHistoryStatus
-        loading={loading}
-        error={error}
-        hasMore={Boolean(data?.nextCursor)}
-        count={calls.length}
-        loadOlder={loadOlder}
-      />
+      <CallHistoryStatus loading={loading} error={error} count={calls.length} />
     </section>
   )
 }
@@ -377,15 +349,11 @@ export default function VoicemailAITab() {
 function CallHistoryStatus({
   loading,
   error,
-  hasMore,
   count,
-  loadOlder,
 }: {
   loading: boolean
   error: string | null
-  hasMore: boolean
   count: number
-  loadOlder: () => void
 }) {
   if (error) return null
   if (loading)
@@ -398,51 +366,17 @@ function CallHistoryStatus({
         Checking Twilio call history…
       </p>
     )
-  return (
-    <>
-      {count === 0 && <EmptyCalls hasMore={hasMore} />}
-      <HistoryPagination
-        hasMore={hasMore}
-        count={count}
-        loadOlder={loadOlder}
-      />
-    </>
-  )
+  return count === 0 ? <EmptyCalls /> : null
 }
 
-function HistoryPagination({
-  hasMore,
-  count,
-  loadOlder,
-}: {
-  hasMore: boolean
-  count: number
-  loadOlder: () => void
-}) {
-  if (!hasMore) return null
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <p className="text-sm text-muted-foreground">
-        {count} verified calls loaded · More history available
-      </p>
-      <Button variant="outline" onClick={loadOlder}>
-        Check older calls
-      </Button>
-    </div>
-  )
-}
-
-function EmptyCalls({ hasMore }: { hasMore: boolean }) {
+function EmptyCalls() {
   return (
     <div className="rounded-xl border border-dashed p-10 text-center">
       <PhoneIncoming className="mx-auto mb-3 size-6 text-muted-foreground" />
-      <h3 className="font-medium">
-        No verified AI calls found{hasMore ? ' in these results' : ''}
-      </h3>
+      <h3 className="font-medium">No verified weekend AI calls found</h3>
       <p className="mt-2 text-sm text-muted-foreground">
-        {hasMore
-          ? 'Continue through older calls to check the rest of the 21-day window.'
-          : 'Recent calls may take 15 minutes to appear. Refresh after Twilio finishes processing.'}
+        Recent calls may take 15 minutes to appear. Refresh after Twilio
+        finishes processing.
       </p>
     </div>
   )
