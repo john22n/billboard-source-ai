@@ -1058,6 +1058,27 @@ function formatTranscript(transcripts: TranscriptionState['transcripts']) {
     .join('\n')
 }
 
+function useTranscriptHistory({
+  transcripts,
+  interimTranscript,
+}: TranscriptionState) {
+  useEffect(() => {
+    const first = transcripts.find((item) => item.text.trim())
+    let transcriptStartedAt = first?.timestamp ?? null
+    if (!first && interimTranscript.trim()) {
+      transcriptStartedAt =
+        useDashboardStore.getState().transcriptStartedAt ?? Date.now()
+    }
+    useDashboardStore.setState({ transcriptStartedAt })
+  }, [transcripts, interimTranscript])
+  useEffect(
+    () => () => {
+      useDashboardStore.setState({ transcriptStartedAt: null })
+    },
+    [],
+  )
+}
+
 function useTranscriptExtraction(
   transcripts: TranscriptionState['transcripts'],
   interimTranscript: TranscriptionState['interimTranscript'],
@@ -1333,6 +1354,7 @@ function TranscriberContent({
   currentMarketLocation,
   scrollRef,
 }: TranscriberContentProps) {
+  useTranscriptHistory(transcription)
   return (
     <div className="h-full overflow-hidden flex items-center justify-center m-0 p-0">
       <div className="max-w-[1800px] w-full h-full flex flex-col px-2 sm:px-0">
