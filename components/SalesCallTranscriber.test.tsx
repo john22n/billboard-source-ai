@@ -10,12 +10,13 @@ const mocks = vi.hoisted(() => ({
   clear: vi.fn(),
   closeSidebar: vi.fn(),
   closeMobileSidebar: vi.fn(),
+  interimTranscript: 'Near Denver',
   transcripts: [
     {
       id: '1',
       text: 'Looking for billboards.',
       speaker: 'caller',
-      timestamp: Date.now(),
+      timestamp: Date.parse('2026-09-24T14:35:00Z'),
     },
   ],
 }))
@@ -34,7 +35,7 @@ vi.mock('@/components/providers/TwilioProvider', () => ({
 vi.mock('@/hooks/useOpenAITranscription', () => ({
   useOpenAITranscription: () => ({
     transcripts: mocks.transcripts,
-    interimTranscript: 'Near Denver',
+    interimTranscript: mocks.interimTranscript,
     interimSpeaker: 'caller',
     clearTranscripts: mocks.clear,
   }),
@@ -196,6 +197,12 @@ it('opens the live transcript from the sidebar without clearing the lead or leav
     ).find((button) => button.textContent === 'Transcript') as HTMLButtonElement
     expect(transcript).toBeDefined()
     expect(transcript.closest('nav')?.textContent).toMatch(/^HistoryTranscript/)
+    expect(transcript.closest('nav')?.textContent).not.toContain(
+      'No transcript',
+    )
+    expect(transcript.parentElement?.querySelector('time')?.dateTime).toBe(
+      '2026-09-24T14:35:00.000Z',
+    )
     await act(async () => transcript.click())
     const panel = container.querySelector(
       '[role="tabpanel"][aria-label="Transcript"][data-state="active"]',
@@ -220,6 +227,52 @@ it('opens the live transcript from the sidebar without clearing the lead or leav
   } finally {
     await act(async () => root.unmount())
     container.remove()
+    vi.unstubAllGlobals()
+  }
+})
+
+it('shows no transcript for empty text, shows live text, and removes the button after clearing', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const originalTranscripts = mocks.transcripts
+  const originalInterim = mocks.interimTranscript
+  mocks.transcripts = [{ ...originalTranscripts[0], text: '  \n ' }]
+  mocks.interimTranscript = ' '
+  const container = document.createElement('div')
+  document.body.append(container)
+  const root = createRoot(container)
+  const render = () =>
+    root.render(
+      <>
+        <NavDocuments items={[]} />
+        <SalesCallTranscriber sessionIssuedAt={Date.now() / 1000} />
+      </>,
+    )
+  try {
+    await act(async () => render())
+    expect(container.querySelector('nav')?.textContent).toContain(
+      'No transcript yet',
+    )
+    expect(container.querySelector('nav button')).toBeNull()
+    expect(container.querySelector('nav time')).toBeNull()
+    mocks.interimTranscript = 'A live caller answer'
+    await act(async () => render())
+    expect(container.querySelector('nav button')?.textContent).toBe(
+      'Transcript',
+    )
+    expect(container.querySelector('nav time')).not.toBeNull()
+    mocks.interimTranscript = ''
+    mocks.transcripts = []
+    await act(async () => render())
+    expect(container.querySelector('nav')?.textContent).toContain(
+      'No transcript yet',
+    )
+    expect(container.querySelector('nav button')).toBeNull()
+    expect(container.querySelector('nav time')).toBeNull()
+  } finally {
+    await act(async () => root.unmount())
+    container.remove()
+    mocks.transcripts = originalTranscripts
+    mocks.interimTranscript = originalInterim
     vi.unstubAllGlobals()
   }
 })
