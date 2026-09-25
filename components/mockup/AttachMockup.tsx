@@ -18,7 +18,7 @@ import {
   sameAdvertiser,
   type LeadTarget,
   type MockupImage,
-} from '@/lib/mockup/intake'
+} from '@/lib/mockup/state'
 
 export function AttachMockup() {
   const { state, update, busy: generating } = useMockupStore()
