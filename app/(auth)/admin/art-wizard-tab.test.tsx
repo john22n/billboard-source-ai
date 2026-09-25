@@ -43,6 +43,27 @@ async function submit() {
   })
 }
 
+it('shows protected instructions as read-only content outside the editable prompt', async () => {
+  fetchMock.mockResolvedValueOnce(
+    Response.json({
+      prompt: 'Original prompt',
+      instructions: [
+        {
+          title: 'Questionnaire extraction',
+          context: 'System message.',
+          text: 'Extract explicit facts only.',
+        },
+      ],
+    }),
+  )
+  await act(async () => root.render(<ArtWizardTab />))
+  expect(container.textContent).toContain('Questionnaire extraction')
+  expect(container.textContent).toContain('Extract explicit facts only.')
+  expect(container.querySelectorAll('textarea')).toHaveLength(1)
+  expect(container.querySelector('textarea')?.value).toBe('Original prompt')
+  expect(container.textContent).toContain('Read-only')
+})
+
 it('loads the saved prompt, rejects blank edits, and reports a successful save', async () => {
   fetchMock.mockResolvedValueOnce(Response.json({ prompt: 'Original prompt' }))
   await act(async () => root.render(<ArtWizardTab />))
