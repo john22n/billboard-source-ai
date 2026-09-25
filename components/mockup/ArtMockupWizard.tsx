@@ -389,22 +389,21 @@ function intakeReply(
   previousQuestion: Question | undefined,
 ): Partial<MockupState> {
   const next = nextQuestion(result.intake)
-  const reply = next
-    ? questions[next]
-    : 'Here’s your summary. When you’re ready, choose Generate mockup.'
   return {
     intake: result.intake,
     summary: result.summary || null,
     brand: result.brand || null,
-    messages: [
-      ...messages,
-      {
-        role: 'assistant',
-        text:
-          next && next === previousQuestion
-            ? 'I couldn’t match that response to the current question. Please rephrase your answer, or say “skip” to move on.'
-            : reply,
-      },
-    ],
+    messages: next
+      ? [
+          ...messages,
+          {
+            role: 'assistant',
+            text:
+              next === previousQuestion
+                ? 'I couldn’t match that response to the current question. Please rephrase your answer, or say “skip” to move on.'
+                : questions[next],
+          },
+        ]
+      : messages,
   }
 }
