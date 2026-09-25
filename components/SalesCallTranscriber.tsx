@@ -416,7 +416,7 @@ function CallHeader(props: CallHeaderProps) {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <div className="min-w-0">
             <CardTitle className="text-lg sm:text-xl font-bold tracking-tight truncate">
-              Billboard Lead Form
+              GPP3
               {userEmail && (
                 <span className="text-[10px] sm:text-xs font-normal ml-2 opacity-75 hidden sm:inline">
                   ({userEmail})

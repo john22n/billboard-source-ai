@@ -19,6 +19,16 @@ export function ApprovalSummary({
       .split(/\s+/).length
   return (
     <div className="space-y-4">
+      <section
+        aria-label="Brief summary"
+        className="space-y-1 rounded-lg border p-4"
+      >
+        <h3 className="font-semibold">{summary.headline}</h3>
+        {summary.supporting && <p className="text-sm">{summary.supporting}</p>}
+        {summary.contact && (
+          <p className="text-sm text-muted-foreground">{summary.contact}</p>
+        )}
+      </section>
       {(summary.caution || wordCount > 20) && (
         <p className="rounded-md border border-primary/40 bg-primary/5 p-3 text-sm">
           {summary.caution ||

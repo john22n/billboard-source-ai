@@ -48,9 +48,6 @@ function MockupConversation() {
   } = useMockupStore()
   const end = useRef<HTMLDivElement>(null)
   const question = nextQuestion(state.intake)
-  const step = Object.keys(questions).filter(
-    (key) => state.intake[key as keyof typeof questions] !== null,
-  ).length
 
   useEffect(() => {
     end.current?.scrollIntoView({ block: 'nearest' })
@@ -105,10 +102,10 @@ function MockupConversation() {
       aria-label="Creative Studio"
       className="flex h-full min-h-0 flex-col bg-background text-foreground"
     >
-      <MockupHeader step={step} />
+      <MockupHeader />
       <div className="flex-1 overflow-y-auto px-4 py-6 sm:px-6">
         <div className="mx-auto max-w-3xl space-y-6">
-          <MockupWelcome step={step} />
+          <MockupWelcome />
           <div
             role="log"
             aria-label="Mockup conversation"
@@ -141,8 +138,7 @@ function MockupConversation() {
                 className="h-auto w-full rounded-lg border"
               />
               <figcaption className="text-xs text-muted-foreground">
-                Concept mockup · Not print-ready artwork. Verify spelling,
-                contact details, brand accuracy, and legal copy before sharing.
+                Concept only · Check text and brand details before sharing.
               </figcaption>
               <div className="flex flex-wrap gap-2">
                 <Button asChild variant="outline">
@@ -156,11 +152,6 @@ function MockupConversation() {
                 </Button>
                 <AttachMockup />
               </div>
-              <p className="text-xs text-muted-foreground">
-                This selected image accompanies your next matching Lead Form
-                submission. New revisions are never automatically sent to an
-                existing lead.
-              </p>
             </figure>
           )}
           <MockupProgress />
@@ -199,8 +190,8 @@ function MockupProgress() {
   )
 }
 
-function MockupHeader({ step }: { step: number }) {
-  const { state, start } = useMockupStore()
+function MockupHeader() {
+  const { start } = useMockupStore()
   return (
     <header className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3 sm:px-6">
       <div>
@@ -208,12 +199,6 @@ function MockupHeader({ step }: { step: number }) {
           <ImageIcon className="size-4 text-primary" />
           Creative Studio
         </h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          One billboard. One clear idea.{' '}
-          {state.image
-            ? 'Concept, not print-ready artwork.'
-            : `${step} of 7 intake answers ready.`}
-        </p>
       </div>
       <Button variant="outline" size="sm" onClick={() => start()}>
         <RotateCcw data-icon="inline-start" className="size-4" />
@@ -223,29 +208,15 @@ function MockupHeader({ step }: { step: number }) {
   )
 }
 
-function MockupWelcome({ step }: { step: number }) {
+function MockupWelcome() {
   const { state, busy: isPending, start } = useMockupStore()
   const question = nextQuestion(state.intake)
   if (state.messages.length) return null
   return (
     <div className="space-y-4 py-6">
-      <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-        Billboard Source · Creative studio
-      </p>
       <h3 className="text-3xl font-semibold tracking-tight">
-        Let’s put your idea
-        <br />
-        on a billboard.
+        Create a billboard
       </h3>
-      <p className="max-w-lg text-sm leading-relaxed text-muted-foreground">
-        We’ll build a short brief together, then turn it into one realistic
-        outdoor concept. Your Lead Form stays unchanged.
-      </p>
-      {step > 0 && (
-        <p className="text-sm">
-          I’ve brought over the usable facts from your current Lead Form.
-        </p>
-      )}
       <Button
         variant="secondary"
         size="sm"
@@ -345,11 +316,8 @@ function MockupComposer({
             </Button>
           </div>
         </MockupAttachments>
-        <p role="status" className="text-xs text-muted-foreground">
-          {state.image
-            ? 'Sending a revision immediately starts another image request—no additional approval step.'
-            : 'Enter to send · Shift+Enter for a new line · Say “skip” to move on.'}{' '}
-          Active session only; no saved history.
+        <p role="status" className="sr-only">
+          {isPending ? 'Working…' : ''}
         </p>
       </form>
     </footer>
