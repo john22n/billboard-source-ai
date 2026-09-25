@@ -281,40 +281,39 @@ function MockupComposer({
           <Label htmlFor={messageId} className="sr-only">
             {state.image ? 'Revision instructions' : 'Your answer'}
           </Label>
-          <div className="flex items-end gap-2 rounded-xl border p-2">
-            <Textarea
-              id={messageId}
-              value={draft}
-              disabled={isLoading}
-              onChange={(e) => setDraft(e.target.value)}
-              maxLength={4000}
-              rows={2}
-              className="min-h-14 resize-none border-0 shadow-none focus-visible:ring-0"
-              placeholder={
-                state.image
-                  ? 'Make the headline bigger, simplify, or try a more premium feel…'
-                  : 'Your answer… (or say skip)'
+          <Textarea
+            id={messageId}
+            value={draft}
+            disabled={!sessionKey}
+            readOnly={isPending}
+            onChange={(e) => setDraft(e.target.value)}
+            maxLength={4000}
+            rows={1}
+            className="min-h-9 min-w-0 resize-none border-0 shadow-none focus-visible:ring-0"
+            placeholder={
+              state.image
+                ? 'Make the headline bigger, simplify, or try a more premium feel…'
+                : 'Your answer… (or say skip)'
+            }
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                send()
               }
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  send()
-                }
-              }}
-            />
-            <Button
-              type="submit"
-              size="icon"
-              aria-label={state.image ? 'Generate revision' : 'Send answer'}
-              disabled={!draft.trim() || isLoading}
-            >
-              {isPending ? (
-                <LoaderCircle className="size-4 animate-spin" />
-              ) : (
-                <ArrowUp className="size-4" />
-              )}
-            </Button>
-          </div>
+            }}
+          />
+          <Button
+            type="submit"
+            size="icon"
+            aria-label={state.image ? 'Generate revision' : 'Send answer'}
+            disabled={!draft.trim() || isLoading}
+          >
+            {isPending ? (
+              <LoaderCircle className="size-4 animate-spin" />
+            ) : (
+              <ArrowUp className="size-4" />
+            )}
+          </Button>
         </MockupAttachments>
         <p role="status" className="sr-only">
           {isPending ? 'Working…' : ''}
