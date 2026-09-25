@@ -233,6 +233,8 @@ it('sends uploaded PDF page imagery and its use instructions to brief preparatio
           id: 'pdf-1',
           name: 'mountain.pdf',
           sourceType: 'application/pdf',
+          pageNumber: 2,
+          pageCount: 3,
           dataUrl,
         },
       ],
@@ -243,7 +245,7 @@ it('sends uploaded PDF page imagery and its use instructions to brief preparatio
   expect(JSON.stringify(input)).toContain(
     'Render the billboard on this PDF background.',
   )
-  expect(JSON.stringify(input)).toContain('PDF page 1 only')
+  expect(JSON.stringify(input)).toContain('PDF page 2 of 3')
   expect(
     input.flatMap((message: { content: unknown[] }) => message.content),
   ).toContainEqual(

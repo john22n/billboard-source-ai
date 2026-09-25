@@ -10,6 +10,7 @@ type Store = {
   epoch: number
   busy: boolean
   preparingFiles: boolean
+  pdfSource: File | null
   draft: string
   error: string
   setDraft: (draft: string) => void
@@ -31,6 +32,7 @@ export const useMockupStore = create<Store>((set, get) => ({
   epoch: 0,
   busy: false,
   preparingFiles: false,
+  pdfSource: null,
   draft: '',
   error: '',
   setDraft: (draft) => set({ draft }),
@@ -50,12 +52,14 @@ export const useMockupStore = create<Store>((set, get) => ({
     } catch {
       // A browser can deny access entirely. update() reports the persistence warning.
     }
+    state.attachments = state.attachments.slice(0, 1)
     set({
       sessionKey: key,
       state,
       epoch: get().epoch + 1,
       busy: false,
       preparingFiles: false,
+      pdfSource: null,
       draft: '',
       error: '',
     })
@@ -94,6 +98,7 @@ export const useMockupStore = create<Store>((set, get) => ({
       epoch: get().epoch + 1,
       busy: false,
       preparingFiles: false,
+      pdfSource: null,
       draft: '',
       error: '',
     })
@@ -114,6 +119,7 @@ export const useMockupStore = create<Store>((set, get) => ({
       epoch: get().epoch + 1,
       busy: false,
       preparingFiles: false,
+      pdfSource: null,
       draft: '',
       error: '',
       storageWarning: '',
