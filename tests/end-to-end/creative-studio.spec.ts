@@ -1,0 +1,286 @@
+import { readFileSync } from 'node:fs'
+import { SignJWT } from 'jose'
+import { expect, test } from 'playwright/test'
+import { jwtSecret, userId } from './environment'
+
+const answers = [
+  {
+    field: 'advertiser',
+    value: 'Example AI',
+    question: 'What is the advertiser’s name?',
+  },
+  {
+    field: 'website',
+    value: 'https://example.com',
+    question: 'What is their website? You can say skip.',
+  },
+  {
+    field: 'goal',
+    value: 'Awareness',
+    question:
+      'What should this billboard accomplish: awareness, calls, visits, an event, political, hiring, an opening, or an offer?',
+  },
+  {
+    field: 'market',
+    value: 'Denver',
+    question: 'Which city, market, or audience should it reach?',
+  },
+  {
+    field: 'focus',
+    value: 'AI Integration',
+    question: 'What product, service, event, or message should it focus on?',
+  },
+  {
+    field: 'required',
+    value: 'website and website content',
+    question:
+      'What exact text must appear? Include any phone, website, slogan, date, address, candidate name, or legal disclaimer—or say skip.',
+  },
+  {
+    field: 'tone',
+    value: 'Professional',
+    question:
+      'What tone feels right: professional, bold, premium, fun, urgent, community, political, minimal, or family-friendly? Unsure is fine.',
+  },
+]
+const summary = {
+  headline: 'AI for your business',
+  supporting: 'AI Integration',
+  contact: 'example.com',
+  direction:
+    'Navy #14283f background, orange #ed7b32 accents, cream #f9e7c4 text.',
+  caution: '',
+}
+const image = {
+  id: '11111111-1111-4111-8111-111111111111',
+  advertiser: 'Example AI',
+  receipt: 'test-receipt',
+  dataUrl: `data:image/jpeg;base64,${readFileSync(new URL('./fixtures/billboard.jpg', import.meta.url)).toString('base64')}`,
+}
+const revisedImage = {
+  ...image,
+  id: '22222222-2222-4222-8222-222222222222',
+  dataUrl: `data:image/jpeg;base64,${readFileSync(new URL('./fixtures/revised-billboard.jpg', import.meta.url)).toString('base64')}`,
+}
+
+test('Creative Studio completes intake, approves edited copy, retries a revision, and resets', async ({
+  page,
+  context,
+}) => {
+  // The first dashboard navigation also compiles Next's client bundle on CI.
+  test.setTimeout(60_000)
+  const token = await new SignJWT({ userId })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime('1h')
+    .sign(new TextEncoder().encode(jwtSecret))
+  await context.addCookies([
+    {
+      name: 'auth_token',
+      value: token,
+      url: 'http://localhost:3000',
+      httpOnly: true,
+      sameSite: 'Lax',
+    },
+  ])
+
+  let intake: Record<string, string | null> = {
+    advertiser: null,
+    website: null,
+    goal: null,
+    market: null,
+    focus: null,
+    required: null,
+    tone: null,
+    boardType: 'Static',
+  }
+  let answerCount = 0
+  const generations: Record<string, unknown>[] = []
+  const unexpected: string[] = []
+  await page.route('**/api/**', async (route) => {
+    unexpected.push(new URL(route.request().url()).pathname)
+    return route.abort()
+  })
+  await page.route('**/api/mockup/session', (route) => route.continue())
+  for (const [path, response] of Object.entries({
+    '/api/taskrouter/worker-status': {
+      json: { status: 'offline', success: true },
+    },
+    '/api/workers/available': { json: { workers: [] } },
+    '/api/twilio/client-events': { status: 204 },
+    '/api/twilio-token': {
+      status: 503,
+      json: { error: 'Telephony disabled in browser tests' },
+    },
+  })) {
+    await page.route(`**${path}`, (route) => route.fulfill(response))
+  }
+  await page.route('**/api/mockup/intake', async (route) => {
+    const body = route.request().postDataJSON()
+    const answer = answers[answerCount++]
+    expect(body).toEqual({ intake, message: answer.value, review: false })
+    intake = { ...intake, [answer.field]: answer.value }
+    return route.fulfill({
+      json: {
+        intake,
+        ...(answerCount === answers.length
+          ? {
+              summary,
+              brand: {
+                notes: 'Website palette reviewed.',
+                fallback: '',
+                logo: null,
+                receipt: null,
+              },
+            }
+          : {}),
+      },
+    })
+  })
+  await page.route('**/api/mockup/generate', async (route) => {
+    generations.push(route.request().postDataJSON())
+    if (generations.length === 2)
+      return route.fulfill({
+        status: 502,
+        json: {
+          error:
+            'The image could not be generated. Your selected image is unchanged.',
+        },
+      })
+    return route.fulfill({
+      json: {
+        image: generations.length === 1 ? image : revisedImage,
+      },
+    })
+  })
+  // Prevent accidental calls to external maps, analytics, or communication providers.
+  await page.route(/^https?:\/\/(?!localhost:3000(?:\/|$))/, (route) =>
+    route.abort(),
+  )
+
+  await page.goto('/dashboard')
+  await expect(page).toHaveURL(/\/dashboard$/)
+  const tab = page
+    .getByRole('tablist', { name: 'Form views' })
+    .getByRole('tab', { name: 'Creative Studio' })
+  await tab.click()
+  await expect(tab).toHaveAttribute('aria-selected', 'true')
+  const studio = page.getByRole('region', {
+    name: 'Creative Studio',
+    exact: true,
+  })
+  await expect(
+    studio.getByRole('heading', { name: 'Creative Studio', exact: true }),
+  ).toBeVisible()
+  await expect(
+    studio.getByRole('textbox', { name: 'Your answer', exact: true }),
+  ).toBeEnabled()
+  await studio
+    .getByRole('button', { name: 'Start Mockup', exact: true })
+    .click()
+
+  for (const answer of answers) {
+    await expect(studio.getByText(answer.question)).toBeVisible()
+    await studio
+      .getByRole('textbox', { name: 'Your answer', exact: true })
+      .fill(answer.value)
+    await studio.getByRole('button', { name: 'Send answer' }).click()
+    await expect(
+      studio.getByRole('textbox', { name: 'Your answer', exact: true }),
+    ).toHaveValue('')
+  }
+  expect(answerCount).toBe(7)
+  // The required-copy question appears once, not again after the website-content answer.
+  await expect(
+    studio.getByRole('log').getByText(answers[5].question),
+  ).toHaveCount(1)
+  await expect(
+    studio.getByText('Review your billboard', { exact: true }),
+  ).toBeVisible()
+  await expect(
+    studio.getByRole('textbox', { name: 'Contact details on the billboard' }),
+  ).toHaveValue('example.com')
+  await expect(
+    studio.getByRole('textbox', { name: 'Tone and visual direction' }),
+  ).toHaveValue(summary.direction)
+  expect(generations).toHaveLength(0)
+
+  await studio
+    .getByRole('textbox', { name: 'Headline', exact: true })
+    .fill('Make AI work for you')
+  await studio
+    .getByRole('button', { name: 'Generate mockup', exact: true })
+    .click()
+  const selected = studio.getByRole('img', {
+    name: 'Selected outdoor billboard concept for Example AI',
+  })
+  await expect(selected).toBeVisible()
+  expect(generations[0]).toMatchObject({
+    approved: true,
+    previous: null,
+    revision: '',
+    intake: {
+      website: 'https://example.com',
+      required: 'website and website content',
+    },
+    summary: { ...summary, headline: 'Make AI work for you' },
+  })
+  const download = studio.getByRole('link', {
+    name: 'Download selected mockup',
+  })
+  await expect(download).toHaveAttribute('href', image.dataUrl)
+  await expect(selected).toHaveJSProperty('naturalWidth', 32)
+  const downloadEvent = page.waitForEvent('download')
+  await download.click()
+  const downloaded = await downloadEvent
+  expect(downloaded.suggestedFilename()).toBe(
+    `billboard-concept-${image.id}.jpg`,
+  )
+  expect(await downloaded.failure()).toBeNull()
+
+  const revision = studio.getByRole('textbox', {
+    name: 'Revision instructions',
+  })
+  await revision.fill('Make the headline larger')
+  await studio.getByRole('button', { name: 'Generate revision' }).click()
+  await expect(studio.getByRole('alert')).toContainText(
+    'Your selected image is unchanged',
+  )
+  await expect(selected).toHaveAttribute('src', image.dataUrl)
+  await expect(revision).toHaveValue('Make the headline larger')
+  await expect(download).toHaveAttribute(
+    'download',
+    `billboard-concept-${image.id}.jpg`,
+  )
+  await studio.getByRole('button', { name: 'Generate revision' }).click()
+  await expect(download).toHaveAttribute(
+    'download',
+    'billboard-concept-22222222-2222-4222-8222-222222222222.jpg',
+  )
+  await expect(studio.getByRole('alert')).toHaveCount(0)
+  await expect(selected).toHaveAttribute('src', revisedImage.dataUrl)
+  await expect(selected).toHaveJSProperty('naturalWidth', 24)
+  expect(generations[2]).toMatchObject({
+    approved: false,
+    previous: image,
+    revision: 'Make the headline larger',
+  })
+
+  await page.reload()
+  await tab.click()
+  await expect(selected).toHaveAttribute('src', revisedImage.dataUrl)
+  await expect(download).toHaveAttribute(
+    'download',
+    'billboard-concept-22222222-2222-4222-8222-222222222222.jpg',
+  )
+  await studio
+    .getByRole('button', { name: 'Start Mockup', exact: true })
+    .click()
+  await expect(selected).toHaveCount(0)
+  await expect(
+    studio.getByText(answers[0].question, { exact: true }),
+  ).toBeVisible()
+  await expect(studio.getByRole('log')).toBeEmpty()
+  expect(generations).toHaveLength(3)
+  expect(unexpected).toEqual([])
+})

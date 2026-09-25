@@ -1,13 +1,14 @@
-"use client"
+'use client'
 
-import { Mic } from 'lucide-react'
+import { FileText, Mic } from 'lucide-react'
+import { useDashboardStore } from '@/stores/dashboardStore'
 import {
   IconDots,
   IconFolder,
   IconShare3,
   IconTrash,
   type Icon,
-} from "@tabler/icons-react"
+} from '@tabler/icons-react'
 
 import {
   DropdownMenu,
@@ -15,7 +16,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+} from '@/components/ui/dropdown-menu'
 import {
   SidebarGroup,
   SidebarGroupLabel,
@@ -24,7 +25,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   useSidebar,
-} from "@/components/ui/sidebar"
+} from '@/components/ui/sidebar'
 
 export function NavDocuments({
   items,
@@ -35,14 +36,29 @@ export function NavDocuments({
     icon: Icon
   }[]
 }) {
-  const { isMobile } = useSidebar()
+  const { isMobile, setOpen, setOpenMobile } = useSidebar()
+  const activeTab = useDashboardStore((state) => state.activeTab)
+  const setActiveTab = useDashboardStore((state) => state.setActiveTab)
 
   return (
     <SidebarGroup className="group-data-[collapsible=icon]:hidden">
-      <SidebarGroupLabel>
-        History
-      </SidebarGroupLabel>
+      <SidebarGroupLabel>History</SidebarGroupLabel>
       <SidebarMenu>
+        <SidebarMenuItem>
+          <SidebarMenuButton
+            tooltip="Transcript"
+            isActive={activeTab === 'transcript'}
+            aria-controls="dashboard-transcript"
+            onClick={() => {
+              setActiveTab('transcript')
+              setOpen(false)
+              setOpenMobile(false)
+            }}
+          >
+            <FileText />
+            <span>Transcript</span>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
         {items.length === 0 ? (
           <SidebarMenuItem>
             <div className="flex items-center gap-2 px-2 py-1.5 text-sm text-muted-foreground">
@@ -72,8 +88,8 @@ export function NavDocuments({
                   </DropdownMenuTrigger>
                   <DropdownMenuContent
                     className="w-24 rounded-lg"
-                    side={isMobile ? "bottom" : "right"}
-                    align={isMobile ? "end" : "start"}
+                    side={isMobile ? 'bottom' : 'right'}
+                    align={isMobile ? 'end' : 'start'}
                   >
                     <DropdownMenuItem>
                       <IconFolder />
