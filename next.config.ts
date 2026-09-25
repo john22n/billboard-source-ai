@@ -20,6 +20,11 @@ const contentSecurityPolicy = [
 const nextConfig: NextConfig = {
   /* config options here */
   reactStrictMode: false,
+  // Keep browser tests independent of an already-running local dev server.
+  distDir: process.env.PLAYWRIGHT_TEST === '1' ? '.next/playwright' : '.next',
+  ...(process.env.PLAYWRIGHT_TEST === '1'
+    ? { devIndicators: false as const }
+    : {}),
   experimental: {
     serverActions: {
       bodySizeLimit: '35mb',

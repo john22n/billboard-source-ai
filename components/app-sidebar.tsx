@@ -1,15 +1,15 @@
-"use client"
-import * as React from "react"
+'use client'
+import * as React from 'react'
 import { BrainCircuit } from 'lucide-react'
 import {
   IconCamera,
   IconFileAi,
   IconFileDescription,
-} from "@tabler/icons-react"
-import { NavDocuments } from "@/components/nav-documents"
-import { NavMain } from "@/components/nav-main"
-import { NavSecondary } from "@/components/nav-secondary"
-import { NavUser } from "@/components/nav-user"
+} from '@tabler/icons-react'
+import { NavDocuments } from '@/components/nav-documents'
+import { NavMain } from '@/components/nav-main'
+import { NavSecondary } from '@/components/nav-secondary'
+import { NavUser } from '@/components/nav-user'
 import {
   Sidebar,
   SidebarContent,
@@ -19,54 +19,54 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarSeparator,
-} from "@/components/ui/sidebar"
+} from '@/components/ui/sidebar'
 
 const data = {
   navMain: [],
   navClouds: [
     {
-      title: "Capture",
+      title: 'Capture',
       icon: IconCamera,
       isActive: true,
-      url: "#",
+      url: '#',
       items: [
         {
-          title: "Active Proposals",
-          url: "#",
+          title: 'Active Proposals',
+          url: '#',
         },
         {
-          title: "Archived",
-          url: "#",
+          title: 'Archived',
+          url: '#',
         },
       ],
     },
     {
-      title: "Proposal",
+      title: 'Proposal',
       icon: IconFileDescription,
-      url: "#",
+      url: '#',
       items: [
         {
-          title: "Active Proposals",
-          url: "#",
+          title: 'Active Proposals',
+          url: '#',
         },
         {
-          title: "Archived",
-          url: "#",
+          title: 'Archived',
+          url: '#',
         },
       ],
     },
     {
-      title: "Prompts",
+      title: 'Prompts',
       icon: IconFileAi,
-      url: "#",
+      url: '#',
       items: [
         {
-          title: "Active Proposals",
-          url: "#",
+          title: 'Active Proposals',
+          url: '#',
         },
         {
-          title: "Archived",
-          url: "#",
+          title: 'Archived',
+          url: '#',
         },
       ],
     },
@@ -75,9 +75,9 @@ const data = {
   history: [],
 }
 
-export function AppSidebar({ 
+export function AppSidebar({
   user,
-  ...props 
+  ...props
 }: React.ComponentProps<typeof Sidebar> & {
   user: {
     name: string
@@ -97,7 +97,9 @@ export function AppSidebar({
             >
               <a href="#">
                 <BrainCircuit className="!size-5" />
-                <span className="text-base font-semibold">Billboard Source AI.</span>
+                <span className="text-base font-semibold">
+                  Billboard Source AI.
+                </span>
               </a>
             </SidebarMenuButton>
           </SidebarMenuItem>
