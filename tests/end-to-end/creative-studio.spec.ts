@@ -127,7 +127,12 @@ for (const placement of ['Form views', 'Lead tools']) {
       })
       expect(
         body.attachments.map((file: { name: string }) => file.name),
-      ).toEqual(['logo.png', 'scene.pdf', 'photo.jpg'])
+      ).toEqual(['scene.pdf'])
+      expect(body.attachments[0]).toMatchObject({
+        pageNumber: 2,
+        pageCount: 3,
+        searchQuery: 'mountain background',
+      })
       expect(body.attachmentInstructions).toContain(answer.value)
       intake = { ...intake, [answer.field]: answer.value }
       return route.fulfill({
@@ -249,18 +254,60 @@ for (const placement of ['Form views', 'Lead tools']) {
       '<html><body style="margin:0;background:#c8e5f5"><div style="height:200px;display:grid;place-items:center;font: bold 48px sans-serif;color:#19392d">ALPINE</div><div style="height:100px;background:#45855a"></div></body></html>',
     )
     const logo = await fixturePage.screenshot({ type: 'png' })
+    const photo = await fixturePage.screenshot({ type: 'jpeg' })
+    await fixturePage.setContent(
+      '<html><style>@page {margin:0} body {margin:0} section {height:300px;break-after:page;font:32px sans-serif}</style><body><section style="background:#ddd">Brand guidelines</section><section><div style="height:200px;background:#c8e5f5">Mountain background</div><div style="height:100px;background:#45855a"></div></section><section style="background:#fdb565">ALPINE LOGO</section></body></html>',
+    )
     const pdf = await fixturePage.pdf({
       width: '600px',
       height: '300px',
       printBackground: true,
     })
-    const photo = await fixturePage.screenshot({ type: 'jpeg' })
     await fixturePage.close()
+    let searches = 0
+    await page.route('**/api/mockup/search-pdf', async (route) => {
+      const body = route.request().postDataJSON()
+      expect(
+        body.pages.map((page: { pageNumber: number }) => page.pageNumber),
+      ).toEqual([1, 2, 3])
+      expect(
+        new Set(body.pages.map((page: { dataUrl: string }) => page.dataUrl))
+          .size,
+      ).toBe(3)
+      expect(
+        body.pages.every(
+          (page: { dataUrl: string }) =>
+            page.dataUrl.startsWith('data:image/jpeg;base64,') &&
+            page.dataUrl.length <= 60_000,
+        ),
+      ).toBe(true)
+      if (++searches === 1)
+        return route.fulfill({
+          status: 502,
+          json: { error: 'Could not search the PDF. Please try again.' },
+        })
+      const pageNumber =
+        body.query === 'missing logo'
+          ? null
+          : body.query === 'company logo'
+            ? 3
+            : 2
+      return route.fulfill({
+        json: {
+          pageNumber,
+          reason: pageNumber
+            ? `Matching artwork found on page ${pageNumber}.`
+            : 'No matching image found.',
+        },
+      })
+    })
     const choose = async (
       files: { name: string; mimeType: string; buffer: Buffer }[],
     ) => {
       const chooser = page.waitForEvent('filechooser')
-      await studio.getByRole('button', { name: 'Attach files' }).click()
+      await studio
+        .getByRole('button', { name: 'Attach file', exact: true })
+        .click()
       await (await chooser).setFiles(files)
     }
     await choose([
@@ -291,47 +338,18 @@ for (const placement of ['Form views', 'Lead tools']) {
     await expect(studio.getByRole('alert')).toContainText(
       'Could not prepare broken.pdf',
     )
-    await choose([
-      { name: 'logo.png', mimeType: 'image/png', buffer: logo },
-      { name: 'scene.pdf', mimeType: 'application/pdf', buffer: pdf },
-      { name: 'photo.jpg', mimeType: 'image/jpeg', buffer: photo },
-    ])
+    await choose([{ name: 'logo.png', mimeType: 'image/png', buffer: logo }])
     await expect(
-      studio.getByRole('img', { name: 'scene.pdf (PDF page 1 only)' }),
+      studio.getByRole('img', { name: 'logo.png', exact: true }),
     ).toBeVisible()
     await expect(studio.getByRole('alert')).toHaveCount(0)
-    const colors = await studio
-      .getByRole('img', { name: 'scene.pdf (PDF page 1 only)' })
-      .evaluate((element) => {
-        const image = element as HTMLImageElement
-        const canvas = document.createElement('canvas')
-        canvas.width = image.naturalWidth
-        canvas.height = image.naturalHeight
-        const context = canvas.getContext('2d')!
-        context.drawImage(image, 0, 0)
-        return [
-          [...context.getImageData(5, 5, 1, 1).data].slice(0, 3),
-          [...context.getImageData(5, canvas.height - 5, 1, 1).data].slice(
-            0,
-            3,
-          ),
-        ]
-      })
-    // Independent colors from the PDF fixture: sky #c8e5f5 and ground #45855a.
-    for (const [index, expected] of [
-      [200, 229, 245],
-      [69, 133, 90],
-    ].entries())
-      expected.forEach((value, channel) =>
-        expect(Math.abs(colors[index][channel] - value)).toBeLessThan(4),
-      )
     await choose([{ name: 'extra.png', mimeType: 'image/png', buffer: logo }])
     await expect(studio.getByRole('alert')).toContainText(
-      'up to 3 reference files',
+      'Use one reference file',
     )
-    await studio.getByRole('button', { name: 'Remove photo.jpg' }).click()
+    await studio.getByRole('button', { name: 'Remove logo.png' }).click()
     await expect(
-      studio.getByRole('img', { name: 'photo.jpg', exact: true }),
+      studio.getByRole('img', { name: 'logo.png', exact: true }),
     ).toHaveCount(0)
     const dropped = await page.evaluateHandle(
       ({ bytes }) => {
@@ -352,6 +370,88 @@ for (const placement of ['Form views', 'Lead tools']) {
     await expect(
       studio.getByRole('img', { name: 'photo.jpg', exact: true }),
     ).toBeVisible()
+    await studio.getByRole('button', { name: 'Remove photo.jpg' }).click()
+    await choose([
+      { name: 'scene.pdf', mimeType: 'application/pdf', buffer: pdf },
+    ])
+    await expect(
+      studio.getByRole('img', {
+        name: 'scene.pdf (PDF page 1 of 3)',
+        exact: true,
+      }),
+    ).toBeVisible()
+    const searchQuery = studio.getByRole('textbox', {
+      name: 'Find a logo or background in this PDF',
+    })
+    const search = studio.getByRole('button', {
+      name: 'Search PDF',
+      exact: true,
+    })
+    await searchQuery.fill('mountain background')
+    await search.click()
+    await expect(studio.getByRole('alert')).toContainText(
+      'Could not search the PDF',
+    )
+    await expect(
+      studio.getByRole('img', {
+        name: 'scene.pdf (PDF page 1 of 3)',
+        exact: true,
+      }),
+    ).toBeVisible()
+    await search.click()
+    await expect(
+      studio.getByRole('img', {
+        name: 'scene.pdf (PDF page 2 of 3) · Selected for: mountain background',
+        exact: true,
+      }),
+    ).toBeVisible()
+    await expect(studio.getByRole('alert')).toHaveCount(0)
+    await searchQuery.fill('missing logo')
+    await searchQuery.press('Enter')
+    await expect(
+      studio.getByText('No matching image found.', { exact: true }),
+    ).toBeVisible()
+    await expect(
+      studio.getByRole('img', {
+        name: 'scene.pdf (PDF page 2 of 3) · Selected for: mountain background',
+        exact: true,
+      }),
+    ).toBeVisible()
+    await searchQuery.fill('company logo')
+    await search.click()
+    await expect(
+      studio.getByRole('img', {
+        name: 'scene.pdf (PDF page 3 of 3) · Selected for: company logo',
+        exact: true,
+      }),
+    ).toBeVisible()
+    await searchQuery.fill('mountain background')
+    await search.click()
+    const pdfPreview = studio.getByRole('img', {
+      name: 'scene.pdf (PDF page 2 of 3) · Selected for: mountain background',
+      exact: true,
+    })
+    await expect(pdfPreview).toBeVisible()
+    const colors = await pdfPreview.evaluate((element) => {
+      const image = element as HTMLImageElement
+      const canvas = document.createElement('canvas')
+      canvas.width = image.naturalWidth
+      canvas.height = image.naturalHeight
+      const context = canvas.getContext('2d')!
+      context.drawImage(image, 0, 0)
+      return [
+        [...context.getImageData(550, 100, 1, 1).data].slice(0, 3),
+        [...context.getImageData(5, canvas.height - 5, 1, 1).data].slice(0, 3),
+      ]
+    })
+    // Page 2, not the gray cover or orange logo page, must supply the reference.
+    for (const [index, expected] of [
+      [200, 229, 245],
+      [69, 133, 90],
+    ].entries())
+      expected.forEach((value, channel) =>
+        expect(Math.abs(colors[index][channel] - value)).toBeLessThan(4),
+      )
     await studio.screenshot({
       path: testInfo.outputPath('studio-attachments.png'),
       animations: 'disabled',
@@ -418,10 +518,13 @@ for (const placement of ['Form views', 'Lead tools']) {
       dataUrl: string
     }[]
     expect(references.map((file) => file.sourceType)).toEqual([
-      'image/png',
       'application/pdf',
-      'image/jpeg',
     ])
+    expect(references[0]).toMatchObject({
+      pageNumber: 2,
+      pageCount: 3,
+      searchQuery: 'mountain background',
+    })
     for (const file of references) {
       expect(file.dataUrl).toMatch(/^data:image\/(png|jpeg);base64,/)
       expect(file.dataUrl.length).toBeLessThanOrEqual(400_000)
@@ -513,6 +616,16 @@ for (const placement of ['Form views', 'Lead tools']) {
       await expect(
         page.getByRole('button', { name: 'Nutshell', exact: true }),
       ).toBeInViewport()
+      await pdfPreview.evaluate((image) =>
+        image.scrollIntoView({ block: 'center' }),
+      )
+      await studio
+        .getByRole('button', { name: 'Search PDF', exact: true })
+        .click({ trial: true })
+      await page.screenshot({
+        path: testInfo.outputPath('studio-mobile-reference.png'),
+        animations: 'disabled',
+      })
       await revision.fill('Keep the background and simplify the headline')
       const sendRevision = studio.getByRole('button', {
         name: 'Generate revision',
@@ -537,7 +650,14 @@ for (const placement of ['Form views', 'Lead tools']) {
     await page.reload()
     await tab.click()
     await expect(
-      studio.getByRole('img', { name: 'scene.pdf (PDF page 1 only)' }),
+      studio.getByRole('img', {
+        name: 'scene.pdf (PDF page 2 of 3) · Selected for: mountain background',
+      }),
+    ).toBeVisible()
+    await expect(
+      studio.getByText(
+        'The selected page is preserved. Remove and reattach the PDF to search again after a refresh.',
+      ),
     ).toBeVisible()
     await expect(selected).toHaveAttribute('src', revisedImage.dataUrl)
     await expect(download).toHaveAttribute(

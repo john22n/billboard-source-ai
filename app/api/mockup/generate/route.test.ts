@@ -143,6 +143,9 @@ it('keeps the selected revision first and adds the uploaded PDF background as a 
           id: 'background',
           name: 'scene.pdf',
           sourceType: 'application/pdf',
+          pageNumber: 3,
+          pageCount: 4,
+          searchQuery: 'mountain background',
           dataUrl,
         },
       ],
@@ -153,7 +156,10 @@ it('keeps the selected revision first and adds the uploaded PDF background as a 
     Buffer.from('/9j/2Q==', 'base64'),
     Buffer.from(dataUrl.split(',')[1], 'base64'),
   ])
-  expect(mocks.edit.mock.calls[0][0].prompt).toContain('PDF page 1 only')
+  expect(mocks.edit.mock.calls[0][0].prompt).toContain('PDF page 3 of 4')
+  expect(mocks.edit.mock.calls[0][0].prompt).toContain(
+    'Selected for: mountain background',
+  )
   expect(mocks.edit.mock.calls[0][0].prompt).toContain(
     'Place it on the attached background',
   )

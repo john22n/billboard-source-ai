@@ -8,6 +8,7 @@ import { useMockupStore } from '@/stores/mockupStore'
 import { attachmentLabel, MAX_ATTACHMENTS } from '@/lib/mockup/attachments'
 import { prepareAttachment } from '@/lib/mockup/prepare-attachment'
 import { getErrorMessage } from '@/lib/error-handling'
+import { PdfReferenceSearch } from './PdfReferenceSearch'
 
 export function MockupAttachments({ children }: { children: ReactNode }) {
   const picker = useRef<HTMLInputElement>(null)
@@ -19,7 +20,7 @@ export function MockupAttachments({ children }: { children: ReactNode }) {
     if (current.busy || !current.sessionKey) return
     if (current.state.attachments.length + files.length > MAX_ATTACHMENTS) {
       useMockupStore.setState({
-        error: 'Use up to 3 reference files. Remove one before adding more.',
+        error: 'Use one reference file. Remove it before attaching another.',
       })
       return
     }
@@ -27,12 +28,14 @@ export function MockupAttachments({ children }: { children: ReactNode }) {
     let preparationError = ''
     useMockupStore.setState({ busy: true, preparingFiles: true, error: '' })
     try {
-      // Prepare the batch atomically; a bad file never discards existing references.
-      const attachments = []
-      for (const file of files) attachments.push(await prepareAttachment(file))
+      const file = files[0]
+      const attachment = await prepareAttachment(file)
       if (useMockupStore.getState().epoch !== epoch) return
+      useMockupStore.setState({
+        pdfSource: file.type === 'application/pdf' ? file : null,
+      })
       update({
-        attachments: [...current.state.attachments, ...attachments],
+        attachments: [attachment],
         ...(!current.state.image ? { summary: null } : {}),
       })
     } catch (error) {
@@ -70,7 +73,6 @@ export function MockupAttachments({ children }: { children: ReactNode }) {
           ref={picker}
           type="file"
           accept="image/png,image/jpeg,application/pdf,.png,.jpg,.jpeg,.pdf"
-          multiple
           hidden
           aria-label="Reference files"
           onChange={(event) => {
@@ -87,22 +89,19 @@ export function MockupAttachments({ children }: { children: ReactNode }) {
           onClick={() => picker.current?.click()}
         >
           <Paperclip className="size-4" data-icon="inline-start" />
-          Attach files
+          Attach file
         </Button>
         <span className="text-xs text-muted-foreground">
-          or drop PNG, JPEG, PDF · 3 files · 10 MB each
+          PNG, JPEG, PDF · 1 file · 10 MB · PDFs up to 50 pages
         </span>
       </div>
       {state.attachments.length > 0 && (
         <>
-          <ul
-            aria-label="Reference attachments"
-            className="grid grid-cols-3 gap-2"
-          >
+          <ul aria-label="Reference attachments" className="space-y-2">
             {state.attachments.map((file) => (
               <li
                 key={file.id}
-                className="relative min-w-0 overflow-hidden rounded-lg border bg-muted/30"
+                className="relative flex min-w-0 items-center gap-3 overflow-hidden rounded-lg border bg-muted/30 pr-9"
               >
                 <Image
                   src={file.dataUrl}
@@ -110,7 +109,7 @@ export function MockupAttachments({ children }: { children: ReactNode }) {
                   width={160}
                   height={80}
                   unoptimized
-                  className="h-16 w-full object-contain"
+                  className="h-16 w-24 shrink-0 object-contain"
                 />
                 <Button
                   type="button"
@@ -119,34 +118,46 @@ export function MockupAttachments({ children }: { children: ReactNode }) {
                   className="absolute top-1 right-1 size-6"
                   aria-label={`Remove ${file.name}`}
                   disabled={busy}
-                  onClick={() =>
+                  onClick={() => {
+                    useMockupStore.setState({ pdfSource: null })
                     update({
-                      attachments: state.attachments.filter(
-                        (item) => item.id !== file.id,
-                      ),
+                      attachments: [],
                       ...(!state.image ? { summary: null } : {}),
                     })
-                  }
+                  }}
                 >
                   <X className="size-3" />
                 </Button>
-                <p
-                  className="truncate border-t px-2 py-1 text-xs"
-                  title={attachmentLabel(file)}
-                >
-                  {file.name}
-                </p>
-                {file.sourceType === 'application/pdf' && (
-                  <p className="px-2 pb-1 text-xs text-muted-foreground">
-                    PDF · Page 1 only
+                <div className="min-w-0 py-2">
+                  <p
+                    className="truncate text-xs font-medium"
+                    title={attachmentLabel(file)}
+                  >
+                    {file.name}
                   </p>
-                )}
+                  {file.sourceType === 'application/pdf' && (
+                    <p className="text-xs text-muted-foreground">
+                      PDF · Page {file.pageNumber ?? 1} of {file.pageCount ?? 1}
+                    </p>
+                  )}
+                  {file.searchQuery && (
+                    <p
+                      className="truncate text-xs text-muted-foreground"
+                      title={file.searchQuery}
+                    >
+                      Selected for: {file.searchQuery}
+                    </p>
+                  )}
+                </div>
               </li>
             ))}
           </ul>
+          {state.attachments[0].sourceType === 'application/pdf' && (
+            <PdfReferenceSearch />
+          )}
           <p className="text-xs text-muted-foreground">
             References stay with this mockup. Describe how to use them in your
-            message. PDFs use page 1 only.
+            message. For PDFs, the selected page is used as the reference.
           </p>
         </>
       )}
