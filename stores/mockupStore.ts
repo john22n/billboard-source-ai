@@ -15,6 +15,8 @@ type Store = {
   error: string
   /** A message the wizard should send on the rep's behalf, such as "Start". */
   opening: string | null
+  /** The turn in flight: the rep's message and the reply streamed so far. */
+  pending: { text: string; reply: string } | null
   setDraft: (draft: string) => void
   storageWarning: string
   initialize: (key: string) => void
@@ -35,6 +37,7 @@ const idle = {
   draft: '',
   error: '',
   opening: null,
+  pending: null,
 }
 
 export const useMockupStore = create<Store>((set, get) => ({

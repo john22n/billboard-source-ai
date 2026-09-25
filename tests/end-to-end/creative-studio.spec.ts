@@ -36,6 +36,44 @@ const revisedImage = {
   dataUrl: `data:image/jpeg;base64,${readFileSync(new URL('./fixtures/revised-billboard.jpg', import.meta.url)).toString('base64')}`,
 }
 
+/**
+ * The chat route answers with an AI SDK UI message stream. Text arrives in
+ * several deltas; the image and brand ride on the finish chunk's metadata.
+ */
+function wizardStream(turn: {
+  reply: string
+  image?: unknown
+  brand?: unknown
+  error?: string
+}) {
+  const words = turn.reply.split(/(?<= )/)
+  const chunks: Record<string, unknown>[] = [
+    { type: 'start' },
+    { type: 'text-start', id: 't' },
+    ...words.map((delta) => ({ type: 'text-delta', id: 't', delta })),
+  ]
+  if (turn.error) chunks.push({ type: 'error', errorText: turn.error })
+  else
+    chunks.push(
+      { type: 'text-end', id: 't' },
+      {
+        type: 'finish',
+        messageMetadata: {
+          image: turn.image ?? null,
+          brand: turn.brand ?? null,
+        },
+      },
+    )
+  return {
+    status: 200,
+    headers: {
+      'content-type': 'text/event-stream',
+      'x-vercel-ai-ui-message-stream': 'v1',
+    },
+    body: chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join(''),
+  }
+}
+
 /** Page 2, not the gray cover or orange logo page, must supply the reference. */
 function expectPageTwoColors(colors: number[][]) {
   const expected = [
@@ -151,13 +189,16 @@ for (const placement of ['Form views', 'Lead tools']) {
         brand?: unknown
       }) => {
         history = [...history, latest, { role: 'assistant', text: json.reply }]
-        return route.fulfill({ json })
+        return route.fulfill(wizardStream(json))
       }
       if (body.image) {
         expect(body.image).toEqual(image)
         expect(body.brand).toEqual(brand)
+        // The model fails mid-stream: the client must discard the partial reply.
         if (++revisions === 1)
-          return route.fulfill({ status: 502, json: { error: wizardError } })
+          return route.fulfill(
+            wizardStream({ reply: 'Adjusting the ', error: wizardError }),
+          )
         return reply({
           reply: 'Here is the revised mockup.',
           image: revisedImage,
@@ -566,6 +607,10 @@ for (const placement of ['Form views', 'Lead tools']) {
     await studio.getByRole('button', { name: 'Send message' }).click()
     await expect(studio.getByRole('alert')).toContainText(
       'Your conversation and selected image are unchanged',
+    )
+    await expect(studio.getByRole('log')).not.toContainText('Adjusting the')
+    await expect(studio.getByRole('log')).not.toContainText(
+      'Make the headline larger',
     )
     await expect(selected).toHaveAttribute('src', image.dataUrl)
     await expect(revision).toHaveValue('Make the headline larger')

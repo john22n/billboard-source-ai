@@ -3,8 +3,8 @@ import { NextResponse } from 'next/server'
 import { createOpenAI } from '@ai-sdk/openai'
 import {
   APICallError,
-  generateText,
   stepCountIs,
+  streamText,
   tool,
   type ModelMessage,
 } from 'ai'
@@ -33,9 +33,11 @@ import {
   chatMessageSchema,
   imageSchema,
   MAX_MESSAGES,
+  WIZARD_ERROR,
   type Brand,
   type MockupImage,
 } from '@/lib/mockup/state'
+import type { WizardReply } from '@/lib/mockup/stream'
 import { getSystemPrompt } from '@/lib/mockup/system-prompt'
 import { reviewWebsite } from '@/lib/mockup/website'
 
@@ -223,7 +225,7 @@ export async function POST(request: Request) {
     const { prompt } = await getSystemPrompt()
     const { tools, captured } = wizardTools(session, input.data)
     stage = 'conversation'
-    const result = await generateText({
+    const result = streamText({
       model: provider('gpt-5.4-mini'),
       system: `${prompt}\n\n${toolInstructions}`,
       messages: conversation(input.data),
@@ -232,25 +234,22 @@ export async function POST(request: Request) {
       maxRetries: 0,
       abortSignal: AbortSignal.timeout(280_000),
     })
-    const reply =
-      result.text.trim() ||
-      (captured.image
-        ? 'Your mockup is ready. Check every word before sharing, then tell me what you’d like to change.'
-        : '')
-    if (!reply) throw new Error('Empty reply')
-    return NextResponse.json(
-      { reply, image: captured.image, brand: captured.brand },
-      { headers },
-    )
+    // Text streams as it is written; the captured image and brand are attached
+    // to the final chunk so the client commits them together with the reply.
+    return result.toUIMessageStreamResponse<WizardReply>({
+      headers,
+      messageMetadata: ({ part }) =>
+        part.type === 'finish'
+          ? { image: captured.image, brand: captured.brand }
+          : undefined,
+      onError: (error) => {
+        logFailure('conversation', error)
+        return WIZARD_ERROR
+      },
+    })
   } catch (error) {
     logFailure(stage, error)
-    return NextResponse.json(
-      {
-        error:
-          'The wizard could not respond. Your conversation and selected image are unchanged. Please try again.',
-      },
-      { status: 502 },
-    )
+    return NextResponse.json({ error: WIZARD_ERROR }, { status: 502 })
   }
 }
 
