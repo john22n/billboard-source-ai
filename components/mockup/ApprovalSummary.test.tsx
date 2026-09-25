@@ -18,13 +18,13 @@ vi.mock('@/stores/mockupStore', () => ({
 
 import { ApprovalSummary } from './ApprovalSummary'
 
-it('keeps a brief copy summary and generation without the detailed overview', () => {
+it('keeps generation without displaying the copy summary', () => {
   const html = renderToStaticMarkup(
     <ApprovalSummary busy={false} onGenerate={() => {}} />,
   )
-  expect(html).toContain('Explore the mountains')
-  expect(html).toContain('Trips from Denver')
-  expect(html).toContain('alpine.example')
+  expect(html).not.toContain('Explore the mountains')
+  expect(html).not.toContain('Trips from Denver')
+  expect(html).not.toContain('alpine.example')
   expect(html).toContain('Generate mockup')
   expect(html).not.toContain('Long internal creative direction')
   expect(html).not.toContain('textarea')
