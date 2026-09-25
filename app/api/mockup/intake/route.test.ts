@@ -83,6 +83,25 @@ function request(body: unknown) {
   })
 }
 
+it('rejects remote attachment URLs before reading any file or calling the provider', async () => {
+  const response = await POST(
+    request({
+      intake: freshIntake(),
+      message: 'Use my logo',
+      attachments: [
+        {
+          id: 'remote',
+          name: 'logo.png',
+          sourceType: 'image/png',
+          dataUrl: 'https://internal.example/logo.png',
+        },
+      ],
+    }),
+  )
+  expect(response.status).toBe(400)
+  expect(fetcher).not.toHaveBeenCalled()
+})
+
 it.each([
   'website and website content',
   'website',
@@ -189,6 +208,47 @@ it('also enforces strict output for the approval summary', async () => {
   expect(fetcher).toHaveBeenCalledTimes(1)
   const format = JSON.parse(String(fetcher.mock.calls[0][1]?.body)).text.format
   expect(format.strict).toBe(true)
+})
+
+it('sends uploaded PDF page imagery and its use instructions to brief preparation', async () => {
+  generated = {
+    summary: {
+      headline: 'Alpine',
+      supporting: '',
+      contact: '',
+      direction: 'Use the supplied mountain background.',
+      caution: '',
+    },
+    brandNotes: 'User supplied a background.',
+    omitWebsite: false,
+  }
+  const dataUrl = 'data:image/jpeg;base64,/9j/2Q=='
+  const response = await POST(
+    request({
+      intake: { ...freshIntake(), advertiser: 'Alpine' },
+      review: true,
+      attachmentInstructions: 'Render the billboard on this PDF background.',
+      attachments: [
+        {
+          id: 'pdf-1',
+          name: 'mountain.pdf',
+          sourceType: 'application/pdf',
+          dataUrl,
+        },
+      ],
+    }),
+  )
+  expect(response.status).toBe(200)
+  const input = JSON.parse(String(fetcher.mock.calls[0][1]?.body)).input
+  expect(JSON.stringify(input)).toContain(
+    'Render the billboard on this PDF background.',
+  )
+  expect(JSON.stringify(input)).toContain('PDF page 1 only')
+  expect(
+    input.flatMap((message: { content: unknown[] }) => message.content),
+  ).toContainEqual(
+    expect.objectContaining({ type: 'input_image', image_url: dataUrl }),
+  )
 })
 
 it.each([false, true])(

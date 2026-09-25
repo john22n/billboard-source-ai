@@ -9,6 +9,7 @@ type Store = {
   sessionKey: string | null
   epoch: number
   busy: boolean
+  preparingFiles: boolean
   draft: string
   error: string
   setDraft: (draft: string) => void
@@ -29,6 +30,7 @@ export const useMockupStore = create<Store>((set, get) => ({
   sessionKey: null,
   epoch: 0,
   busy: false,
+  preparingFiles: false,
   draft: '',
   error: '',
   setDraft: (draft) => set({ draft }),
@@ -43,7 +45,7 @@ export const useMockupStore = create<Store>((set, get) => ({
         saved.state?.intake &&
         Array.isArray(saved.state.messages)
       )
-        state = saved.state
+        state = { ...state, ...saved.state }
       else sessionStorage.removeItem(STORAGE)
     } catch {
       // A browser can deny access entirely. update() reports the persistence warning.
@@ -53,6 +55,7 @@ export const useMockupStore = create<Store>((set, get) => ({
       state,
       epoch: get().epoch + 1,
       busy: false,
+      preparingFiles: false,
       draft: '',
       error: '',
     })
@@ -87,7 +90,13 @@ export const useMockupStore = create<Store>((set, get) => ({
     })
   },
   start(lead) {
-    set({ epoch: get().epoch + 1, busy: false, draft: '', error: '' })
+    set({
+      epoch: get().epoch + 1,
+      busy: false,
+      preparingFiles: false,
+      draft: '',
+      error: '',
+    })
     get().update({
       ...restart(),
       ...(lead ? { intake: importLead(lead) } : {}),
@@ -104,6 +113,7 @@ export const useMockupStore = create<Store>((set, get) => ({
       sessionKey: null,
       epoch: get().epoch + 1,
       busy: false,
+      preparingFiles: false,
       draft: '',
       error: '',
       storageWarning: '',

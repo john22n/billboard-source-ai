@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { CreativeAttachment } from './attachments'
 
 export const questions = {
   advertiser: 'What is the advertiser’s name?',
@@ -77,6 +78,7 @@ export type MockupState = {
   started: boolean
   intake: Intake
   messages: { role: 'user' | 'assistant'; text: string }[]
+  attachments: CreativeAttachment[]
   summary: Summary | null
   brand: Brand | null
   image: MockupImage | null
@@ -101,6 +103,7 @@ export function restart(): MockupState {
     started: true,
     intake: freshIntake(),
     messages: [],
+    attachments: [],
     summary: null,
     brand: null,
     image: null,

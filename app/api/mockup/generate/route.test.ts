@@ -48,6 +48,8 @@ const request = (body: unknown) =>
   })
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.generate.mockReset()
+  mocks.edit.mockReset()
 })
 
 it('does not call OpenAI before explicit initial approval', async () => {
@@ -77,6 +79,86 @@ it('uses an uploaded logo as an image reference rather than generating from text
     Buffer.from(dataUrl.split(',')[1], 'base64'),
   ])
   expect(mocks.edit.mock.calls[0][0].prompt).toContain('alpine-logo.png')
+})
+
+it.each([
+  'https://internal.example/image.png',
+  'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=',
+  'data:image/png;base64,PGh0bWw+',
+  'data:image/jpeg;base64,invalid!',
+  `data:image/jpeg;base64,/9j/${'A'.repeat(400_000)}`,
+])(
+  'rejects invalid or oversized references without a provider call (case %#)',
+  async (dataUrl) => {
+    const response = await POST(
+      request({
+        ...brief,
+        attachments: [
+          { id: 'bad', name: 'bad.png', sourceType: 'image/png', dataUrl },
+        ],
+      }),
+    )
+    expect(response.status).toBe(400)
+    expect(mocks.edit).not.toHaveBeenCalled()
+    expect(mocks.generate).not.toHaveBeenCalled()
+  },
+)
+
+it('accepts three references but rejects a fourth', async () => {
+  const file = {
+    id: 'ref',
+    name: 'ref.jpg',
+    sourceType: 'image/jpeg',
+    dataUrl: 'data:image/jpeg;base64,/9j/2Q==',
+  }
+  mocks.edit.mockResolvedValue({ data: [{ b64_json: '/9j/2Q==' }] })
+  expect(
+    (await POST(request({ ...brief, attachments: Array(3).fill(file) })))
+      .status,
+  ).toBe(200)
+  expect(mocks.edit.mock.calls[0][0].image).toHaveLength(3)
+  expect(
+    (await POST(request({ ...brief, attachments: Array(4).fill(file) })))
+      .status,
+  ).toBe(400)
+  expect(mocks.edit).toHaveBeenCalledTimes(1)
+})
+
+it('keeps the selected revision first and adds the uploaded PDF background as a separate reference', async () => {
+  mocks.edit.mockResolvedValueOnce({ data: [{ b64_json: '/9j/2Q==' }] })
+  const previous = {
+    id: '12345678-1234-4123-8123-123456789abc',
+    advertiser: 'Alpine',
+    dataUrl: 'data:image/jpeg;base64,/9j/2Q==',
+    receipt: 'signed',
+  }
+  const dataUrl =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='
+  const response = await POST(
+    request({
+      ...brief,
+      previous,
+      revision: 'Place it on the attached background',
+      approved: false,
+      attachments: [
+        {
+          id: 'background',
+          name: 'scene.pdf',
+          sourceType: 'application/pdf',
+          dataUrl,
+        },
+      ],
+    }),
+  )
+  expect(response.status).toBe(200)
+  expect(mocks.edit.mock.calls[0][0].image).toEqual([
+    Buffer.from('/9j/2Q==', 'base64'),
+    Buffer.from(dataUrl.split(',')[1], 'base64'),
+  ])
+  expect(mocks.edit.mock.calls[0][0].prompt).toContain('PDF page 1 only')
+  expect(mocks.edit.mock.calls[0][0].prompt).toContain(
+    'Place it on the attached background',
+  )
 })
 it('uses the selected image as the revision reference and reports a failed request', async () => {
   mocks.edit.mockRejectedValueOnce(new Error('Provider failure'))
