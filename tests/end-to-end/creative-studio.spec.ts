@@ -510,16 +510,15 @@ for (const placement of ['Form views', 'Lead tools']) {
     await expect(
       studio.getByText('Billboard summary', { exact: true }),
     ).toHaveCount(0)
-    const brief = studio.getByRole('region', { name: 'Brief summary' })
     await expect(
-      brief.getByRole('heading', { name: summary.headline }),
-    ).toBeVisible()
+      studio.getByRole('region', { name: 'Brief summary' }),
+    ).toHaveCount(0)
     await expect(
-      brief.getByText(summary.supporting, { exact: true }),
-    ).toBeVisible()
+      studio.getByRole('heading', { name: summary.headline }),
+    ).toHaveCount(0)
     await expect(
-      brief.getByText(summary.contact, { exact: true }),
-    ).toBeVisible()
+      studio.getByText('Here’s your summary.', { exact: false }),
+    ).toHaveCount(0)
     await expect(
       studio.getByText(summary.caution, { exact: true }),
     ).toBeVisible()
