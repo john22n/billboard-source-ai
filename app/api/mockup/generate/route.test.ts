@@ -54,6 +54,30 @@ it('does not call OpenAI before explicit initial approval', async () => {
   expect((await POST(request({ ...brief, approved: false }))).status).toBe(400)
   expect(mocks.generate).not.toHaveBeenCalled()
 })
+it('uses an uploaded logo as an image reference rather than generating from text alone', async () => {
+  mocks.edit.mockResolvedValueOnce({ data: [{ b64_json: '/9j/2Q==' }] })
+  const dataUrl =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='
+  const response = await POST(
+    request({
+      ...brief,
+      attachments: [
+        {
+          id: 'logo-1',
+          name: 'alpine-logo.png',
+          sourceType: 'image/png',
+          dataUrl,
+        },
+      ],
+    }),
+  )
+  expect(response.status).toBe(200)
+  expect(mocks.generate).not.toHaveBeenCalled()
+  expect(mocks.edit.mock.calls[0][0].image).toEqual([
+    Buffer.from(dataUrl.split(',')[1], 'base64'),
+  ])
+  expect(mocks.edit.mock.calls[0][0].prompt).toContain('alpine-logo.png')
+})
 it('uses the selected image as the revision reference and reports a failed request', async () => {
   mocks.edit.mockRejectedValueOnce(new Error('Provider failure'))
   const previous = {
