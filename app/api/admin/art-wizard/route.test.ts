@@ -40,9 +40,25 @@ it.each([
 
 it('loads the current prompt without caching and saves validated instructions', async () => {
   const response = await GET()
-  expect(await response.json()).toEqual({
+  const data = await response.json()
+  expect(data).toMatchObject({
     prompt: 'Create a high contrast billboard.',
   })
+  expect(
+    data.instructions.map((item: { title: string }) => item.title),
+  ).toEqual([
+    'Questionnaire extraction',
+    'Approval summary',
+    'Summary reference guidance',
+    'New image assembly',
+    'Image revisions',
+    'PDF search',
+    'Attachment handling',
+    'Questionnaire questions',
+  ])
+  expect(
+    data.instructions.every((item: { text: string }) => item.text.length > 0),
+  ).toBe(true)
   expect(response.headers.get('Cache-Control')).toContain('no-store')
   const saved = await PUT(
     request({ prompt: '  Use watercolor.\nKeep text bold.  ' }),
@@ -72,6 +88,13 @@ it('rejects malformed JSON', async () => {
     }),
   )
   expect(response.status).toBe(400)
+  expect(mocks.save).not.toHaveBeenCalled()
+})
+
+it('rejects attempts to change protected instructions', async () => {
+  expect(
+    (await PUT(request({ prompt: 'Valid style', instructions: [] }))).status,
+  ).toBe(400)
   expect(mocks.save).not.toHaveBeenCalled()
 })
 
