@@ -46,8 +46,6 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 The GitHub Actions workflow in `.github/workflows/ci-cd.yml`:
 
 - lints, type-checks, and tests every pull request targeting `main`;
-- runs the login and Creative Studio Playwright tests in a separate job, using Chromium and disposable local PostgreSQL;
-- retains Playwright reports, failure screenshots, and retry traces for seven days;
 - audits dependencies for critical vulnerabilities; and
 - publishes an SPDX SBOM.
 
@@ -115,18 +113,3 @@ Before deploying, create a Twilio Conversation Intelligence (classic) Service in
 Twilio posts completed recordings to the signature-validated `/api/twilio/voicemail-ai-recording` endpoint. It verifies recording ownership and requests an Intelligence transcript using the Recording SID, with the Call SID as its customer key. Callback retries do not create additional transcripts. Connection/read failures and 5xx responses have bounded Twilio retries; persistent failures appear in Vercel logs as `Voicemail AI transcription request failed`. After resolving the cause, replay the recording callback using Twilio's signed webhook mechanism or request the transcript for that Recording SID through the Intelligence API.
 
 The admin Voicemail AI tab shows recording audio, legacy Twilio transcripts, and Intelligence transcript text/status for the existing rolling 21-day call window. Refresh after transcription completes; Call Events may take 15 minutes to appear. A 21-day display window is not a Twilio deletion policy. Recording/storage/transcription charges apply, and old unrecorded calls cannot be recovered. Verify the spoken notice meets the business's recording-consent requirements before release.
-
-## Playwright browser tests
-
-Install PostgreSQL locally and put `initdb` and `pg_ctl` on your `PATH` (for Homebrew PostgreSQL 17: `export PATH="$(brew --prefix postgresql@17)/bin:$PATH"`). Run as a regular user, not root. Ports 3000 and 54329 must be free.
-
-```bash
-pnpm exec playwright install chromium
-pnpm test:e2e
-# Creative Studio only:
-pnpm exec playwright test creative-studio.spec.ts
-```
-
-Playwright starts an isolated Next.js server and a temporary PostgreSQL cluster containing only a test user. Both stop after the run, and the database files are removed. Shell and `.env` service credentials are cleared for the app; the suite does not use the dev or production database.
-
-The Creative Studio test opens the actual dashboard with a signed test session and exercises all seven intake answers, editable approval, website palette propagation, generation, download, failed revision/retry, refresh persistence, and reset. AI and telephony HTTP responses are mocked, so it verifies the browser workflow and request contracts—not live model quality or website extraction. Existing API/unit tests cover those server-side contracts. The tiny JPEG fixtures are synthetic, not customer artwork.

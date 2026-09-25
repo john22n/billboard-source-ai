@@ -32,23 +32,3 @@ These defaults are optimized for AI coding agents (and humans) working on apps t
 Before creating any commit, use $shadscan-pre-commit. Establish the current score when work begins, run Shadscan immediately before each commit, and do not commit if the score is unassessed or below the task floor.
 
 <!-- VERCEL BEST PRACTICES END -->
-
-## Playwright
-
-How tests get written
-
-Write a failing test before the implementation. Commit the test first.
-Unit tests live next to the file under test as <name>.test.ts and run with Vitest.
-End-to-end tests live in tests/end-to-end/ and run with Playwright.
-The starter Playwright suite is intentionally small. Later course labs add storage state, HAR replay, dossiers, accessibility, and visual coverage.
-Playwright locator rules
-
-getByRole first. getByLabel or getByText second. data-testid only when semantics genuinely don't exist.
-Never use raw CSS or XPath selectors in specs.
-Never use page.waitForTimeout or page.waitForLoadState('networkidle'). Use expect(locator).toBeVisible(), page.waitForResponse, or page.waitForRequest.
-Do not fix a failing Playwright test by changing the assertion to match broken UI.
-
-## testing
-
-always close the app process when youre done testing
-use Playwright to run UI validation instead of the chrome MCP

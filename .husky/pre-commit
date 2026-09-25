@@ -2,4 +2,3 @@ npx lint-staged
 npm run typecheck
 npm run fallow:audit
 pnpm dlx @shadscan/cli
-pnpm run test:e2e
