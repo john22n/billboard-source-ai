@@ -152,22 +152,79 @@ it('sends the latest copy request and retains the selected image and draft on fa
   )
 })
 
-it('requires initial approval, shows the exact edited copy, and disables generation while pending', async () => {
-  useMockupStore.getState().update({ summary })
+it('shares pending drafts and failures across Studio views and clears them on restart', async () => {
+  let finish!: (response: Response) => void
+  vi.mocked(fetch).mockReturnValueOnce(
+    new Promise<Response>((resolve) => {
+      finish = resolve
+    }),
+  )
+  await act(async () => root.render(<ArtMockupWizard key="outer" />))
+  await send('alpine.example')
+  await act(async () => root.render(<ArtMockupWizard key="inline" />))
+  expect(container.querySelector('textarea')?.value).toBe('alpine.example')
+  expect(container.querySelector('textarea')?.disabled).toBe(true)
+  await act(async () =>
+    finish(Response.json({ error: 'Try again later.' }, { status: 502 })),
+  )
+  expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+    'Try again later.',
+  )
+  await act(async () =>
+    root.render(
+      <>
+        <ArtMockupWizard key="inline" />
+        <ArtMockupWizard key="outer" />
+      </>,
+    ),
+  )
+  expect(
+    Array.from(container.querySelectorAll('textarea'), (el) => el.value),
+  ).toEqual(['alpine.example', 'alpine.example'])
+  expect(container.querySelectorAll('[role="alert"]')).toHaveLength(2)
+  await act(async () => button('Start Mockup').click())
+  expect(
+    Array.from(container.querySelectorAll('textarea'), (el) => el.value),
+  ).toEqual(['', ''])
+  expect(container.querySelectorAll('[role="alert"]')).toHaveLength(0)
+})
+
+it('keeps only the orange summary and generate button, without the review section', async () => {
+  useMockupStore
+    .getState()
+    .update({ summary: { ...summary, caution: 'Keep the headline short.' } })
   const generate = vi.fn()
   await act(async () =>
     root.render(<ApprovalSummary busy={false} onGenerate={generate} />),
   )
   expect(generate).not.toHaveBeenCalled()
-  expect(
-    (container.querySelector('#mockup-headline') as HTMLInputElement).value,
-  ).toBe('Smile bigger')
+  expect(container.querySelector('input, textarea')).toBeNull()
+  expect(container.textContent).toContain('Keep the headline short.')
+  expect(container.textContent).not.toContain('Smile bigger')
+  expect(container.textContent).not.toContain('Visual direction')
+  expect(container.textContent).not.toContain('Billboard summary')
   await act(async () => button('Generate mockup').click())
   expect(generate).toHaveBeenCalledTimes(1)
   await act(async () =>
     root.render(<ApprovalSummary busy onGenerate={generate} />),
   )
   expect(button('Generating mockup…').disabled).toBe(true)
+})
+
+it('shows download but no existing-lead action, retaining recovery for a failed lead attachment', async () => {
+  useMockupStore.getState().update({ image, summary })
+  await act(async () => root.render(<ArtMockupWizard />))
+  expect(container.textContent).not.toContain('Add to existing Nutshell lead')
+  expect(container.querySelector('a[download]')?.getAttribute('href')).toBe(
+    image.dataUrl,
+  )
+  await act(async () =>
+    useMockupStore.getState().update({
+      attachmentFailed: true,
+      lastLead: { id: 42, advertiser: 'Alpine', name: 'Alpine campaign' },
+    }),
+  )
+  expect(button('Retry image attachment')).toBeDefined()
 })
 
 it('preserves the selected image on revision failure and fences late responses after restart', async () => {
@@ -234,9 +291,6 @@ it.each(['alpine.example', ''])(
       Response.json({ image, remaining: 9 }),
     )
     await act(async () => root.render(<ArtMockupWizard />))
-    expect(
-      (container.querySelector('#mockup-contact') as HTMLInputElement).value,
-    ).toBe(contact)
     await act(async () => button('Generate mockup').click())
     expect(
       JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string),
@@ -250,10 +304,11 @@ it.each(['alpine.example', ''])(
 it('blocks the wrong advertiser and requires explicit confirmation to retry the exact lead', async () => {
   useMockupStore.getState().update({
     image,
+    attachmentFailed: true,
     lastLead: { id: 9, name: 'Wrong company', advertiser: 'Other' },
   })
   await act(async () => root.render(<AttachMockup />))
-  await act(async () => button('Add to existing Nutshell lead').click())
+  await act(async () => button('Retry image attachment').click())
   expect(button('Confirm & attach image').disabled).toBe(true)
   expect(fetch).not.toHaveBeenCalled()
   await act(async () => button('Close').click())

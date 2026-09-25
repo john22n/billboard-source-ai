@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef } from 'react'
 import Image from 'next/image'
 import {
   ArrowUp,
@@ -41,9 +41,10 @@ function MockupConversation() {
     storageWarning,
     update,
     start,
+    draft,
+    error,
+    setDraft,
   } = useMockupStore()
-  const [draft, setDraft] = useState('')
-  const [error, setError] = useState('')
   const end = useRef<HTMLDivElement>(null)
   const question = nextQuestion(state.intake)
   const step = Object.keys(questions).filter(
@@ -57,8 +58,7 @@ function MockupConversation() {
   async function request(kind: 'intake' | 'generate', text = '') {
     if (useMockupStore.getState().busy || !sessionKey) return
     const started = useMockupStore.getState().epoch
-    useMockupStore.setState({ busy: true })
-    setError('')
+    useMockupStore.setState({ busy: true, error: '' })
     try {
       const result = await postMockup(kind, state, text, started)
       if (!result) return
@@ -83,7 +83,7 @@ function MockupConversation() {
       setDraft('')
     } catch (err) {
       if (useMockupStore.getState().epoch !== started) return
-      setError(getErrorMessage(err))
+      useMockupStore.setState({ error: getErrorMessage(err) })
     } finally {
       if (useMockupStore.getState().epoch === started)
         useMockupStore.setState({ busy: false })
@@ -288,6 +288,7 @@ function MockupComposer({
   send: () => void
 }) {
   const { state, busy: isPending, sessionKey } = useMockupStore()
+  const messageId = useId()
   const isLoading = isPending || !sessionKey
   return (
     <footer className="border-t bg-background px-4 py-3 sm:px-6">
@@ -299,12 +300,12 @@ function MockupComposer({
           send()
         }}
       >
-        <Label htmlFor="mockup-message" className="sr-only">
+        <Label htmlFor={messageId} className="sr-only">
           {state.image ? 'Revision instructions' : 'Your answer'}
         </Label>
         <div className="flex items-end gap-2 rounded-xl border p-2">
           <Textarea
-            id="mockup-message"
+            id={messageId}
             value={draft}
             disabled={isLoading}
             onChange={(e) => setDraft(e.target.value)}
@@ -400,7 +401,7 @@ function intakeReply(
   const next = nextQuestion(result.intake)
   const reply = next
     ? questions[next]
-    : 'Here’s your brief. Edit anything you need, then choose Generate mockup.'
+    : 'Here’s your summary. When you’re ready, choose Generate mockup.'
   return {
     intake: result.intake,
     summary: result.summary || null,
