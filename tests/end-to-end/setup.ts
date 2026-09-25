@@ -63,7 +63,7 @@ export default async function setup() {
       )
       await pool.query(`CREATE TABLE art_wizard_settings (
         id integer PRIMARY KEY DEFAULT 1,
-        image_generation_prompt text NOT NULL
+        system_prompt text NOT NULL
       )`)
     } finally {
       await pool.end()

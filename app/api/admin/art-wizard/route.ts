@@ -2,19 +2,16 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { adminAuthorizationError } from '@/lib/admin-api'
 import {
-  getImageGenerationPrompt,
-  saveImageGenerationPrompt,
-} from '@/lib/mockup/image-prompt'
-import { questions } from '@/lib/mockup/intake'
+  defaultSystemPrompt,
+  getSystemPrompt,
+  resetSystemPrompt,
+  saveSystemPrompt,
+} from '@/lib/mockup/system-prompt'
 import {
-  extractionInstructions,
-  summaryInstructions,
-  summaryReferenceGuidance,
-  newImageInstructions,
-  revisionInstructions,
-  uploadedInstructions,
+  billboardImagePrompt,
   pdfSearchInstructions,
   referenceLabelInstructions,
+  toolInstructions,
 } from '@/lib/mockup/instructions'
 
 const schema = z
@@ -24,72 +21,39 @@ const headers = { 'Cache-Control': 'private, no-store' }
 
 const instructions = [
   {
-    title: 'Questionnaire extraction',
+    title: 'Tool instructions',
     context:
-      'System message. Receives the current intake, current question, questionnaire questions, latest answer, and uploaded references. Structured output is validated in code. Skip answers and exact-copy requests are handled directly by code.',
-    text: extractionInstructions,
+      'Appended after the editable system prompt on every wizard turn. Describes the two application tools (website review and billboard rendering) and how the wizard must use them.',
+    text: toolInstructions,
   },
   {
-    title: 'Approval summary',
+    title: 'New image frame',
     context:
-      'System message. Receives intake, website evidence, attachment instructions, and references. Returns a validated summary, brand notes, and website-omission flag. The code also preserves website contact copy unless explicitly omitted.',
-    text: summaryInstructions,
-  },
-  {
-    title: 'Summary reference guidance',
-    context:
-      'Included in the approval-summary user message alongside request data.',
-    text: summaryReferenceGuidance,
-  },
-  {
-    title: 'New image assembly',
-    context:
-      'Image API prompt, not a chat system message. The three logo-selection variants are shown below; uploaded-reference instructions are omitted when no uploads are supplied. Bracketed values are request-time placeholders, not customer data. The editable prompt above is inserted first.',
+      'Image API prompt, not a chat message. The wizard writes the creative brief; the application wraps it in this fixed staging frame. The logo sentence depends on whether the website review captured a logo; the reference sentence appears only when a file is attached. Bracketed values are request-time placeholders.',
     text: [
-      { label: 'Website logo available', logo: true, attachments: true },
-      { label: 'Uploaded references only', logo: false, attachments: true },
-      { label: 'No logo or references', logo: false, attachments: false },
+      { label: 'Website logo captured', logo: true, labels: [] },
+      {
+        label: 'Uploaded reference only',
+        logo: false,
+        labels: ['[Uploaded file label]'],
+      },
+      { label: 'No logo or references', logo: false, labels: [] },
     ]
       .map(
-        ({ label, logo, attachments }) =>
-          `${label}\n${newImageInstructions(
-            '[Editable image-generation prompt]',
-            logo,
-            attachments,
-            uploadedInstructions(
-              attachments ? ['[Uploaded file label]'] : [],
-              false,
-              logo,
-            ),
-            Object.fromEntries(
-              [
-                'advertiser',
-                'boardType',
-                'market',
-                'goal',
-                'focus',
-                'tone',
-                'headline',
-                'supporting',
-                'contact',
-                'direction',
-                'caution',
-              ].map((key) => [key, `[${key}]`]),
-            ),
-            '[Website brand notes]',
-          )}`,
+        ({ label, logo, labels }) =>
+          `${label}\n${billboardImagePrompt('[Creative brief written by the wizard]', { revision: false, logo, labels })}`,
       )
       .join('\n\n'),
   },
   {
-    title: 'Image revisions',
+    title: 'Revision frame',
     context:
-      'Image API prompt. Uses the selected image and revision request, not the editable initial prompt or original brief. The reference suffix is included only when uploads are supplied.',
-    text: revisionInstructions(
-      '[Advertiser]',
-      '[Revision request]',
-      uploadedInstructions(['[Uploaded file label]'], true, false),
-    ),
+      'Image API prompt. Uses the selected image plus the wizard’s description of the requested changes. The reference sentence appears only when a file is attached.',
+    text: billboardImagePrompt('[Requested changes written by the wizard]', {
+      revision: true,
+      logo: false,
+      labels: ['[Uploaded file label]'],
+    }),
   },
   {
     title: 'PDF search',
@@ -100,16 +64,8 @@ const instructions = [
   {
     title: 'Attachment handling',
     context:
-      'User-message label sent before each image in intake, summary, and PDF search. PDF labels include the selected page number, page count, and search query when present.',
+      'Label sent before each uploaded image in the wizard conversation and PDF search. PDF labels include the selected page number, page count, and search query when present.',
     text: referenceLabelInstructions('[Filename / PDF page label]'),
-  },
-  {
-    title: 'Questionnaire questions',
-    context:
-      'Code-owned question order and wording. These fields drive questionnaire progression and extraction; changes require a code update and regression tests.',
-    text: Object.entries(questions)
-      .map(([field, question]) => `${field}: ${question}`)
-      .join('\n\n'),
   },
 ]
 
@@ -118,7 +74,7 @@ export async function GET() {
   if (denied) return denied
   try {
     return NextResponse.json(
-      { prompt: await getImageGenerationPrompt(), instructions },
+      { ...(await getSystemPrompt()), instructions },
       { headers },
     )
   } catch {
@@ -137,16 +93,40 @@ export async function PUT(request: Request) {
     return NextResponse.json(
       {
         error:
-          'Only the image-generation prompt can be edited. Enter between 1 and 20,000 characters.',
+          'Only the system prompt can be edited. Enter between 1 and 20,000 characters.',
       },
       { status: 400, headers },
     )
   try {
-    await saveImageGenerationPrompt(input.data.prompt)
-    return NextResponse.json(input.data, { headers })
+    await saveSystemPrompt(input.data.prompt)
+    return NextResponse.json(
+      {
+        prompt: input.data.prompt,
+        isDefault: input.data.prompt === defaultSystemPrompt,
+      },
+      { headers },
+    )
   } catch {
     return NextResponse.json(
       { error: 'Could not save the prompt. Your edits are preserved; retry.' },
+      { status: 500, headers },
+    )
+  }
+}
+
+/** One-click full reset to the original Billboard Source Mockup Wizard prompt. */
+export async function DELETE() {
+  const denied = await adminAuthorizationError()
+  if (denied) return denied
+  try {
+    await resetSystemPrompt()
+    return NextResponse.json(
+      { prompt: defaultSystemPrompt, isDefault: true },
+      { headers },
+    )
+  } catch {
+    return NextResponse.json(
+      { error: 'Could not reset the prompt. Please retry.' },
       { status: 500, headers },
     )
   }

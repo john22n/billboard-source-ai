@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getSession } from '@/lib/auth'
 import { serverConfig } from '@/lib/config'
-import { imageSchema } from '@/lib/mockup/intake'
+import { imageSchema } from '@/lib/mockup/state'
 import { attachMockup, searchMockupLeads } from '@/lib/mockup/nutshell'
 import { verifyImage } from '@/lib/mockup/receipts'
 

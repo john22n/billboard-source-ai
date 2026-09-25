@@ -19,24 +19,35 @@ describe('active mockup lifecycle', () => {
     expect(useMockupStore.getState().state.attachmentFailed).toBe(true)
   })
 
-  it('waits until the wizard opens to import the current lead', () => {
+  it('queues an opening message that carries the current lead, and a plain Start without one', () => {
     useMockupStore.getState().initialize('rep:1')
-    expect(useMockupStore.getState().state.started).toBe(false)
+    expect(useMockupStore.getState().opening).toBeNull()
+    useMockupStore.getState().update({
+      messages: [{ role: 'assistant', text: 'Old question' }],
+    })
+    useMockupStore.setState({ draft: 'half-typed', error: 'old failure' })
     useMockupStore.getState().start({ entityName: 'Later entered advertiser' })
-    expect(useMockupStore.getState().state.intake.advertiser).toBe(
-      'Later entered advertiser',
+    expect(useMockupStore.getState().opening).toContain(
+      'Advertiser: Later entered advertiser',
     )
+    expect(useMockupStore.getState().state.messages).toEqual([])
+    expect(useMockupStore.getState().draft).toBe('')
+    expect(useMockupStore.getState().error).toBe('')
     useMockupStore.getState().start()
-    expect(useMockupStore.getState().state.started).toBe(true)
-    expect(useMockupStore.getState().state.intake.advertiser).toBeNull()
+    expect(useMockupStore.getState().opening).toBe('Start')
   })
+
   it('restores only this authenticated session, never an old advertiser after logout/login', () => {
     useMockupStore.getState().initialize('rep:1')
-    useMockupStore.getState().start({ entityName: 'Alpine' })
+    useMockupStore.getState().update({
+      messages: [{ role: 'user', text: 'Alpine' }],
+    })
     useMockupStore.setState({ sessionKey: null })
     useMockupStore.getState().initialize('rep:1')
-    expect(useMockupStore.getState().state.intake.advertiser).toBe('Alpine')
+    expect(useMockupStore.getState().state.messages).toEqual([
+      { role: 'user', text: 'Alpine' },
+    ])
     useMockupStore.getState().initialize('rep:2')
-    expect(useMockupStore.getState().state.intake.advertiser).toBeNull()
+    expect(useMockupStore.getState().state.messages).toEqual([])
   })
 })

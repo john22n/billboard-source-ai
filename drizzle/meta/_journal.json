@@ -57,6 +57,13 @@
       "when": 1790000000000,
       "tag": "0007_art_wizard_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790100000000,
+      "tag": "0008_art_wizard_system_prompt",
+      "breakpoints": true
     }
   ]
 }

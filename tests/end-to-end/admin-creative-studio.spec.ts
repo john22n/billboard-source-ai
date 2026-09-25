@@ -2,7 +2,7 @@ import { SignJWT } from 'jose'
 import { expect, test } from 'playwright/test'
 import { baseUrl, jwtSecret } from './environment'
 
-test('admin can inspect protected instructions and persist only the image prompt', async ({
+test('admin edits the wizard system prompt and restores the original in one click', async ({
   page,
   context,
 }, testInfo) => {
@@ -13,7 +13,7 @@ test('admin can inspect protected instructions and persist only the image prompt
     .setExpirationTime('1h')
     .sign(new TextEncoder().encode(jwtSecret))
   await context.addCookies([{ name: 'auth_token', value: token, url: baseUrl }])
-  // Other admin widgets are unrelated; instruction reads/writes use the real API and disposable DB.
+  // Other admin widgets are unrelated; prompt reads/writes use the real API and disposable DB.
   await page.route('**/api/**', (route) => {
     const path = new URL(route.request().url()).pathname
     if (path === '/api/admin/art-wizard') return route.continue()
@@ -32,47 +32,73 @@ test('admin can inspect protected instructions and persist only the image prompt
   await page.goto('/admin')
   await page.getByRole('tab', { name: 'Creative Studio' }).click()
   const editor = page.getByRole('textbox', {
-    name: 'Image-generation system prompt',
+    name: 'Mockup Wizard system prompt',
   })
-  await expect(editor).toHaveValue(/^Create ONE finished/)
-  const before = await (
+  await expect(editor).toHaveValue(
+    /^You are the Billboard Source Mockup Wizard/,
+  )
+  await expect(page.getByText('Using the original prompt.')).toBeVisible()
+  const original = await (
     await context.request.get('/api/admin/art-wizard')
   ).json()
-  await page.getByText('Questionnaire extraction', { exact: true }).click()
+  expect(original.isDefault).toBe(true)
+  await page.getByText('Tool instructions', { exact: true }).click()
   await expect(
-    page.getByText(before.instructions[0].text, { exact: true }),
+    page.getByText(original.instructions[0].text, { exact: true }),
   ).toBeVisible()
   await expect(page.getByRole('textbox')).toHaveCount(1)
-  await editor.fill(
-    'Use a restrained navy and orange palette with large readable type.',
-  )
+
+  const custom =
+    'You are the Billboard Source Mockup Wizard. Ask only three questions, then generate the billboard.'
+  await editor.fill(custom)
+  await expect(page.getByText('Unsaved changes')).toBeVisible()
   await page.getByRole('button', { name: 'Save prompt', exact: true }).click()
   await expect(
-    page.getByText('Prompt saved. New mockups will use these instructions.'),
+    page.getByText(
+      'Prompt saved. New wizard conversations will use these instructions.',
+    ),
   ).toBeVisible()
-  const after = await (
+  const saved = await (
     await context.request.get('/api/admin/art-wizard')
   ).json()
-  expect(after.instructions).toEqual(before.instructions)
-  expect(after.prompt).toBe(
-    'Use a restrained navy and orange palette with large readable type.',
-  )
+  expect(saved.prompt).toBe(custom)
+  expect(saved.isDefault).toBe(false)
+  expect(saved.instructions).toEqual(original.instructions)
+
   const denied = await context.request.put('/api/admin/art-wizard', {
     data: { prompt: 'Unwanted replacement', instructions: [] },
   })
   expect(denied.status()).toBe(400)
+
   await page.reload()
   await page.getByRole('tab', { name: 'Creative Studio' }).click()
-  await expect(editor).toHaveValue(after.prompt)
-  await page.getByText('Questionnaire extraction', { exact: true }).click()
+  await expect(editor).toHaveValue(custom)
+  await expect(page.getByText('Using a customized prompt.')).toBeVisible()
+  await page.getByText('Tool instructions', { exact: true }).click()
   await page.screenshot({
-    path: testInfo.outputPath('admin-instructions-desktop.png'),
+    path: testInfo.outputPath('admin-prompt-desktop.png'),
     fullPage: true,
   })
-  await page.setViewportSize({ width: 390, height: 844 })
-  await page.getByText('New image assembly', { exact: true }).click()
+
+  await page
+    .getByRole('button', { name: 'Reset to original prompt', exact: true })
+    .click()
   await expect(
-    page.getByText('Website logo available', { exact: false }),
+    page.getByText(
+      'Original prompt restored. New wizard conversations will use it.',
+    ),
+  ).toBeVisible()
+  await expect(editor).toHaveValue(original.prompt)
+  const restored = await (
+    await context.request.get('/api/admin/art-wizard')
+  ).json()
+  expect(restored.isDefault).toBe(true)
+  expect(restored.prompt).toBe(original.prompt)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.getByText('New image frame', { exact: true }).click()
+  await expect(
+    page.getByText(original.instructions[1].text, { exact: true }),
   ).toBeVisible()
   expect(
     await page.evaluate(
@@ -80,7 +106,7 @@ test('admin can inspect protected instructions and persist only the image prompt
     ),
   ).toBe(true)
   await page.screenshot({
-    path: testInfo.outputPath('admin-instructions-mobile.png'),
+    path: testInfo.outputPath('admin-prompt-mobile.png'),
     fullPage: true,
   })
 })
