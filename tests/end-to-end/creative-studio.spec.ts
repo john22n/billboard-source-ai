@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { SignJWT } from 'jose'
 import { expect, test } from 'playwright/test'
-import { jwtSecret, userId } from './environment'
+import { baseUrl, jwtSecret, userId } from './environment'
 
 const answers = [
   {
@@ -80,7 +80,7 @@ for (const placement of ['Form views', 'Lead tools']) {
       {
         name: 'auth_token',
         value: token,
-        url: 'http://localhost:3000',
+        url: baseUrl,
         httpOnly: true,
         sameSite: 'Lax',
       },
@@ -169,8 +169,9 @@ for (const placement of ['Form views', 'Lead tools']) {
       })
     })
     // Prevent accidental calls to external maps, analytics, or communication providers.
-    await page.route(/^https?:\/\/(?!localhost:3000(?:\/|$))/, (route) =>
-      route.abort(),
+    await page.route(
+      (url) => /^https?:$/.test(url.protocol) && url.origin !== baseUrl,
+      (route) => route.abort(),
     )
 
     await page.goto('/dashboard')
@@ -180,7 +181,7 @@ for (const placement of ['Form views', 'Lead tools']) {
     await expect(page.getByText('Billboard Lead Form')).toHaveCount(0)
     await page.getByRole('button', { name: 'Toggle Sidebar' }).click()
     await expect(
-      page.getByRole('link', { name: 'Creative Studio', exact: true }),
+      page.getByRole('link', { name: 'Billboard Source AI.', exact: true }),
     ).toBeVisible()
     await page.screenshot({
       path: testInfo.outputPath('gpp3-sidebar.png'),
@@ -327,9 +328,12 @@ for (const placement of ['Form views', 'Lead tools']) {
     const choose = async (
       files: { name: string; mimeType: string; buffer: Buffer }[],
     ) => {
-      const chooser = page.waitForEvent('filechooser')
       await studio
-        .getByRole('button', { name: 'Attach file', exact: true })
+        .getByRole('button', { name: 'Add attachment', exact: true })
+        .click()
+      const chooser = page.waitForEvent('filechooser')
+      await page
+        .getByRole('menuitem', { name: 'Add photos & files', exact: true })
         .click()
       await (await chooser).setFiles(files)
     }
@@ -485,10 +489,18 @@ for (const placement of ['Form views', 'Lead tools']) {
       await studio
         .getByRole('textbox', { name: 'Your answer', exact: true })
         .fill(answer.value)
-      await studio.getByRole('button', { name: 'Send answer' }).click()
+      await studio
+        .getByRole('textbox', { name: 'Your answer', exact: true })
+        .press('Enter')
       await expect(
         studio.getByRole('textbox', { name: 'Your answer', exact: true }),
       ).toHaveValue('')
+      await expect(
+        studio.getByRole('textbox', { name: 'Your answer', exact: true }),
+      ).toBeFocused()
+      await expect(
+        studio.getByRole('textbox', { name: 'Your answer', exact: true }),
+      ).toBeEditable()
     }
     expect(answerCount).toBe(7)
     // The required-copy question appears once, not again after the website-content answer.

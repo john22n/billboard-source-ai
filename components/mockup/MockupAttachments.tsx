@@ -2,8 +2,15 @@
 
 import { useRef, useState, type ReactNode } from 'react'
 import Image from 'next/image'
-import { Paperclip, X } from 'lucide-react'
+import { Paperclip, Plus, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { useMockupStore } from '@/stores/mockupStore'
 import { attachmentLabel, MAX_ATTACHMENTS } from '@/lib/mockup/attachments'
 import { prepareAttachment } from '@/lib/mockup/prepare-attachment'
@@ -68,33 +75,18 @@ export function MockupAttachments({ children }: { children: ReactNode }) {
           void addFiles(Array.from(event.dataTransfer.files))
       }}
     >
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <input
-          ref={picker}
-          type="file"
-          accept="image/png,image/jpeg,application/pdf,.png,.jpg,.jpeg,.pdf"
-          hidden
-          aria-label="Reference files"
-          onChange={(event) => {
-            if (event.target.files?.length)
-              void addFiles(Array.from(event.target.files))
-            event.target.value = ''
-          }}
-        />
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={busy || !sessionKey}
-          onClick={() => picker.current?.click()}
-        >
-          <Paperclip className="size-4" data-icon="inline-start" />
-          Attach file
-        </Button>
-        <span className="text-xs text-muted-foreground">
-          PNG, JPEG, PDF · 1 file · 10 MB · PDFs up to 50 pages
-        </span>
-      </div>
+      <input
+        ref={picker}
+        type="file"
+        accept="image/png,image/jpeg,application/pdf,.png,.jpg,.jpeg,.pdf"
+        hidden
+        aria-label="Reference files"
+        onChange={(event) => {
+          if (event.target.files?.length)
+            void addFiles(Array.from(event.target.files))
+          event.target.value = ''
+        }}
+      />
       {state.attachments.length > 0 && (
         <>
           <ul aria-label="Reference attachments" className="space-y-2">
@@ -161,7 +153,42 @@ export function MockupAttachments({ children }: { children: ReactNode }) {
           </p>
         </>
       )}
-      {children}
+      <div className="flex items-center gap-1 rounded-2xl border p-1.5">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="shrink-0 rounded-full bg-muted"
+              aria-label="Add attachment"
+              disabled={busy || !sessionKey}
+            >
+              <Plus className="size-5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            side="top"
+            sideOffset={24}
+            className="w-64 rounded-xl p-2"
+          >
+            <DropdownMenuItem
+              onSelect={() => picker.current?.click()}
+              className="gap-3 rounded-lg py-2.5"
+            >
+              <Paperclip className="size-4" />
+              Add photos &amp; files
+            </DropdownMenuItem>
+            <DropdownMenuLabel className="px-2 pt-2 text-xs font-normal text-muted-foreground">
+              PNG, JPEG or PDF · 1 file · 10 MB
+              <br />
+              PDFs up to 50 pages
+            </DropdownMenuLabel>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {children}
+      </div>
     </div>
   )
 }

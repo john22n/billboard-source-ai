@@ -75,7 +75,8 @@ it('sends intake, blocks duplicates while pending, and advances the conversation
   )
   await act(async () => root.render(<ArtMockupWizard />))
   await send('alpine.example')
-  expect(container.querySelector('textarea')?.disabled).toBe(true)
+  expect(container.querySelector('textarea')?.readOnly).toBe(true)
+  expect(container.querySelector('textarea')?.disabled).toBe(false)
   await send('Duplicate')
   expect(fetch).toHaveBeenCalledTimes(1)
   expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string)).toEqual(
@@ -100,6 +101,7 @@ it('sends intake, blocks duplicates while pending, and advances the conversation
     questions.goal,
   )
   expect(container.querySelector('textarea')?.value).toBe('')
+  expect(container.querySelector('textarea')?.readOnly).toBe(false)
   expect(useMockupStore.getState().busy).toBe(false)
 })
 
@@ -163,7 +165,7 @@ it('shares pending drafts and failures across Studio views and clears them on re
   await send('alpine.example')
   await act(async () => root.render(<ArtMockupWizard key="inline" />))
   expect(container.querySelector('textarea')?.value).toBe('alpine.example')
-  expect(container.querySelector('textarea')?.disabled).toBe(true)
+  expect(container.querySelector('textarea')?.readOnly).toBe(true)
   await act(async () =>
     finish(Response.json({ error: 'Try again later.' }, { status: 502 })),
   )
@@ -263,7 +265,7 @@ it('preserves the selected image on revision failure and fences late responses a
       .querySelector('form')!
       .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
   )
-  expect(textarea.disabled).toBe(true)
+  expect(textarea.readOnly).toBe(true)
   await act(async () => button('Start Mockup').click())
   await act(async () => finish(Response.json({ image, remaining: 8 })))
   expect(useMockupStore.getState().state.image).toBeNull()

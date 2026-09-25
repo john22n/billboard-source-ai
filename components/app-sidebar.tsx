@@ -97,7 +97,9 @@ export function AppSidebar({
             >
               <a href="#">
                 <BrainCircuit className="!size-5" />
-                <span className="text-base font-semibold">Creative Studio</span>
+                <span className="text-base font-semibold">
+                  Billboard Source AI.
+                </span>
               </a>
             </SidebarMenuButton>
           </SidebarMenuItem>
