@@ -104,7 +104,7 @@ it.each([
   },
 )
 
-it('accepts three references but rejects a fourth', async () => {
+it('accepts one reference but rejects a second file', async () => {
   const file = {
     id: 'ref',
     name: 'ref.jpg',
@@ -112,14 +112,12 @@ it('accepts three references but rejects a fourth', async () => {
     dataUrl: 'data:image/jpeg;base64,/9j/2Q==',
   }
   mocks.edit.mockResolvedValue({ data: [{ b64_json: '/9j/2Q==' }] })
+  expect((await POST(request({ ...brief, attachments: [file] }))).status).toBe(
+    200,
+  )
+  expect(mocks.edit.mock.calls[0][0].image).toHaveLength(1)
   expect(
-    (await POST(request({ ...brief, attachments: Array(3).fill(file) })))
-      .status,
-  ).toBe(200)
-  expect(mocks.edit.mock.calls[0][0].image).toHaveLength(3)
-  expect(
-    (await POST(request({ ...brief, attachments: Array(4).fill(file) })))
-      .status,
+    (await POST(request({ ...brief, attachments: [file, file] }))).status,
   ).toBe(400)
   expect(mocks.edit).toHaveBeenCalledTimes(1)
 })
