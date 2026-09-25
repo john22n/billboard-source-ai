@@ -120,7 +120,15 @@ for (const placement of ['Form views', 'Lead tools']) {
     await page.route('**/api/mockup/intake', async (route) => {
       const body = route.request().postDataJSON()
       const answer = answers[answerCount++]
-      expect(body).toEqual({ intake, message: answer.value, review: false })
+      expect(body).toMatchObject({
+        intake,
+        message: answer.value,
+        review: false,
+      })
+      expect(
+        body.attachments.map((file: { name: string }) => file.name),
+      ).toEqual(['logo.png', 'scene.pdf', 'photo.jpg'])
+      expect(body.attachmentInstructions).toContain(answer.value)
       intake = { ...intake, [answer.field]: answer.value }
       return route.fulfill({
         json: {
@@ -235,6 +243,120 @@ for (const placement of ['Form views', 'Lead tools']) {
         .click()
     }
 
+    const fixturePage = await context.newPage()
+    await fixturePage.setViewportSize({ width: 600, height: 300 })
+    await fixturePage.setContent(
+      '<html><body style="margin:0;background:#c8e5f5"><div style="height:200px;display:grid;place-items:center;font: bold 48px sans-serif;color:#19392d">ALPINE</div><div style="height:100px;background:#45855a"></div></body></html>',
+    )
+    const logo = await fixturePage.screenshot({ type: 'png' })
+    const pdf = await fixturePage.pdf({
+      width: '600px',
+      height: '300px',
+      printBackground: true,
+    })
+    const photo = await fixturePage.screenshot({ type: 'jpeg' })
+    await fixturePage.close()
+    const choose = async (
+      files: { name: string; mimeType: string; buffer: Buffer }[],
+    ) => {
+      const chooser = page.waitForEvent('filechooser')
+      await studio.getByRole('button', { name: 'Attach files' }).click()
+      await (await chooser).setFiles(files)
+    }
+    await choose([
+      {
+        name: 'bad.html',
+        mimeType: 'text/html',
+        buffer: Buffer.from('<h1>bad</h1>'),
+      },
+    ])
+    await expect(studio.getByRole('alert')).toContainText('PNG, JPEG, or PDF')
+    await choose([
+      {
+        name: 'large.png',
+        mimeType: 'image/png',
+        buffer: Buffer.alloc(10 * 1024 * 1024 + 1),
+      },
+    ])
+    await expect(studio.getByRole('alert')).toContainText(
+      'no larger than 10 MB',
+    )
+    await choose([
+      {
+        name: 'broken.pdf',
+        mimeType: 'application/pdf',
+        buffer: Buffer.from('%PDF-broken'),
+      },
+    ])
+    await expect(studio.getByRole('alert')).toContainText(
+      'Could not prepare broken.pdf',
+    )
+    await choose([
+      { name: 'logo.png', mimeType: 'image/png', buffer: logo },
+      { name: 'scene.pdf', mimeType: 'application/pdf', buffer: pdf },
+      { name: 'photo.jpg', mimeType: 'image/jpeg', buffer: photo },
+    ])
+    await expect(
+      studio.getByRole('img', { name: 'scene.pdf (PDF page 1 only)' }),
+    ).toBeVisible()
+    await expect(studio.getByRole('alert')).toHaveCount(0)
+    const colors = await studio
+      .getByRole('img', { name: 'scene.pdf (PDF page 1 only)' })
+      .evaluate((element) => {
+        const image = element as HTMLImageElement
+        const canvas = document.createElement('canvas')
+        canvas.width = image.naturalWidth
+        canvas.height = image.naturalHeight
+        const context = canvas.getContext('2d')!
+        context.drawImage(image, 0, 0)
+        return [
+          [...context.getImageData(5, 5, 1, 1).data].slice(0, 3),
+          [...context.getImageData(5, canvas.height - 5, 1, 1).data].slice(
+            0,
+            3,
+          ),
+        ]
+      })
+    // Independent colors from the PDF fixture: sky #c8e5f5 and ground #45855a.
+    for (const [index, expected] of [
+      [200, 229, 245],
+      [69, 133, 90],
+    ].entries())
+      expected.forEach((value, channel) =>
+        expect(Math.abs(colors[index][channel] - value)).toBeLessThan(4),
+      )
+    await choose([{ name: 'extra.png', mimeType: 'image/png', buffer: logo }])
+    await expect(studio.getByRole('alert')).toContainText(
+      'up to 3 reference files',
+    )
+    await studio.getByRole('button', { name: 'Remove photo.jpg' }).click()
+    await expect(
+      studio.getByRole('img', { name: 'photo.jpg', exact: true }),
+    ).toHaveCount(0)
+    const dropped = await page.evaluateHandle(
+      ({ bytes }) => {
+        const transfer = new DataTransfer()
+        transfer.items.add(
+          new File([Uint8Array.from(bytes)], 'photo.jpg', {
+            type: 'image/jpeg',
+          }),
+        )
+        return transfer
+      },
+      { bytes: [...photo] },
+    )
+    await studio
+      .getByRole('textbox', { name: 'Your answer', exact: true })
+      .dispatchEvent('drop', { dataTransfer: dropped })
+    await dropped.dispose()
+    await expect(
+      studio.getByRole('img', { name: 'photo.jpg', exact: true }),
+    ).toBeVisible()
+    await studio.screenshot({
+      path: testInfo.outputPath('studio-attachments.png'),
+      animations: 'disabled',
+    })
+
     for (const answer of answers.slice(answerCount)) {
       await expect(studio.getByText(answer.question)).toBeVisible()
       await studio
@@ -291,6 +413,19 @@ for (const placement of ['Form views', 'Lead tools']) {
       },
       summary,
     })
+    const references = generations[0].attachments as {
+      sourceType: string
+      dataUrl: string
+    }[]
+    expect(references.map((file) => file.sourceType)).toEqual([
+      'image/png',
+      'application/pdf',
+      'image/jpeg',
+    ])
+    for (const file of references) {
+      expect(file.dataUrl).toMatch(/^data:image\/(png|jpeg);base64,/)
+      expect(file.dataUrl.length).toBeLessThanOrEqual(400_000)
+    }
     const download = studio.getByRole('link', {
       name: 'Download selected mockup',
     })
@@ -345,6 +480,7 @@ for (const placement of ['Form views', 'Lead tools']) {
       approved: false,
       previous: image,
       revision: 'Make the headline larger',
+      attachments: references,
     })
 
     if (placement === 'Lead tools') {
@@ -377,6 +513,15 @@ for (const placement of ['Form views', 'Lead tools']) {
       await expect(
         page.getByRole('button', { name: 'Nutshell', exact: true }),
       ).toBeInViewport()
+      await revision.fill('Keep the background and simplify the headline')
+      const sendRevision = studio.getByRole('button', {
+        name: 'Generate revision',
+      })
+      await sendRevision.evaluate((button) =>
+        button.scrollIntoView({ block: 'center' }),
+      )
+      await expect(sendRevision).toBeInViewport({ ratio: 1 })
+      await sendRevision.click({ trial: true })
       await page.screenshot({
         path: testInfo.outputPath('studio-mobile.png'),
         animations: 'disabled',
@@ -391,6 +536,9 @@ for (const placement of ['Form views', 'Lead tools']) {
 
     await page.reload()
     await tab.click()
+    await expect(
+      studio.getByRole('img', { name: 'scene.pdf (PDF page 1 only)' }),
+    ).toBeVisible()
     await expect(selected).toHaveAttribute('src', revisedImage.dataUrl)
     await expect(download).toHaveAttribute(
       'download',
@@ -404,6 +552,9 @@ for (const placement of ['Form views', 'Lead tools']) {
       studio.getByText(answers[0].question, { exact: true }),
     ).toBeVisible()
     await expect(studio.getByRole('log')).toBeEmpty()
+    await expect(studio.getByRole('button', { name: /^Remove / })).toHaveCount(
+      0,
+    )
     expect(generations).toHaveLength(3)
     expect(unexpected).toEqual([])
   })

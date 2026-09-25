@@ -23,6 +23,7 @@ import {
 } from '@/lib/mockup/intake'
 import { ApprovalSummary } from './ApprovalSummary'
 import { AttachMockup } from './AttachMockup'
+import { MockupAttachments } from './MockupAttachments'
 
 export function ArtMockupWizard() {
   const { state, sessionKey, epoch, start } = useMockupStore()
@@ -162,16 +163,7 @@ function MockupConversation() {
               </p>
             </figure>
           )}
-          {isPending && (
-            <p
-              role="status"
-              className="animate-pulse text-sm text-muted-foreground"
-            >
-              {state.summary
-                ? 'Rendering your billboard. This can take a couple of minutes. Your current image stays selected.'
-                : 'Reading your answer and preparing the next step…'}
-            </p>
-          )}
+          <MockupProgress />
           {error && (
             <p
               role="alert"
@@ -190,6 +182,20 @@ function MockupConversation() {
       </div>
       <MockupComposer draft={draft} setDraft={setDraft} send={send} />
     </section>
+  )
+}
+
+function MockupProgress() {
+  const { busy, preparingFiles, state } = useMockupStore()
+  if (!busy) return null
+  return (
+    <p role="status" className="animate-pulse text-sm text-muted-foreground">
+      {preparingFiles
+        ? 'Preparing file previews…'
+        : state.summary
+          ? 'Rendering your billboard. This can take a couple of minutes. Your current image stays selected.'
+          : 'Reading your answer and preparing the next step…'}
+    </p>
   )
 }
 
@@ -291,7 +297,7 @@ function MockupComposer({
   const messageId = useId()
   const isLoading = isPending || !sessionKey
   return (
-    <footer className="border-t bg-background px-4 py-3 sm:px-6">
+    <footer className="max-h-[65%] shrink-0 overflow-y-auto border-t bg-background px-4 py-3 sm:px-6">
       <form
         className="mx-auto max-w-3xl space-y-2"
         aria-busy={isPending}
@@ -300,43 +306,45 @@ function MockupComposer({
           send()
         }}
       >
-        <Label htmlFor={messageId} className="sr-only">
-          {state.image ? 'Revision instructions' : 'Your answer'}
-        </Label>
-        <div className="flex items-end gap-2 rounded-xl border p-2">
-          <Textarea
-            id={messageId}
-            value={draft}
-            disabled={isLoading}
-            onChange={(e) => setDraft(e.target.value)}
-            maxLength={4000}
-            rows={2}
-            className="min-h-14 resize-none border-0 shadow-none focus-visible:ring-0"
-            placeholder={
-              state.image
-                ? 'Make the headline bigger, simplify, or try a more premium feel…'
-                : 'Your answer… (or say skip)'
-            }
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                send()
+        <MockupAttachments>
+          <Label htmlFor={messageId} className="sr-only">
+            {state.image ? 'Revision instructions' : 'Your answer'}
+          </Label>
+          <div className="flex items-end gap-2 rounded-xl border p-2">
+            <Textarea
+              id={messageId}
+              value={draft}
+              disabled={isLoading}
+              onChange={(e) => setDraft(e.target.value)}
+              maxLength={4000}
+              rows={2}
+              className="min-h-14 resize-none border-0 shadow-none focus-visible:ring-0"
+              placeholder={
+                state.image
+                  ? 'Make the headline bigger, simplify, or try a more premium feel…'
+                  : 'Your answer… (or say skip)'
               }
-            }}
-          />
-          <Button
-            type="submit"
-            size="icon"
-            aria-label={state.image ? 'Generate revision' : 'Send answer'}
-            disabled={!draft.trim() || isLoading}
-          >
-            {isPending ? (
-              <LoaderCircle className="size-4 animate-spin" />
-            ) : (
-              <ArrowUp className="size-4" />
-            )}
-          </Button>
-        </div>
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  send()
+                }
+              }}
+            />
+            <Button
+              type="submit"
+              size="icon"
+              aria-label={state.image ? 'Generate revision' : 'Send answer'}
+              disabled={!draft.trim() || isLoading}
+            >
+              {isPending ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : (
+                <ArrowUp className="size-4" />
+              )}
+            </Button>
+          </div>
+        </MockupAttachments>
         <p role="status" className="text-xs text-muted-foreground">
           {state.image
             ? 'Sending a revision immediately starts another image request—no additional approval step.'
@@ -380,16 +388,31 @@ function requestBody(
       intake: state.intake,
       message: text,
       review: !nextQuestion(state.intake),
+      ...(state.attachments.length
+        ? {
+            attachments: state.attachments,
+            attachmentInstructions: [
+              ...state.messages
+                .filter((message) => message.role === 'user')
+                .map((message) => message.text),
+              text,
+            ]
+              .join('\n')
+              .slice(-8000),
+          }
+        : {}),
     }
+  const brand = state.brand ?? { logo: null, receipt: null, notes: '' }
   return {
     intake: state.intake,
     summary: state.summary,
     approved: !state.image,
     previous: state.image,
     revision: text,
-    logo: state.brand?.logo || null,
-    logoReceipt: state.brand?.receipt || null,
-    brandNotes: state.brand?.notes || '',
+    logo: brand.logo,
+    logoReceipt: brand.receipt,
+    brandNotes: brand.notes,
+    ...(state.attachments.length ? { attachments: state.attachments } : {}),
   }
 }
 
