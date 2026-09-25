@@ -189,7 +189,7 @@ it('shares pending drafts and failures across Studio views and clears them on re
   expect(container.querySelectorAll('[role="alert"]')).toHaveLength(0)
 })
 
-it('keeps only the orange summary and generate button, without the review section', async () => {
+it('keeps a brief copy summary, caution, and generate button without editable review fields', async () => {
   useMockupStore
     .getState()
     .update({ summary: { ...summary, caution: 'Keep the headline short.' } })
@@ -200,7 +200,7 @@ it('keeps only the orange summary and generate button, without the review sectio
   expect(generate).not.toHaveBeenCalled()
   expect(container.querySelector('input, textarea')).toBeNull()
   expect(container.textContent).toContain('Keep the headline short.')
-  expect(container.textContent).not.toContain('Smile bigger')
+  expect(container.textContent).toContain('Smile bigger')
   expect(container.textContent).not.toContain('Visual direction')
   expect(container.textContent).not.toContain('Billboard summary')
   await act(async () => button('Generate mockup').click())

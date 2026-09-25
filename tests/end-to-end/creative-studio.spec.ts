@@ -176,6 +176,19 @@ for (const placement of ['Form views', 'Lead tools']) {
     await page.goto('/dashboard')
     await expect(page).toHaveURL(/\/dashboard$/)
     await page.setViewportSize({ width: 1440, height: 1000 })
+    await expect(page.getByText('GPP3', { exact: true })).toBeVisible()
+    await expect(page.getByText('Billboard Lead Form')).toHaveCount(0)
+    await page.getByRole('button', { name: 'Toggle Sidebar' }).click()
+    await expect(
+      page.getByRole('link', { name: 'Creative Studio', exact: true }),
+    ).toBeVisible()
+    await page.screenshot({
+      path: testInfo.outputPath('gpp3-sidebar.png'),
+      animations: 'disabled',
+    })
+    await page
+      .getByRole('button', { name: 'Close sidebar', exact: true })
+      .click()
     if (placement === 'Lead tools') {
       await page
         .getByPlaceholder('Company Name', { exact: true })
@@ -198,6 +211,16 @@ for (const placement of ['Form views', 'Lead tools']) {
     await expect(
       studio.getByRole('textbox', { name: 'Your answer', exact: true }),
     ).toBeEnabled()
+    await expect(
+      studio.getByText('One billboard. One clear idea.', { exact: false }),
+    ).toHaveCount(0)
+    await expect(
+      studio.getByText('Active session only', { exact: false }),
+    ).toHaveCount(0)
+    await page.screenshot({
+      path: testInfo.outputPath('gpp3-studio.png'),
+      animations: 'disabled',
+    })
     if (placement === 'Lead tools') {
       await expect(
         page.getByPlaceholder('Company Name', { exact: true }),
@@ -206,7 +229,7 @@ for (const placement of ['Form views', 'Lead tools']) {
         studio.getByText(
           'I’ve brought over the usable facts from your current Lead Form.',
         ),
-      ).toBeVisible()
+      ).toHaveCount(0)
       const draft = studio.getByRole('textbox', {
         name: 'Your answer',
         exact: true,
@@ -475,6 +498,16 @@ for (const placement of ['Form views', 'Lead tools']) {
     await expect(
       studio.getByText('Billboard summary', { exact: true }),
     ).toHaveCount(0)
+    const brief = studio.getByRole('region', { name: 'Brief summary' })
+    await expect(
+      brief.getByRole('heading', { name: summary.headline }),
+    ).toBeVisible()
+    await expect(
+      brief.getByText(summary.supporting, { exact: true }),
+    ).toBeVisible()
+    await expect(
+      brief.getByText(summary.contact, { exact: true }),
+    ).toBeVisible()
     await expect(
       studio.getByText(summary.caution, { exact: true }),
     ).toBeVisible()
@@ -497,6 +530,18 @@ for (const placement of ['Form views', 'Lead tools']) {
       name: 'Selected outdoor billboard concept for Example AI',
     })
     await expect(selected).toBeVisible()
+    await expect(
+      studio.getByText(
+        'Concept only · Check text and brand details before sharing.',
+      ),
+    ).toBeVisible()
+    await expect(
+      studio.getByText('This selected image accompanies', { exact: false }),
+    ).toHaveCount(0)
+    await page.screenshot({
+      path: testInfo.outputPath('gpp3-result.png'),
+      animations: 'disabled',
+    })
     await expect(
       studio.getByRole('button', {
         name: 'Add to existing Nutshell lead',
