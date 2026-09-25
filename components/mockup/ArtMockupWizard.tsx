@@ -17,10 +17,13 @@ import { useFormStore } from '@/stores/formStore'
 import { getErrorMessage } from '@/lib/error-handling'
 import {
   MAX_MESSAGES,
+  MOCKUP_READY,
   START_COMMAND,
+  WIZARD_ERROR,
   type ChatMessage,
   type MockupState,
 } from '@/lib/mockup/state'
+import { readWizardReply, replyText } from '@/lib/mockup/stream'
 import { AttachMockup } from './AttachMockup'
 import { MockupAttachments } from './MockupAttachments'
 
@@ -39,13 +42,14 @@ function MockupConversation() {
     draft,
     error,
     opening,
+    pending,
     setDraft,
   } = useMockupStore()
   const end = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     end.current?.scrollIntoView({ block: 'nearest' })
-  }, [state.messages.length, isPending])
+  }, [state.messages.length, isPending, pending?.reply.length])
 
   // "Start" is sent on the rep's behalf so the wizard opens with Question 1.
   useEffect(() => {
@@ -81,6 +85,16 @@ function MockupConversation() {
             {state.messages.map((message, index) => (
               <ConversationMessage key={index} message={message} />
             ))}
+            {pending && (
+              <ConversationMessage
+                message={{ role: 'user', text: pending.text }}
+              />
+            )}
+            {pending?.reply && (
+              <ConversationMessage
+                message={{ role: 'assistant', text: pending.reply }}
+              />
+            )}
           </div>
           {state.image && <SelectedMockup image={state.image} />}
           <MockupProgress />
@@ -287,29 +301,40 @@ function MockupComposer({
 }
 
 /**
- * Sends one user message and appends the wizard's reply. Late responses from a
- * previous mockup (a different epoch) are discarded, and a failed request keeps
- * the draft, conversation and selected image untouched.
+ * Sends one user message and appends the wizard's reply as it streams. Late
+ * chunks from a previous mockup (a different epoch) are discarded, and a failed
+ * turn restores the draft and leaves the conversation and selected image untouched.
  */
 async function sendMessage(text: string) {
   const store = useMockupStore.getState()
   if (store.busy || !store.sessionKey) return
   const { epoch, state } = store
+  const current = () => useMockupStore.getState().epoch === epoch
   const messages = [...state.messages, { role: 'user' as const, text }].slice(
     -MAX_MESSAGES,
   )
-  useMockupStore.setState({ busy: true, error: '' })
-  const outcome = await requestReply({
-    messages,
-    attachments: state.attachments,
-    image: state.image,
-    brand: state.brand,
+  useMockupStore.setState({
+    busy: true,
+    error: '',
+    draft: '',
+    pending: { text, reply: '' },
   })
-  if (useMockupStore.getState().epoch !== epoch) return
-  useMockupStore.setState({ busy: false })
+  const outcome = await requestReply(
+    {
+      messages,
+      attachments: state.attachments,
+      image: state.image,
+      brand: state.brand,
+    },
+    (reply) => {
+      if (current()) useMockupStore.setState({ pending: { text, reply } })
+    },
+  )
+  if (!current()) return
+  useMockupStore.setState({ busy: false, pending: null })
   if (outcome.kind === 'unauthorized') return useMockupStore.getState().clear()
   if (outcome.kind === 'error')
-    return useMockupStore.setState({ error: outcome.message })
+    return useMockupStore.setState({ error: outcome.message, draft: text })
   useMockupStore.getState().update({
     messages: [
       ...messages,
@@ -318,7 +343,6 @@ async function sendMessage(text: string) {
     image: outcome.image ?? state.image,
     brand: outcome.brand ?? state.brand,
   })
-  useMockupStore.setState({ draft: '' })
 }
 
 type ReplyOutcome =
@@ -331,9 +355,13 @@ type ReplyOutcome =
       brand: MockupState['brand'] | null
     }
 
-/** Posts one turn to the wizard; network and server failures become messages. */
+/**
+ * Posts one turn to the wizard and reads its UI message stream, reporting the
+ * reply text as it grows. Network, server and mid-stream failures become messages.
+ */
 async function requestReply(
   body: Pick<MockupState, 'messages' | 'attachments' | 'image' | 'brand'>,
+  onReply: (reply: string) => void,
 ): Promise<ReplyOutcome> {
   try {
     const response = await fetch('/api/mockup/chat', {
@@ -341,20 +369,35 @@ async function requestReply(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
-    const result = await response.json()
     if (response.status === 401) return { kind: 'unauthorized' }
-    if (!response.ok)
+    if (!response.ok || !response.body) {
+      const result = await response.json().catch(() => ({}))
       return {
         kind: 'error',
         message: result.error || 'Request failed. Please try again.',
       }
-    return {
-      kind: 'reply',
-      reply: String(result.reply || ''),
-      image: result.image ?? null,
-      brand: result.brand ?? null,
     }
+    return await streamedReply(response.body, onReply)
   } catch (err) {
     return { kind: 'error', message: getErrorMessage(err) }
+  }
+}
+
+/** Reads the streamed turn; an image with no words gets the standard ready message. */
+async function streamedReply(
+  body: ReadableStream<Uint8Array>,
+  onReply: (reply: string) => void,
+): Promise<ReplyOutcome> {
+  const message = await readWizardReply(body, (update) =>
+    onReply(replyText(update)),
+  )
+  const image = message?.metadata?.image ?? null
+  const reply = replyText(message).trim() || (image ? MOCKUP_READY : '')
+  if (!reply) return { kind: 'error', message: WIZARD_ERROR }
+  return {
+    kind: 'reply',
+    reply,
+    image,
+    brand: message?.metadata?.brand ?? null,
   }
 }

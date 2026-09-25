@@ -2,6 +2,13 @@
 import React, { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import {
+  createUIMessageStream,
+  createUIMessageStreamResponse,
+  type InferUIMessageChunk,
+  type UIMessageStreamWriter,
+} from 'ai'
+import type { WizardReply } from '@/lib/mockup/stream'
 import { ArtMockupWizard } from './ArtMockupWizard'
 import { AttachMockup } from './AttachMockup'
 import { useMockupSession } from '@/hooks/useMockupSession'
@@ -42,6 +49,43 @@ const button = (text: string) => {
 }
 const body = (call = 0) =>
   JSON.parse(vi.mocked(fetch).mock.calls[call][1]!.body as string)
+const log = () => container.querySelector('[role="log"]')?.textContent ?? ''
+
+/** A UI message stream response the test writes to chunk by chunk. */
+function openStream() {
+  let writer!: UIMessageStreamWriter<WizardReply>
+  let done!: () => void
+  const response = createUIMessageStreamResponse({
+    stream: createUIMessageStream<WizardReply>({
+      execute: ({ writer: current }) => {
+        writer = current
+        return new Promise<void>((resolve) => {
+          done = resolve
+        })
+      },
+    }),
+  })
+  return {
+    response,
+    write: (chunk: InferUIMessageChunk<WizardReply>) => writer.write(chunk),
+    close: () => done(),
+  }
+}
+
+/** A complete wizard turn, streamed the way the chat route sends it. */
+function streamed(reply: string, metadata?: WizardReply['metadata']) {
+  const stream = openStream()
+  stream.write({ type: 'start' })
+  stream.write({ type: 'text-start', id: 't' })
+  stream.write({ type: 'text-delta', id: 't', delta: reply })
+  stream.write({ type: 'text-end', id: 't' })
+  stream.write({
+    type: 'finish',
+    messageMetadata: metadata ?? { image: null, brand: null },
+  })
+  stream.close()
+  return stream.response
+}
 
 async function send(text: string) {
   const input = container.querySelector('textarea')!
@@ -61,7 +105,7 @@ async function send(text: string) {
 
 it('sends Start on the rep’s behalf once, even with two Studio views mounted', async () => {
   vi.mocked(fetch).mockResolvedValueOnce(
-    Response.json({ reply: 'What is the advertiser’s name?' }),
+    streamed('What is the advertiser’s name?'),
   )
   await act(async () =>
     root.render(
@@ -106,6 +150,7 @@ it('sends the conversation, blocks duplicates while pending, and appends the rep
   )
   await act(async () => root.render(<ArtMockupWizard />))
   await send('alpine.example')
+  expect(container.querySelector('textarea')?.value).toBe('')
   expect(container.querySelector('textarea')?.readOnly).toBe(true)
   expect(container.querySelector('textarea')?.disabled).toBe(false)
   await send('Duplicate')
@@ -120,21 +165,20 @@ it('sends the conversation, blocks duplicates while pending, and appends the rep
     brand: null,
   })
   await act(async () =>
-    finish(Response.json({ reply: 'What is the goal?', brand, image: null })),
+    finish(streamed('What is the goal?', { brand, image: null })),
   )
   expect(container.querySelector('[role="log"]')?.textContent).toContain(
     'What is the goal?',
   )
   expect(useMockupStore.getState().state.brand).toEqual(brand)
   expect(useMockupStore.getState().state.image).toBeNull()
-  expect(container.querySelector('textarea')?.value).toBe('')
   expect(container.querySelector('textarea')?.readOnly).toBe(false)
   expect(useMockupStore.getState().busy).toBe(false)
 })
 
 it('treats Start as a local reset instead of a wizard message', async () => {
   useMockupStore.getState().update({ image, brand })
-  vi.mocked(fetch).mockResolvedValueOnce(Response.json({ reply: 'Question 1' }))
+  vi.mocked(fetch).mockResolvedValueOnce(streamed('Question 1'))
   await act(async () => root.render(<ArtMockupWizard />))
   await send('start mockup')
   expect(useMockupStore.getState().state.image).toBeNull()
@@ -156,13 +200,83 @@ it('ignores an old response after starting a different mockup', async () => {
   await act(async () => root.render(<ArtMockupWizard />))
   await send('Old advertiser')
   await act(async () => useMockupStore.getState().start())
-  await act(async () => finish(Response.json({ reply: 'Old reply', image })))
+  await act(async () => finish(streamed('Old reply', { image, brand: null })))
   expect(useMockupStore.getState().state.image).toBeNull()
   expect(
     useMockupStore
       .getState()
       .state.messages.some((m) => m.text === 'Old reply'),
   ).toBe(false)
+})
+
+it('shows the reply as it streams and commits it once when the turn finishes', async () => {
+  const stream = openStream()
+  vi.mocked(fetch).mockResolvedValueOnce(stream.response)
+  await act(async () => root.render(<ArtMockupWizard />))
+  await send('alpine.example')
+  expect(log()).toContain('alpine.example')
+  await act(async () => {
+    stream.write({ type: 'start' })
+    stream.write({ type: 'text-start', id: 't' })
+    stream.write({ type: 'text-delta', id: 't', delta: 'Thanks. What is ' })
+  })
+  await vi.waitFor(() => expect(log()).toContain('Thanks. What is '))
+  expect(useMockupStore.getState().state.messages).toEqual([])
+  expect(useMockupStore.getState().busy).toBe(true)
+  await act(async () => {
+    stream.write({ type: 'text-delta', id: 't', delta: 'the goal?' })
+    stream.write({ type: 'text-end', id: 't' })
+    stream.write({
+      type: 'finish',
+      messageMetadata: { image: null, brand },
+    })
+    stream.close()
+  })
+  await vi.waitFor(() =>
+    expect(useMockupStore.getState().state.messages).toEqual([
+      { role: 'user', text: 'alpine.example' },
+      { role: 'assistant', text: 'Thanks. What is the goal?' },
+    ]),
+  )
+  expect(useMockupStore.getState().state.brand).toEqual(brand)
+  expect(log().match(/Thanks\. What is the goal\?/g)).toHaveLength(1)
+  expect(useMockupStore.getState().pending).toBeNull()
+})
+
+it('supplies the ready message when the wizard renders an image without words', async () => {
+  vi.mocked(fetch).mockResolvedValueOnce(streamed('', { image, brand: null }))
+  await act(async () => root.render(<ArtMockupWizard />))
+  await send('Professional')
+  await vi.waitFor(() =>
+    expect(useMockupStore.getState().state.image).toEqual(image),
+  )
+  expect(useMockupStore.getState().state.messages.at(-1)?.text).toContain(
+    'Your mockup is ready',
+  )
+})
+
+it('treats a streamed error as a failed turn and restores the draft', async () => {
+  useMockupStore.getState().update({ image })
+  const stream = openStream()
+  vi.mocked(fetch).mockResolvedValueOnce(stream.response)
+  await act(async () => root.render(<ArtMockupWizard />))
+  await send('Bigger text')
+  await act(async () => {
+    stream.write({ type: 'start' })
+    stream.write({ type: 'text-start', id: 't' })
+    stream.write({ type: 'text-delta', id: 't', delta: 'Working on ' })
+    stream.write({ type: 'error', errorText: 'The wizard could not respond.' })
+    stream.close()
+  })
+  await vi.waitFor(() =>
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      'The wizard could not respond.',
+    ),
+  )
+  expect(useMockupStore.getState().state.messages).toEqual([])
+  expect(useMockupStore.getState().state.image).toEqual(image)
+  expect(container.querySelector('textarea')?.value).toBe('Bigger text')
+  expect(log()).not.toContain('Working on ')
 })
 
 it('keeps the selected image, brand and draft when a revision fails', async () => {
@@ -191,13 +305,13 @@ it('replaces the selected image only when the wizard returns a new one', async (
   useMockupStore.getState().update({ image })
   const revised = { ...image, id: '22222222-2222-4222-8222-222222222222' }
   vi.mocked(fetch).mockResolvedValueOnce(
-    Response.json({ reply: 'Kept the layout; nothing else changed.' }),
+    streamed('Kept the layout; nothing else changed.'),
   )
   await act(async () => root.render(<ArtMockupWizard />))
   await send('Thanks')
   expect(useMockupStore.getState().state.image).toEqual(image)
   vi.mocked(fetch).mockResolvedValueOnce(
-    Response.json({ reply: 'Here is the revision.', image: revised }),
+    streamed('Here is the revision.', { image: revised, brand: null }),
   )
   await send('Bigger text')
   expect(useMockupStore.getState().state.image).toEqual(revised)
@@ -216,14 +330,16 @@ it('shares pending drafts and failures across Studio views and clears them on re
   await act(async () => root.render(<ArtMockupWizard key="outer" />))
   await send('alpine.example')
   await act(async () => root.render(<ArtMockupWizard key="inline" />))
-  expect(container.querySelector('textarea')?.value).toBe('alpine.example')
+  expect(container.querySelector('textarea')?.value).toBe('')
   expect(container.querySelector('textarea')?.readOnly).toBe(true)
+  expect(log()).toContain('alpine.example')
   await act(async () =>
     finish(Response.json({ error: 'Try again later.' }, { status: 502 })),
   )
   expect(container.querySelector('[role="alert"]')?.textContent).toBe(
     'Try again later.',
   )
+  expect(log()).not.toContain('alpine.example')
   await act(async () =>
     root.render(
       <>
@@ -236,7 +352,7 @@ it('shares pending drafts and failures across Studio views and clears them on re
     Array.from(container.querySelectorAll('textarea'), (el) => el.value),
   ).toEqual(['alpine.example', 'alpine.example'])
   expect(container.querySelectorAll('[role="alert"]')).toHaveLength(2)
-  vi.mocked(fetch).mockResolvedValueOnce(Response.json({ reply: 'Question 1' }))
+  vi.mocked(fetch).mockResolvedValueOnce(streamed('Question 1'))
   await act(async () => button('Start Mockup').click())
   expect(
     Array.from(container.querySelectorAll('textarea'), (el) => el.value),

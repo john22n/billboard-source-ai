@@ -1,13 +1,25 @@
 import { beforeEach, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
 import { SignJWT } from 'jose'
+import {
+  createUIMessageStream,
+  createUIMessageStreamResponse,
+  type TextStreamPart,
+  type ToolSet,
+  type UIMessageStreamOptions,
+} from 'ai'
 import { defaultSystemPrompt } from '@/lib/mockup/system-prompt'
 import { toolInstructions } from '@/lib/mockup/instructions'
+import {
+  readWizardReply,
+  replyText,
+  type WizardReply,
+} from '@/lib/mockup/stream'
 
 const secret = 'test-secret-that-is-long-enough-for-hs256-signing'
 const session = { userId: 'rep', sessionStartedAt: 123, email: 'rep@x.test' }
 const mocks = vi.hoisted(() => ({
-  generateText: vi.fn(),
+  streamText: vi.fn(),
   render: vi.fn(),
   review: vi.fn(),
   rateLimit: vi.fn(),
@@ -33,7 +45,7 @@ vi.mock('@/lib/mockup/system-prompt', async (importOriginal) => ({
 vi.mock('@/db', () => ({ db: {} }))
 vi.mock('ai', async (importOriginal) => ({
   ...(await importOriginal<typeof import('ai')>()),
-  generateText: mocks.generateText,
+  streamText: mocks.streamText,
 }))
 vi.mock('@ai-sdk/openai', () => ({
   createOpenAI: () => (id: string) => ({ modelId: id }),
@@ -41,6 +53,57 @@ vi.mock('@ai-sdk/openai', () => ({
 import { POST } from './route'
 
 type Tools = Record<string, { execute: (input: unknown) => Promise<unknown> }>
+type Options = {
+  tools: Tools
+  system: string
+  messages: Array<{
+    role: string
+    content: Array<{ type: string; text?: string }>
+  }>
+}
+
+/**
+ * Stands in for streamText: runs the scripted turn (tool calls included) while
+ * the response streams, then emits the text and the route's finish metadata as
+ * a genuine AI SDK UI message stream.
+ */
+const streams =
+  (run: (options: Options) => Promise<string>) => (options: Options) => ({
+    toUIMessageStreamResponse: (
+      init: UIMessageStreamOptions<WizardReply> & { headers?: HeadersInit },
+    ) =>
+      createUIMessageStreamResponse({
+        headers: init.headers,
+        stream: createUIMessageStream<WizardReply>({
+          execute: async ({ writer }) => {
+            writer.write({ type: 'start' })
+            const text = await run(options)
+            writer.write({ type: 'text-start', id: 't' })
+            writer.write({ type: 'text-delta', id: 't', delta: text })
+            writer.write({ type: 'text-end', id: 't' })
+            writer.write({
+              type: 'finish',
+              messageMetadata: init.messageMetadata?.({
+                part: { type: 'finish' } as TextStreamPart<ToolSet>,
+              }),
+            })
+          },
+        }),
+      }),
+  })
+const replies = (text: string) => streams(async () => text)
+
+/** Reads a streamed turn the way the Creative Studio client does. */
+async function readTurn(response: Response) {
+  expect(response.status).toBe(200)
+  expect(response.headers.get('cache-control')).toBe('no-store')
+  const message = await readWizardReply(response.body!)
+  return {
+    reply: replyText(message).trim(),
+    image: message?.metadata?.image ?? null,
+    brand: message?.metadata?.brand ?? null,
+  }
+}
 const request = (body: unknown) =>
   new Request('http://localhost/api/mockup/chat', {
     method: 'POST',
@@ -86,13 +149,13 @@ it('requires a signed-in rep, a user message last, and respects the rate limit',
     (await POST(request({ messages: [{ role: 'user', text: 'Start' }] })))
       .status,
   ).toBe(429)
-  expect(mocks.generateText).not.toHaveBeenCalled()
+  expect(mocks.streamText).not.toHaveBeenCalled()
 })
 
 it('sends the editable prompt plus the protected tool frame and returns the reply', async () => {
-  mocks.generateText.mockResolvedValueOnce({
-    text: ' What is the advertiser’s name? ',
-  })
+  mocks.streamText.mockImplementationOnce(
+    replies(' What is the advertiser’s name? '),
+  )
   const response = await POST(
     request({
       messages: [
@@ -101,13 +164,12 @@ it('sends the editable prompt plus the protected tool frame and returns the repl
       ],
     }),
   )
-  expect(response.status).toBe(200)
-  expect(await response.json()).toEqual({
+  expect(await readTurn(response)).toEqual({
     reply: 'What is the advertiser’s name?',
     image: null,
     brand: null,
   })
-  const options = mocks.generateText.mock.calls[0][0]
+  const options = mocks.streamText.mock.calls[0][0]
   expect(options.system).toBe(`Custom wizard prompt\n\n${toolInstructions}`)
   expect(options.system).not.toContain(defaultSystemPrompt.slice(0, 40))
   expect(options.messages).toEqual([
@@ -126,8 +188,8 @@ it('captures the website logo out of band and signs it for later turns', async (
     logo: png,
     fallback: '',
   })
-  mocks.generateText.mockImplementationOnce(
-    async ({ tools }: { tools: Tools }) => {
+  mocks.streamText.mockImplementationOnce(
+    streams(async ({ tools }) => {
       const result = await tools.review_website.execute({
         url: 'https://alpine.example',
       })
@@ -137,31 +199,31 @@ it('captures the website logo out of band and signs it for later turns', async (
         note: '',
         evidence: 'Alpine Dental. Theme color: #123456',
       })
-      return { text: 'Thanks. What is the goal?' }
-    },
+      return 'Thanks. What is the goal?'
+    }),
   )
-  const data = await (
+  const data = await readTurn(
     await POST(
       request({ messages: [{ role: 'user', text: 'alpine.example' }] }),
-    )
-  ).json()
+    ),
+  )
   expect(data.brand).toMatchObject({
     website: 'https://alpine.example',
     logo: png,
   })
-  expect(typeof data.brand.receipt).toBe('string')
-  expect(JSON.stringify(mocks.generateText.mock.calls[0][0])).not.toContain(png)
+  expect(typeof data.brand?.receipt).toBe('string')
+  expect(JSON.stringify(mocks.streamText.mock.calls[0][0])).not.toContain(png)
 
   // The signed logo is accepted as the first reference on a later turn.
-  mocks.generateText.mockImplementationOnce(
-    async ({ tools }: { tools: Tools }) => {
+  mocks.streamText.mockImplementationOnce(
+    streams(async ({ tools }) => {
       await tools.generate_billboard.execute({
         advertiser: 'Alpine Dental',
         prompt: 'Headline "Smile Bigger"',
         revision: false,
       })
-      return { text: 'Here it is.' }
-    },
+      return 'Here it is.'
+    }),
   )
   const second = await POST(
     request({
@@ -206,7 +268,7 @@ it('rejects a tampered logo or image receipt before contacting the model', async
       )
     ).status,
   ).toBe(400)
-  expect(mocks.generateText).not.toHaveBeenCalled()
+  expect(mocks.streamText).not.toHaveBeenCalled()
 })
 
 it('renders a new billboard with uploads as references and signs the result', async () => {
@@ -216,24 +278,26 @@ it('renders a new billboard with uploads as references and signs the result', as
     sourceType: 'image/png',
     dataUrl: png,
   }
-  mocks.generateText.mockImplementationOnce(async ({ tools, messages }) => {
-    expect(messages.at(-1).content[1].text).toContain('logo.png')
-    expect(messages.at(-1).content[2].type).toBe('image')
-    const result = await tools.generate_billboard.execute({
-      advertiser: '  Alpine Dental ',
-      prompt: 'Headline "Smile Bigger" in navy',
-      revision: false,
-    })
-    expect(result).toMatchObject({ ok: true })
-    return { text: '' }
-  })
+  mocks.streamText.mockImplementationOnce(
+    streams(async ({ tools, messages }) => {
+      expect(messages.at(-1)?.content[1].text).toContain('logo.png')
+      expect(messages.at(-1)?.content[2].type).toBe('image')
+      const result = await tools.generate_billboard.execute({
+        advertiser: '  Alpine Dental ',
+        prompt: 'Headline "Smile Bigger" in navy',
+        revision: false,
+      })
+      expect(result).toMatchObject({ ok: true })
+      return ''
+    }),
+  )
   const response = await POST(
     request({
       messages: [{ role: 'user', text: 'Professional' }],
       attachments: [attachment],
     }),
   )
-  const data = await response.json()
+  const data = await readTurn(response)
   expect(mocks.render).toHaveBeenCalledWith(
     expect.stringContaining('do NOT invent a logo'),
     [png],
@@ -243,8 +307,9 @@ it('renders a new billboard with uploads as references and signs the result', as
     advertiser: 'Alpine Dental',
     dataUrl: jpeg,
   })
-  expect(data.image.id).toMatch(/^[0-9a-f-]{36}$/)
-  expect(data.reply).toContain('Your mockup is ready')
+  expect(data.image?.id).toMatch(/^[0-9a-f-]{36}$/)
+  // An image with no words: the client supplies the ready message.
+  expect(data.reply).toBe('')
   // The receipt must verify against the same session.
   const followUp = await POST(
     request({
@@ -264,17 +329,17 @@ it('edits the current image for revisions and keeps its advertiser', async () =>
     receipt: await receipt('image', jpeg, 'Alpine', id),
   }
   mocks.render.mockResolvedValueOnce('data:image/jpeg;base64,/9j/AA==')
-  mocks.generateText.mockImplementationOnce(
-    async ({ tools }: { tools: Tools }) => {
+  mocks.streamText.mockImplementationOnce(
+    streams(async ({ tools }) => {
       await tools.generate_billboard.execute({
         advertiser: 'Renamed by the model',
         prompt: 'Make the headline larger',
         revision: true,
       })
-      return { text: 'Done.' }
-    },
+      return 'Done.'
+    }),
   )
-  const data = await (
+  const data = await readTurn(
     await POST(
       request({
         messages: [{ role: 'user', text: 'Make the headline larger' }],
@@ -285,8 +350,8 @@ it('edits the current image for revisions and keeps its advertiser', async () =>
           receipt: await receipt('logo', png, '', 'alpine.example'),
         },
       }),
-    )
-  ).json()
+    ),
+  )
   expect(mocks.render).toHaveBeenCalledWith(
     expect.stringMatching(/^Edit the supplied CURRENT selected/),
     [jpeg],
@@ -295,35 +360,62 @@ it('edits the current image for revisions and keeps its advertiser', async () =>
     advertiser: 'Alpine',
     dataUrl: 'data:image/jpeg;base64,/9j/AA==',
   })
-  expect(data.image.id).not.toBe(id)
+  expect(data.image?.id).not.toBe(id)
 })
 
 it('reports rendering failures to the model instead of failing the turn', async () => {
   mocks.render.mockRejectedValueOnce(new Error('provider down'))
-  mocks.generateText.mockImplementationOnce(
-    async ({ tools }: { tools: Tools }) => {
+  mocks.streamText.mockImplementationOnce(
+    streams(async ({ tools }) => {
       const result = await tools.generate_billboard.execute({
         advertiser: 'Alpine',
         prompt: 'x',
         revision: false,
       })
       expect(result).toMatchObject({ ok: false })
-      return { text: 'The image failed; shall I retry?' }
-    },
+      return 'The image failed; shall I retry?'
+    }),
   )
   const response = await POST(
     request({ messages: [{ role: 'user', text: 'Generate' }] }),
   )
-  expect(response.status).toBe(200)
-  expect(await response.json()).toEqual({
+  expect(await readTurn(response)).toEqual({
     reply: 'The image failed; shall I retry?',
     image: null,
     brand: null,
   })
 })
 
-it('returns a retryable error when the model produces nothing', async () => {
-  mocks.generateText.mockResolvedValueOnce({ text: '' })
+it('reports a model failure inside the stream without leaking details', async () => {
+  mocks.streamText.mockImplementationOnce(() => ({
+    toUIMessageStreamResponse: (
+      init: UIMessageStreamOptions<WizardReply> & { headers?: HeadersInit },
+    ) =>
+      createUIMessageStreamResponse({
+        stream: createUIMessageStream({
+          execute: ({ writer }) => {
+            writer.write({ type: 'start' })
+            writer.write({
+              type: 'error',
+              errorText: init.onError!(new Error('secret provider detail')),
+            })
+          },
+        }),
+      }),
+  }))
+  const response = await POST(
+    request({ messages: [{ role: 'user', text: 'Start' }] }),
+  )
+  expect(response.status).toBe(200)
+  const body = await response.text()
+  expect(body).toContain('selected image are unchanged')
+  expect(body).not.toContain('secret provider detail')
+})
+
+it('returns a retryable error when the wizard cannot be prepared', async () => {
+  mocks.streamText.mockImplementationOnce(() => {
+    throw new Error('misconfigured')
+  })
   const response = await POST(
     request({ messages: [{ role: 'user', text: 'Start' }] }),
   )

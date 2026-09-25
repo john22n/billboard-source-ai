@@ -24,6 +24,11 @@ export const imageSchema = z.object({
 })
 export type MockupImage = z.infer<typeof imageSchema>
 export type LeadTarget = { id: number; name: string; advertiser: string }
+
+export const WIZARD_ERROR =
+  'The wizard could not respond. Your conversation and selected image are unchanged. Please try again.'
+export const MOCKUP_READY =
+  'Your mockup is ready. Check every word before sharing, then tell me what you’d like to change.'
 export type MockupState = {
   messages: ChatMessage[]
   attachments: CreativeAttachment[]
