@@ -16,21 +16,16 @@ import { useMockupStore } from '@/stores/mockupStore'
 import { useFormStore } from '@/stores/formStore'
 import { getErrorMessage } from '@/lib/error-handling'
 import {
-  nextQuestion,
-  questions,
+  MAX_MESSAGES,
+  START_COMMAND,
+  type ChatMessage,
   type MockupState,
-  type Question,
-} from '@/lib/mockup/intake'
-import { ApprovalSummary } from './ApprovalSummary'
+} from '@/lib/mockup/state'
 import { AttachMockup } from './AttachMockup'
 import { MockupAttachments } from './MockupAttachments'
 
 export function ArtMockupWizard() {
-  const { state, sessionKey, epoch, start } = useMockupStore()
-  useEffect(() => {
-    if (sessionKey && !state.started)
-      start({ ...useFormStore.getState().getFormData() })
-  }, [sessionKey, state.started, start])
+  const epoch = useMockupStore((store) => store.epoch)
   return <MockupConversation key={epoch} />
 }
 
@@ -40,61 +35,32 @@ function MockupConversation() {
     sessionKey,
     busy: isPending,
     storageWarning,
-    update,
     start,
     draft,
     error,
+    opening,
     setDraft,
   } = useMockupStore()
   const end = useRef<HTMLDivElement>(null)
-  const question = nextQuestion(state.intake)
 
   useEffect(() => {
     end.current?.scrollIntoView({ block: 'nearest' })
   }, [state.messages.length, isPending])
 
-  async function request(kind: 'intake' | 'generate', text = '') {
-    if (useMockupStore.getState().busy || !sessionKey) return
-    const started = useMockupStore.getState().epoch
-    useMockupStore.setState({ busy: true, error: '' })
-    try {
-      const result = await postMockup(kind, state, text, started)
-      if (!result) return
-      const messages = [
-        ...state.messages,
-        ...(text ? [{ role: 'user' as const, text }] : []),
-      ].slice(-80)
-      if (kind === 'generate') {
-        update({
-          image: result.image,
-          messages: [
-            ...messages,
-            {
-              role: 'assistant',
-              text: 'Your mockup is ready. Check every word before sharing. Tell me what you’d like to change.',
-            },
-          ],
-        })
-      } else {
-        update(intakeReply(result, messages, question))
-      }
-      setDraft('')
-    } catch (err) {
-      if (useMockupStore.getState().epoch !== started) return
-      useMockupStore.setState({ error: getErrorMessage(err) })
-    } finally {
-      if (useMockupStore.getState().epoch === started)
-        useMockupStore.setState({ busy: false })
-    }
-  }
+  // "Start" is sent on the rep's behalf so the wizard opens with Question 1.
+  useEffect(() => {
+    if (!opening || !sessionKey) return
+    useMockupStore.setState({ opening: null })
+    void sendMessage(opening)
+  }, [opening, sessionKey])
 
   function send() {
     const text = draft.trim()
-    if (/^(start|start mockup)[.!]?$/i.test(text)) {
+    if (START_COMMAND.test(text)) {
       start()
       return
     }
-    if (text) void request(state.image ? 'generate' : 'intake', text)
+    if (text) void sendMessage(text)
   }
 
   return (
@@ -116,44 +82,7 @@ function MockupConversation() {
               <ConversationMessage key={index} message={message} />
             ))}
           </div>
-          {!question && !state.summary && (
-            <Button disabled={isPending} onClick={() => void request('intake')}>
-              Review brief
-            </Button>
-          )}
-          {!state.image && (
-            <ApprovalSummary
-              busy={isPending}
-              onGenerate={() => void request('generate')}
-            />
-          )}
-          {state.image && (
-            <figure className="space-y-3">
-              <Image
-                src={state.image.dataUrl}
-                alt={`Selected outdoor billboard concept for ${state.image.advertiser}`}
-                width={1536}
-                height={1024}
-                unoptimized
-                className="h-auto w-full rounded-lg border"
-              />
-              <figcaption className="text-xs text-muted-foreground">
-                Concept only · Check text and brand details before sharing.
-              </figcaption>
-              <div className="flex flex-wrap gap-2">
-                <Button asChild variant="outline">
-                  <a
-                    href={state.image.dataUrl}
-                    download={`billboard-concept-${state.image.id}.jpg`}
-                  >
-                    <Download data-icon="inline-start" className="size-4" />
-                    Download selected mockup
-                  </a>
-                </Button>
-                <AttachMockup />
-              </div>
-            </figure>
-          )}
+          {state.image && <SelectedMockup image={state.image} />}
           <MockupProgress />
           {error && (
             <p
@@ -176,22 +105,54 @@ function MockupConversation() {
   )
 }
 
+function SelectedMockup({
+  image,
+}: {
+  image: NonNullable<MockupState['image']>
+}) {
+  return (
+    <figure className="space-y-3">
+      <Image
+        src={image.dataUrl}
+        alt={`Selected outdoor billboard concept for ${image.advertiser}`}
+        width={1536}
+        height={1024}
+        unoptimized
+        className="h-auto w-full rounded-lg border"
+      />
+      <figcaption className="text-xs text-muted-foreground">
+        Concept only · Check text and brand details before sharing.
+      </figcaption>
+      <div className="flex flex-wrap gap-2">
+        <Button asChild variant="outline">
+          <a
+            href={image.dataUrl}
+            download={`billboard-concept-${image.id}.jpg`}
+          >
+            <Download data-icon="inline-start" className="size-4" />
+            Download selected mockup
+          </a>
+        </Button>
+        <AttachMockup />
+      </div>
+    </figure>
+  )
+}
+
 function MockupProgress() {
-  const { busy, preparingFiles, state } = useMockupStore()
+  const { busy, preparingFiles } = useMockupStore()
   if (!busy) return null
   return (
     <p role="status" className="animate-pulse text-sm text-muted-foreground">
       {preparingFiles
         ? 'Preparing file previews…'
-        : state.summary
-          ? 'Rendering your billboard. This can take a couple of minutes. Your current image stays selected.'
-          : 'Reading your answer and preparing the next step…'}
+        : 'The wizard is working. Rendering a billboard can take a couple of minutes; your current image stays selected.'}
     </p>
   )
 }
 
 function MockupHeader() {
-  const { start } = useMockupStore()
+  const { start, sessionKey } = useMockupStore()
   return (
     <header className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3 sm:px-6">
       <div>
@@ -200,7 +161,12 @@ function MockupHeader() {
           Creative Studio
         </h2>
       </div>
-      <Button variant="outline" size="sm" onClick={() => start()}>
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={!sessionKey}
+        onClick={() => start()}
+      >
         <RotateCcw data-icon="inline-start" className="size-4" />
         Start Mockup
       </Button>
@@ -209,36 +175,31 @@ function MockupHeader() {
 }
 
 function MockupWelcome() {
-  const { state, busy: isPending, start } = useMockupStore()
-  const question = nextQuestion(state.intake)
+  const { state, busy: isPending, sessionKey, start } = useMockupStore()
   if (state.messages.length) return null
   return (
     <div className="space-y-4 py-6">
       <h3 className="text-3xl font-semibold tracking-tight">
         Create a billboard
       </h3>
+      <p className="text-base text-muted-foreground">
+        Say “Start” and the wizard asks one question at a time, reviews the
+        advertiser’s website, then renders the mockup. Attach a logo or
+        background any time.
+      </p>
       <Button
         variant="secondary"
         size="sm"
-        disabled={isPending}
+        disabled={isPending || !sessionKey}
         onClick={() => start({ ...useFormStore.getState().getFormData() })}
       >
         Use current lead form
       </Button>
-      <p className="pt-3 text-base">
-        {question
-          ? questions[question]
-          : 'Your intake is ready. Review the brief before generating.'}
-      </p>
     </div>
   )
 }
 
-function ConversationMessage({
-  message,
-}: {
-  message: MockupState['messages'][number]
-}) {
+function ConversationMessage({ message }: { message: ChatMessage }) {
   return (
     <div
       className={
@@ -279,7 +240,7 @@ function MockupComposer({
       >
         <MockupAttachments>
           <Label htmlFor={messageId} className="sr-only">
-            {state.image ? 'Revision instructions' : 'Your answer'}
+            Message
           </Label>
           <Textarea
             id={messageId}
@@ -292,8 +253,10 @@ function MockupComposer({
             className="min-h-9 min-w-0 resize-none border-0 shadow-none focus-visible:ring-0"
             placeholder={
               state.image
-                ? 'Make the headline bigger, simplify, or try a more premium feel…'
-                : 'Your answer… (or say skip)'
+                ? 'Describe a revision, or say Start for a new mockup…'
+                : state.messages.length
+                  ? 'Reply to the wizard… (or say skip)'
+                  : 'Say Start to begin…'
             }
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
@@ -305,7 +268,7 @@ function MockupComposer({
           <Button
             type="submit"
             size="icon"
-            aria-label={state.image ? 'Generate revision' : 'Send answer'}
+            aria-label="Send message"
             disabled={!draft.trim() || isLoading}
           >
             {isPending ? (
@@ -323,87 +286,75 @@ function MockupComposer({
   )
 }
 
-async function postMockup(
-  kind: 'intake' | 'generate',
-  state: MockupState,
-  text: string,
-  epoch: number,
-) {
-  const response = await fetch(`/api/mockup/${kind}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(requestBody(kind, state, text)),
+/**
+ * Sends one user message and appends the wizard's reply. Late responses from a
+ * previous mockup (a different epoch) are discarded, and a failed request keeps
+ * the draft, conversation and selected image untouched.
+ */
+async function sendMessage(text: string) {
+  const store = useMockupStore.getState()
+  if (store.busy || !store.sessionKey) return
+  const { epoch, state } = store
+  const messages = [...state.messages, { role: 'user' as const, text }].slice(
+    -MAX_MESSAGES,
+  )
+  useMockupStore.setState({ busy: true, error: '' })
+  const outcome = await requestReply({
+    messages,
+    attachments: state.attachments,
+    image: state.image,
+    brand: state.brand,
   })
-  const result = await response.json()
-  if (useMockupStore.getState().epoch !== epoch) return null
-  if (response.status === 401) {
-    useMockupStore.getState().clear()
-    return null
-  }
-  if (!response.ok)
-    throw new Error(result.error || 'Request failed. Please try again.')
-  return result
+  if (useMockupStore.getState().epoch !== epoch) return
+  useMockupStore.setState({ busy: false })
+  if (outcome.kind === 'unauthorized') return useMockupStore.getState().clear()
+  if (outcome.kind === 'error')
+    return useMockupStore.setState({ error: outcome.message })
+  useMockupStore.getState().update({
+    messages: [
+      ...messages,
+      { role: 'assistant' as const, text: outcome.reply },
+    ].slice(-MAX_MESSAGES),
+    image: outcome.image ?? state.image,
+    brand: outcome.brand ?? state.brand,
+  })
+  useMockupStore.setState({ draft: '' })
 }
 
-function requestBody(
-  kind: 'intake' | 'generate',
-  state: MockupState,
-  text: string,
-) {
-  if (kind === 'intake')
-    return {
-      intake: state.intake,
-      message: text,
-      review: !nextQuestion(state.intake),
-      ...(state.attachments.length
-        ? {
-            attachments: state.attachments,
-            attachmentInstructions: [
-              ...state.messages
-                .filter((message) => message.role === 'user')
-                .map((message) => message.text),
-              text,
-            ]
-              .join('\n')
-              .slice(-8000),
-          }
-        : {}),
+type ReplyOutcome =
+  | { kind: 'unauthorized' }
+  | { kind: 'error'; message: string }
+  | {
+      kind: 'reply'
+      reply: string
+      image: MockupState['image'] | null
+      brand: MockupState['brand'] | null
     }
-  const brand = state.brand ?? { logo: null, receipt: null, notes: '' }
-  return {
-    intake: state.intake,
-    summary: state.summary,
-    approved: !state.image,
-    previous: state.image,
-    revision: text,
-    logo: brand.logo,
-    logoReceipt: brand.receipt,
-    brandNotes: brand.notes,
-    ...(state.attachments.length ? { attachments: state.attachments } : {}),
-  }
-}
 
-function intakeReply(
-  result: Pick<MockupState, 'intake' | 'summary' | 'brand'>,
-  messages: MockupState['messages'],
-  previousQuestion: Question | undefined,
-): Partial<MockupState> {
-  const next = nextQuestion(result.intake)
-  return {
-    intake: result.intake,
-    summary: result.summary || null,
-    brand: result.brand || null,
-    messages: next
-      ? [
-          ...messages,
-          {
-            role: 'assistant',
-            text:
-              next === previousQuestion
-                ? 'I couldn’t match that response to the current question. Please rephrase your answer, or say “skip” to move on.'
-                : questions[next],
-          },
-        ]
-      : messages,
+/** Posts one turn to the wizard; network and server failures become messages. */
+async function requestReply(
+  body: Pick<MockupState, 'messages' | 'attachments' | 'image' | 'brand'>,
+): Promise<ReplyOutcome> {
+  try {
+    const response = await fetch('/api/mockup/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const result = await response.json()
+    if (response.status === 401) return { kind: 'unauthorized' }
+    if (!response.ok)
+      return {
+        kind: 'error',
+        message: result.error || 'Request failed. Please try again.',
+      }
+    return {
+      kind: 'reply',
+      reply: String(result.reply || ''),
+      image: result.image ?? null,
+      brand: result.brand ?? null,
+    }
+  } catch (err) {
+    return { kind: 'error', message: getErrorMessage(err) }
   }
 }

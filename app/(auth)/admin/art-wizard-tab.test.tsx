@@ -23,6 +23,14 @@ afterEach(async () => {
   vi.unstubAllGlobals()
 })
 
+const button = (text: string) => {
+  const found = Array.from(container.querySelectorAll('button')).find(
+    (el) => el.textContent === text,
+  )
+  if (!found) throw new Error(`Missing button: ${text}`)
+  return found
+}
+
 async function edit(value: string) {
   const input = container.querySelector('textarea')!
   await act(async () => {
@@ -43,48 +51,76 @@ async function submit() {
   })
 }
 
-it('shows protected instructions as read-only content outside the editable prompt', async () => {
+it('shows protected frames as read-only content outside the single editable prompt', async () => {
   fetchMock.mockResolvedValueOnce(
     Response.json({
       prompt: 'Original prompt',
+      isDefault: true,
       instructions: [
         {
-          title: 'Questionnaire extraction',
-          context: 'System message.',
-          text: 'Extract explicit facts only.',
+          title: 'Tool instructions',
+          context: 'Appended to the system prompt.',
+          text: 'Always call generate_billboard.',
         },
       ],
     }),
   )
   await act(async () => root.render(<ArtWizardTab />))
-  expect(container.textContent).toContain('Questionnaire extraction')
-  expect(container.textContent).toContain('Extract explicit facts only.')
+  expect(container.textContent).toContain('Tool instructions')
+  expect(container.textContent).toContain('Always call generate_billboard.')
   expect(container.querySelectorAll('textarea')).toHaveLength(1)
   expect(container.querySelector('textarea')?.value).toBe('Original prompt')
   expect(container.textContent).toContain('Read-only')
+  expect(container.textContent).toContain('Using the original prompt.')
+  expect(button('Reset to original prompt').disabled).toBe(true)
 })
 
 it('loads the saved prompt, rejects blank edits, and reports a successful save', async () => {
-  fetchMock.mockResolvedValueOnce(Response.json({ prompt: 'Original prompt' }))
+  fetchMock.mockResolvedValueOnce(
+    Response.json({ prompt: 'Original prompt', isDefault: false }),
+  )
   await act(async () => root.render(<ArtWizardTab />))
-  const button = container.querySelector(
-    'button[type="submit"]',
-  ) as HTMLButtonElement
+  const save = button('Save prompt')
   expect(container.querySelector('textarea')?.value).toBe('Original prompt')
-  expect(button.disabled).toBe(true)
+  expect(container.textContent).toContain('Using a customized prompt.')
+  expect(save.disabled).toBe(true)
   await edit(' \n ')
-  expect(button.disabled).toBe(true)
-  await edit('Use watercolor.')
-  expect(button.disabled).toBe(false)
-  fetchMock.mockResolvedValueOnce(Response.json({ prompt: 'Use watercolor.' }))
+  expect(save.disabled).toBe(true)
+  await edit('Ask three questions.')
+  expect(save.disabled).toBe(false)
+  fetchMock.mockResolvedValueOnce(
+    Response.json({ prompt: 'Ask three questions.', isDefault: false }),
+  )
   await submit()
   expect(fetchMock).toHaveBeenLastCalledWith('/api/admin/art-wizard', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt: 'Use watercolor.' }),
+    body: JSON.stringify({ prompt: 'Ask three questions.' }),
   })
   expect(container.textContent).toContain('Prompt saved')
-  expect(button.disabled).toBe(true)
+  expect(save.disabled).toBe(true)
+})
+
+it('resets to the original prompt with one click and replaces the editor text', async () => {
+  fetchMock.mockResolvedValueOnce(
+    Response.json({ prompt: 'Customized prompt', isDefault: false }),
+  )
+  await act(async () => root.render(<ArtWizardTab />))
+  const input = await edit('Half-finished edit')
+  fetchMock.mockResolvedValueOnce(
+    Response.json({
+      prompt: 'You are the Billboard Source Mockup Wizard.',
+      isDefault: true,
+    }),
+  )
+  await act(async () => button('Reset to original prompt').click())
+  expect(fetchMock).toHaveBeenLastCalledWith('/api/admin/art-wizard', {
+    method: 'DELETE',
+  })
+  expect(input.value).toBe('You are the Billboard Source Mockup Wizard.')
+  expect(container.textContent).toContain('Original prompt restored')
+  expect(button('Reset to original prompt').disabled).toBe(true)
+  expect(button('Save prompt').disabled).toBe(true)
 })
 
 it('keeps unsaved edits after a failed save and allows retrying', async () => {
@@ -99,10 +135,7 @@ it('keeps unsaved edits after a failed save and allows retrying', async () => {
     'Could not save.',
   )
   expect(input.value).toBe('My unsaved prompt')
-  expect(
-    (container.querySelector('button[type="submit"]') as HTMLButtonElement)
-      .disabled,
-  ).toBe(false)
+  expect(button('Save prompt').disabled).toBe(false)
   fetchMock.mockResolvedValueOnce(
     Response.json({ prompt: 'My unsaved prompt' }),
   )
@@ -131,12 +164,10 @@ it('disables the editor and duplicate submissions while saving', async () => {
     }),
   )
   await submit()
-  const button = container.querySelector(
-    'button[type="submit"]',
-  ) as HTMLButtonElement
-  expect(button.disabled).toBe(true)
+  const save = button('Saving…')
+  expect(save.disabled).toBe(true)
   expect(input.disabled).toBe(true)
-  expect(button.textContent).toBe('Saving…')
+  expect(button('Reset to original prompt').disabled).toBe(true)
   await submit()
   expect(fetchMock).toHaveBeenCalledTimes(2)
   await act(async () =>

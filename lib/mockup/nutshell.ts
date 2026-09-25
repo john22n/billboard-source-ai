@@ -1,4 +1,4 @@
-import { sameAdvertiser, type LeadTarget, type MockupImage } from './intake'
+import { sameAdvertiser, type LeadTarget, type MockupImage } from './state'
 
 type NutshellFile = {
   id?: number

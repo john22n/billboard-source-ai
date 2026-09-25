@@ -4,10 +4,8 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { ArtMockupWizard } from './ArtMockupWizard'
 import { AttachMockup } from './AttachMockup'
-import { ApprovalSummary } from './ApprovalSummary'
 import { useMockupSession } from '@/hooks/useMockupSession'
 import { useMockupStore } from '@/stores/mockupStore'
-import { freshIntake, questions } from '@/lib/mockup/intake'
 
 let root: Root
 let container: HTMLDivElement
@@ -17,13 +15,7 @@ const image = {
   dataUrl: 'data:image/jpeg;base64,/9j/2Q==',
   receipt: 'signed',
 }
-const summary = {
-  headline: 'Smile bigger',
-  supporting: '',
-  contact: '',
-  direction: 'Bold',
-  caution: '',
-}
+const brand = { website: 'alpine.example', logo: null, receipt: null }
 
 beforeEach(() => {
   vi.stubGlobal('React', React)
@@ -32,7 +24,6 @@ beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn()
   useMockupStore.getState().clear()
   useMockupStore.getState().initialize('rep:1')
-  useMockupStore.getState().start({ entityName: 'Alpine' })
   container = document.createElement('div')
   document.body.append(container)
   root = createRoot(container)
@@ -49,6 +40,8 @@ const button = (text: string) => {
   if (!found) throw new Error(`Missing button: ${text}`)
   return found
 }
+const body = (call = 0) =>
+  JSON.parse(vi.mocked(fetch).mock.calls[call][1]!.body as string)
 
 async function send(text: string) {
   const input = container.querySelector('textarea')!
@@ -66,7 +59,45 @@ async function send(text: string) {
   })
 }
 
-it('sends intake, blocks duplicates while pending, and advances the conversation', async () => {
+it('sends Start on the rep’s behalf once, even with two Studio views mounted', async () => {
+  vi.mocked(fetch).mockResolvedValueOnce(
+    Response.json({ reply: 'What is the advertiser’s name?' }),
+  )
+  await act(async () =>
+    root.render(
+      <>
+        <ArtMockupWizard key="inline" />
+        <ArtMockupWizard key="outer" />
+      </>,
+    ),
+  )
+  await act(async () =>
+    useMockupStore.getState().start({ entityName: 'Alpine' }),
+  )
+  expect(fetch).toHaveBeenCalledTimes(1)
+  expect(vi.mocked(fetch).mock.calls[0][0]).toBe('/api/mockup/chat')
+  expect(body()).toEqual({
+    messages: [
+      {
+        role: 'user',
+        text: 'Start\n\nHere is what I already know from the lead form:\nAdvertiser: Alpine',
+      },
+    ],
+    attachments: [],
+    image: null,
+    brand: null,
+  })
+  expect(useMockupStore.getState().state.messages.at(-1)).toEqual({
+    role: 'assistant',
+    text: 'What is the advertiser’s name?',
+  })
+  expect(useMockupStore.getState().opening).toBeNull()
+})
+
+it('sends the conversation, blocks duplicates while pending, and appends the reply', async () => {
+  useMockupStore.getState().update({
+    messages: [{ role: 'assistant', text: 'What is their website?' }],
+  })
   let finish!: (response: Response) => void
   vi.mocked(fetch).mockReturnValueOnce(
     new Promise<Response>((resolve) => {
@@ -79,30 +110,40 @@ it('sends intake, blocks duplicates while pending, and advances the conversation
   expect(container.querySelector('textarea')?.disabled).toBe(false)
   await send('Duplicate')
   expect(fetch).toHaveBeenCalledTimes(1)
-  expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string)).toEqual(
-    {
-      intake: { ...freshIntake(), advertiser: 'Alpine' },
-      message: 'alpine.example',
-      review: false,
-    },
-  )
+  expect(body()).toEqual({
+    messages: [
+      { role: 'assistant', text: 'What is their website?' },
+      { role: 'user', text: 'alpine.example' },
+    ],
+    attachments: [],
+    image: null,
+    brand: null,
+  })
   await act(async () =>
-    finish(
-      Response.json({
-        intake: {
-          ...freshIntake(),
-          advertiser: 'Alpine',
-          website: 'alpine.example',
-        },
-      }),
-    ),
+    finish(Response.json({ reply: 'What is the goal?', brand, image: null })),
   )
   expect(container.querySelector('[role="log"]')?.textContent).toContain(
-    questions.goal,
+    'What is the goal?',
   )
+  expect(useMockupStore.getState().state.brand).toEqual(brand)
+  expect(useMockupStore.getState().state.image).toBeNull()
   expect(container.querySelector('textarea')?.value).toBe('')
   expect(container.querySelector('textarea')?.readOnly).toBe(false)
   expect(useMockupStore.getState().busy).toBe(false)
+})
+
+it('treats Start as a local reset instead of a wizard message', async () => {
+  useMockupStore.getState().update({ image, brand })
+  vi.mocked(fetch).mockResolvedValueOnce(Response.json({ reply: 'Question 1' }))
+  await act(async () => root.render(<ArtMockupWizard />))
+  await send('start mockup')
+  expect(useMockupStore.getState().state.image).toBeNull()
+  expect(useMockupStore.getState().state.brand).toBeNull()
+  expect(body()).toMatchObject({
+    messages: [{ role: 'user', text: 'Start' }],
+    image: null,
+    brand: null,
+  })
 })
 
 it('ignores an old response after starting a different mockup', async () => {
@@ -114,43 +155,54 @@ it('ignores an old response after starting a different mockup', async () => {
   )
   await act(async () => root.render(<ArtMockupWizard />))
   await send('Old advertiser')
-  await act(async () =>
-    useMockupStore.getState().start({ entityName: 'New advertiser' }),
-  )
-  await act(async () =>
-    finish(
-      Response.json({
-        intake: { ...freshIntake(), advertiser: 'Old advertiser' },
-      }),
-    ),
-  )
-  expect(useMockupStore.getState().state.intake.advertiser).toBe(
-    'New advertiser',
-  )
-  expect(useMockupStore.getState().state.messages).toEqual([])
+  await act(async () => useMockupStore.getState().start())
+  await act(async () => finish(Response.json({ reply: 'Old reply', image })))
+  expect(useMockupStore.getState().state.image).toBeNull()
+  expect(
+    useMockupStore
+      .getState()
+      .state.messages.some((m) => m.text === 'Old reply'),
+  ).toBe(false)
 })
 
-it('sends the latest copy request and retains the selected image and draft on failure', async () => {
-  useMockupStore.getState().update({ image })
+it('keeps the selected image, brand and draft when a revision fails', async () => {
+  useMockupStore.getState().update({ image, brand })
   vi.mocked(fetch).mockResolvedValueOnce(
     Response.json({ error: 'Try again later.' }, { status: 502 }),
   )
   await act(async () => root.render(<ArtMockupWizard />))
   await send('Remove the phone number')
-  expect(vi.mocked(fetch).mock.calls[0][0]).toBe('/api/mockup/generate')
-  expect(
-    JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string),
-  ).toMatchObject({
-    previous: image,
-    approved: false,
-    revision: 'Remove the phone number',
+  expect(body()).toMatchObject({
+    messages: [{ role: 'user', text: 'Remove the phone number' }],
+    image,
+    brand,
   })
   expect(useMockupStore.getState().state.image).toEqual(image)
+  expect(useMockupStore.getState().state.messages).toEqual([])
   expect(container.querySelector('textarea')?.value).toBe(
     'Remove the phone number',
   )
   expect(container.querySelector('[role="alert"]')?.textContent).toBe(
     'Try again later.',
+  )
+})
+
+it('replaces the selected image only when the wizard returns a new one', async () => {
+  useMockupStore.getState().update({ image })
+  const revised = { ...image, id: '22222222-2222-4222-8222-222222222222' }
+  vi.mocked(fetch).mockResolvedValueOnce(
+    Response.json({ reply: 'Kept the layout; nothing else changed.' }),
+  )
+  await act(async () => root.render(<ArtMockupWizard />))
+  await send('Thanks')
+  expect(useMockupStore.getState().state.image).toEqual(image)
+  vi.mocked(fetch).mockResolvedValueOnce(
+    Response.json({ reply: 'Here is the revision.', image: revised }),
+  )
+  await send('Bigger text')
+  expect(useMockupStore.getState().state.image).toEqual(revised)
+  expect(container.querySelector('a[download]')?.getAttribute('download')).toBe(
+    `billboard-concept-${revised.id}.jpg`,
   )
 })
 
@@ -184,37 +236,17 @@ it('shares pending drafts and failures across Studio views and clears them on re
     Array.from(container.querySelectorAll('textarea'), (el) => el.value),
   ).toEqual(['alpine.example', 'alpine.example'])
   expect(container.querySelectorAll('[role="alert"]')).toHaveLength(2)
+  vi.mocked(fetch).mockResolvedValueOnce(Response.json({ reply: 'Question 1' }))
   await act(async () => button('Start Mockup').click())
   expect(
     Array.from(container.querySelectorAll('textarea'), (el) => el.value),
   ).toEqual(['', ''])
   expect(container.querySelectorAll('[role="alert"]')).toHaveLength(0)
-})
-
-it('keeps caution and generation without displaying the copy summary', async () => {
-  useMockupStore
-    .getState()
-    .update({ summary: { ...summary, caution: 'Keep the headline short.' } })
-  const generate = vi.fn()
-  await act(async () =>
-    root.render(<ApprovalSummary busy={false} onGenerate={generate} />),
-  )
-  expect(generate).not.toHaveBeenCalled()
-  expect(container.querySelector('input, textarea')).toBeNull()
-  expect(container.textContent).toContain('Keep the headline short.')
-  expect(container.textContent).not.toContain('Smile bigger')
-  expect(container.textContent).not.toContain('Visual direction')
-  expect(container.textContent).not.toContain('Billboard summary')
-  await act(async () => button('Generate mockup').click())
-  expect(generate).toHaveBeenCalledTimes(1)
-  await act(async () =>
-    root.render(<ApprovalSummary busy onGenerate={generate} />),
-  )
-  expect(button('Generating mockup…').disabled).toBe(true)
+  expect(fetch).toHaveBeenCalledTimes(2)
 })
 
 it('shows download but no existing-lead action, retaining recovery for a failed lead attachment', async () => {
-  useMockupStore.getState().update({ image, summary })
+  useMockupStore.getState().update({ image })
   await act(async () => root.render(<ArtMockupWizard />))
   expect(container.textContent).not.toContain('Add to existing Nutshell lead')
   expect(container.querySelector('a[download]')?.getAttribute('href')).toBe(
@@ -228,80 +260,6 @@ it('shows download but no existing-lead action, retaining recovery for a failed 
   )
   expect(button('Retry image attachment')).toBeDefined()
 })
-
-it('preserves the selected image on revision failure and fences late responses after restart', async () => {
-  useMockupStore.getState().update({ image, summary })
-  vi.mocked(fetch).mockResolvedValueOnce(
-    Response.json({ error: 'Provider unavailable' }, { status: 502 }),
-  )
-  await act(async () => root.render(<ArtMockupWizard />))
-  const textarea = container.querySelector('textarea')!
-  const setter = Object.getOwnPropertyDescriptor(
-    HTMLTextAreaElement.prototype,
-    'value',
-  )!.set!
-  await act(async () => {
-    setter.call(textarea, 'Bigger text')
-    textarea.dispatchEvent(new Event('input', { bubbles: true }))
-  })
-  await act(async () =>
-    container
-      .querySelector('form')!
-      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
-  )
-  expect(fetch).toHaveBeenCalledTimes(1)
-  expect(useMockupStore.getState().state.image).toEqual(image)
-  expect(container.querySelector('[role="alert"]')!.textContent).toContain(
-    'Provider unavailable',
-  )
-  let finish!: (response: Response) => void
-  vi.mocked(fetch).mockReturnValueOnce(
-    new Promise((resolve) => {
-      finish = resolve
-    }),
-  )
-  await act(async () =>
-    container
-      .querySelector('form')!
-      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
-  )
-  expect(textarea.readOnly).toBe(true)
-  await act(async () => button('Start Mockup').click())
-  await act(async () => finish(Response.json({ image, remaining: 8 })))
-  expect(useMockupStore.getState().state.image).toBeNull()
-  expect(useMockupStore.getState().state.intake).toEqual(freshIntake())
-})
-
-it.each(['alpine.example', ''])(
-  'sends brand evidence and exact approved contact copy (%s)',
-  async (contact) => {
-    const brand = {
-      notes: 'Navy #123456 and gold #fedc98.',
-      logo: null,
-      receipt: null,
-      fallback: '',
-    }
-    useMockupStore.getState().update({
-      intake: {
-        ...useMockupStore.getState().state.intake,
-        website: 'alpine.example',
-      },
-      summary: { ...summary, contact },
-      brand,
-    })
-    vi.mocked(fetch).mockResolvedValueOnce(
-      Response.json({ image, remaining: 9 }),
-    )
-    await act(async () => root.render(<ArtMockupWizard />))
-    await act(async () => button('Generate mockup').click())
-    expect(
-      JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string),
-    ).toMatchObject({
-      summary: { contact },
-      brandNotes: brand.notes,
-    })
-  },
-)
 
 it('blocks the wrong advertiser and requires explicit confirmation to retry the exact lead', async () => {
   useMockupStore.getState().update({
@@ -324,9 +282,7 @@ it('blocks the wrong advertiser and requires explicit confirmation to retry the 
     Response.json({ target: { id: 42, name: 'Alpine', advertiser: 'Alpine' } }),
   )
   await act(async () => button('Confirm & attach image').click())
-  expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string)).toEqual(
-    { leadId: 42, confirmedLeadId: 42, image },
-  )
+  expect(body()).toEqual({ leadId: 42, confirmedLeadId: 42, image })
   expect(useMockupStore.getState().state.attachmentFailed).toBe(false)
 })
 
@@ -334,53 +290,6 @@ function SessionProbe() {
   useMockupSession()
   return null
 }
-
-it('asks for clarification instead of repeating a question when extraction makes no progress', async () => {
-  const intake = useMockupStore.getState().state.intake
-  useMockupStore
-    .getState()
-    .update({ messages: [{ role: 'assistant', text: questions.website }] })
-  vi.mocked(fetch).mockResolvedValueOnce(Response.json({ intake }))
-  await act(async () => root.render(<ArtMockupWizard />))
-  const textarea = container.querySelector('textarea')!
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(
-      HTMLTextAreaElement.prototype,
-      'value',
-    )!.set!.call(textarea, 'I do not remember it')
-    textarea.dispatchEvent(new Event('input', { bubbles: true }))
-  })
-  await act(async () =>
-    container
-      .querySelector('form')!
-      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
-  )
-  const messages = useMockupStore.getState().state.messages
-  expect(
-    messages.filter((message) => message.text === questions.website),
-  ).toHaveLength(1)
-  expect(messages.at(-1)?.text).toContain('rephrase')
-  expect(useMockupStore.getState().state.intake.website).toBeNull()
-  vi.mocked(fetch).mockResolvedValueOnce(
-    Response.json({ intake: { ...intake, website: '' } }),
-  )
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(
-      HTMLTextAreaElement.prototype,
-      'value',
-    )!.set!.call(textarea, 'skip')
-    textarea.dispatchEvent(new Event('input', { bubbles: true }))
-  })
-  await act(async () =>
-    container
-      .querySelector('form')!
-      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
-  )
-  expect(useMockupStore.getState().state.messages.at(-1)?.text).toBe(
-    questions.goal,
-  )
-  expect(useMockupStore.getState().state.intake.advertiser).toBe('Alpine')
-})
 
 it('clears active images when the authentication session expires', async () => {
   useMockupStore.getState().update({ image })

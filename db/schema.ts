@@ -160,7 +160,7 @@ export type AppMetrics = InferSelectModel<typeof appMetrics>
 // Global administrator-managed instructions, separate from advertiser content.
 export const artWizardSettings = pgTable('art_wizard_settings', {
   id: integer('id').primaryKey().default(1),
-  imageGenerationPrompt: text('image_generation_prompt').notNull(),
+  systemPrompt: text('system_prompt').notNull(),
 })
 
 // Fixed-size buckets used for serverless-safe abuse controls. A key is reused

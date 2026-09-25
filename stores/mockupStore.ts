@@ -1,7 +1,7 @@
 'use client'
 
 import { create } from 'zustand'
-import { importLead, restart, type MockupState } from '@/lib/mockup/intake'
+import { openingMessage, restart, type MockupState } from '@/lib/mockup/state'
 
 const STORAGE = 'billboard-active-mockup'
 type Store = {
@@ -13,6 +13,8 @@ type Store = {
   pdfSource: File | null
   draft: string
   error: string
+  /** A message the wizard should send on the rep's behalf, such as "Start". */
+  opening: string | null
   setDraft: (draft: string) => void
   storageWarning: string
   initialize: (key: string) => void
@@ -26,43 +28,35 @@ type Store = {
   clear: () => void
 }
 
-export const useMockupStore = create<Store>((set, get) => ({
-  state: restart(),
-  sessionKey: null,
-  epoch: 0,
+const idle = {
   busy: false,
   preparingFiles: false,
   pdfSource: null,
   draft: '',
   error: '',
+  opening: null,
+}
+
+export const useMockupStore = create<Store>((set, get) => ({
+  state: restart(),
+  sessionKey: null,
+  epoch: 0,
+  ...idle,
   setDraft: (draft) => set({ draft }),
   storageWarning: '',
   initialize(key) {
     if (get().sessionKey === key) return
-    let state = { ...restart(), started: false }
+    let state = restart()
     try {
       const saved = JSON.parse(sessionStorage.getItem(STORAGE) || 'null')
-      if (
-        saved?.key === key &&
-        saved.state?.intake &&
-        Array.isArray(saved.state.messages)
-      )
+      if (saved?.key === key && Array.isArray(saved.state?.messages))
         state = { ...state, ...saved.state }
       else sessionStorage.removeItem(STORAGE)
     } catch {
       // A browser can deny access entirely. update() reports the persistence warning.
     }
     state.attachments = state.attachments.slice(0, 1)
-    set({
-      sessionKey: key,
-      state,
-      epoch: get().epoch + 1,
-      busy: false,
-      preparingFiles: false,
-      pdfSource: null,
-      draft: '',
-      error: '',
-    })
+    set({ sessionKey: key, state, epoch: get().epoch + 1, ...idle })
     get().update({})
   },
   update(change) {
@@ -93,19 +87,10 @@ export const useMockupStore = create<Store>((set, get) => ({
       attachmentFailed,
     })
   },
+  /** "Start" always discards the previous advertiser, image and references. */
   start(lead) {
-    set({
-      epoch: get().epoch + 1,
-      busy: false,
-      preparingFiles: false,
-      pdfSource: null,
-      draft: '',
-      error: '',
-    })
-    get().update({
-      ...restart(),
-      ...(lead ? { intake: importLead(lead) } : {}),
-    })
+    set({ epoch: get().epoch + 1, ...idle, opening: openingMessage(lead) })
+    get().update(restart())
   },
   clear() {
     try {
@@ -117,11 +102,7 @@ export const useMockupStore = create<Store>((set, get) => ({
       state: restart(),
       sessionKey: null,
       epoch: get().epoch + 1,
-      busy: false,
-      preparingFiles: false,
-      pdfSource: null,
-      draft: '',
-      error: '',
+      ...idle,
       storageWarning: '',
     })
   },

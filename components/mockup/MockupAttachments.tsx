@@ -41,10 +41,7 @@ export function MockupAttachments({ children }: { children: ReactNode }) {
       useMockupStore.setState({
         pdfSource: file.type === 'application/pdf' ? file : null,
       })
-      update({
-        attachments: [attachment],
-        ...(!current.state.image ? { summary: null } : {}),
-      })
+      update({ attachments: [attachment] })
     } catch (error) {
       preparationError = getErrorMessage(error)
     } finally {
@@ -112,10 +109,7 @@ export function MockupAttachments({ children }: { children: ReactNode }) {
                   disabled={busy}
                   onClick={() => {
                     useMockupStore.setState({ pdfSource: null })
-                    update({
-                      attachments: [],
-                      ...(!state.image ? { summary: null } : {}),
-                    })
+                    update({ attachments: [] })
                   }}
                 >
                   <X className="size-3" />

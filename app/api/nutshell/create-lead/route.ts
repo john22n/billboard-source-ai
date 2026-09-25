@@ -5,7 +5,7 @@ import {
   imageSchema,
   sameAdvertiser,
   type MockupImage,
-} from '@/lib/mockup/intake'
+} from '@/lib/mockup/state'
 import { verifyImage } from '@/lib/mockup/receipts'
 import { attachMockup } from '@/lib/mockup/nutshell'
 import {

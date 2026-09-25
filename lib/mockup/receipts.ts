@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { SignJWT, jwtVerify } from 'jose'
 import { serverConfig } from '@/lib/config'
-import type { MockupImage } from './intake'
+import type { MockupImage } from './state'
 
 export type MockupSession = { userId: string; sessionStartedAt: number }
 const hash = (data: string) => createHash('sha256').update(data).digest('hex')
