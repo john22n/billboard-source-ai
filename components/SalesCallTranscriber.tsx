@@ -106,6 +106,7 @@ type NutshellResult = {
   missingFields?: unknown
   leadId?: number
   imageAttachmentFailed?: boolean
+  imageAttachmentReceipt?: string
 }
 
 type NutshellResponseActions = {
@@ -1201,6 +1202,7 @@ function useNutshellSubmission(
             result.leadId,
             formData.entityName,
             !!result.imageAttachmentFailed,
+            result.imageAttachmentReceipt,
           )
       }
       handleNutshellResponse(response, result, {

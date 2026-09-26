@@ -64,6 +64,13 @@
       "when": 1790100000000,
       "tag": "0008_art_wizard_system_prompt",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790454043000,
+      "tag": "0009_remove_mockup_quotas",
+      "breakpoints": true
     }
   ]
 }

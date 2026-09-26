@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
-import { createOpenAI } from '@ai-sdk/openai'
-import { generateObject } from 'ai'
+import { createGateway, generateObject } from 'ai'
 import { getSession } from '@/lib/auth'
 import { serverConfig } from '@/lib/config'
 import { rateLimit } from '@/lib/rate-limit'
@@ -38,11 +37,11 @@ export async function POST(request: Request) {
     )
   try {
     const { query, pages } = input.data
-    const provider = createOpenAI({
-      apiKey: serverConfig.openai.requireApiKey(),
+    const provider = createGateway({
+      apiKey: serverConfig.aiGateway.requireApiKey(),
     })
     const result = await generateObject({
-      model: provider('gpt-5.4-mini'),
+      model: provider('openai/gpt-5.4-mini'),
       schema: pdfSearchResultSchema,
       providerOptions: { openai: { strictJsonSchema: true } },
       maxRetries: 0,

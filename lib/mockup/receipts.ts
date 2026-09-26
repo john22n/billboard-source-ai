@@ -10,7 +10,7 @@ const key = () => new TextEncoder().encode(serverConfig.auth.jwtSecret)
 /** Authenticity only; content is stored in this tab, never in a server-side gallery. */
 export async function signArtifact(
   session: MockupSession,
-  kind: 'logo' | 'image',
+  kind: 'logo' | 'image' | 'attachment',
   data: string,
   advertiser: string,
   id: string,
@@ -30,7 +30,7 @@ export async function signArtifact(
 }
 export async function verifyArtifact(
   session: MockupSession,
-  kind: 'logo' | 'image',
+  kind: 'logo' | 'image' | 'attachment',
   data: string,
   advertiser: string,
   id: string,

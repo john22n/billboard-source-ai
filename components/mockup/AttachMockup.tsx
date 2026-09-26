@@ -3,8 +3,6 @@
 import { useState } from 'react'
 import Image from 'next/image'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import {
   Dialog,
   DialogContent,
@@ -23,32 +21,13 @@ import {
 export function AttachMockup() {
   const { state, update, busy: generating } = useMockupStore()
   const [open, setOpen] = useState(false)
-  const [query, setQuery] = useState('')
-  const [leads, setLeads] = useState<LeadTarget[] | null>(null)
   const [target, setTarget] = useState<LeadTarget | null>(null)
   const [isPending, setIsPending] = useState(false)
   const [message, setMessage] = useState('')
   const image = state.image
   if (!image || !state.attachmentFailed) return null
 
-  async function search() {
-    setIsPending(true)
-    setMessage('')
-    try {
-      const response = await fetch(
-        `/api/mockup/leads?q=${encodeURIComponent(query)}`,
-      )
-      const result = await response.json()
-      if (!response.ok) throw new Error(result.error)
-      setLeads(result.leads)
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Search failed.')
-    } finally {
-      setIsPending(false)
-    }
-  }
-  async function attach() {
-    if (!target || !image) return
+  async function attach(target: LeadTarget, image: MockupImage) {
     setIsPending(true)
     setMessage('')
     const epoch = useMockupStore.getState().epoch
@@ -59,16 +38,20 @@ export function AttachMockup() {
         body: JSON.stringify({
           leadId: target.id,
           confirmedLeadId: target.id,
+          receipt: target.receipt,
           image,
         }),
       })
       const result = await response.json()
       if (!response.ok) throw new Error(result.error)
-      if (useMockupStore.getState().epoch !== epoch) return
-      update({ lastLead: result.target, attachmentFailed: false })
-      setMessage(
-        `Image attached to ${target.name} (#${target.id}). Revisions will not be sent automatically.`,
+      const current = useMockupStore.getState()
+      if (
+        current.epoch !== epoch ||
+        current.state.lastLead?.id !== target.id ||
+        current.state.image?.id !== image.id
       )
+        return
+      update({ attachmentFailed: false })
     } catch (error) {
       setMessage(
         error instanceof Error
@@ -90,7 +73,6 @@ export function AttachMockup() {
         onClick={() => {
           setOpen(true)
           setTarget(state.lastLead)
-          setQuery(image.advertiser)
           setMessage('')
         }}
       >
@@ -101,45 +83,18 @@ export function AttachMockup() {
           <DialogHeader>
             <DialogTitle>Send this mockup to Nutshell</DialogTitle>
             <DialogDescription>
-              Choose the matching advertiser, then confirm the lead and selected
-              image. This never creates a new lead.
+              Retry the image for the lead already created below. The target
+              cannot be changed, and this never creates a new lead.
             </DialogDescription>
           </DialogHeader>
-          <form
-            className="space-y-2"
-            onSubmit={(e) => {
-              e.preventDefault()
-              void search()
-            }}
-          >
-            <Label htmlFor="mockup-lead-search">
-              Company / advertiser or lead name
-            </Label>
-            <div className="flex gap-2">
-              <Input
-                id="mockup-lead-search"
-                value={query}
-                maxLength={150}
-                onChange={(e) => setQuery(e.target.value)}
-              />
-              <Button
-                type="submit"
-                disabled={isPending || query.trim().length < 2}
-              >
-                Search
-              </Button>
-            </div>
-          </form>
-          <LeadSearchResults
-            leads={leads}
-            target={target}
-            disabled={isPending}
-            onSelect={(lead) => {
-              setTarget(lead)
-              setMessage('')
-            }}
-          />
           {target && <AttachmentPreview target={target} image={image} />}
+          {!target?.receipt && (
+            <p role="alert" className="text-sm text-destructive">
+              This older mockup has no verified attachment target. Download it
+              and attach it to the created lead manually. Do not resubmit the
+              Lead Form.
+            </p>
+          )}
           {message && (
             <p role="status" className="text-sm">
               {message}
@@ -152,10 +107,13 @@ export function AttachMockup() {
             <Button
               disabled={
                 isPending ||
-                !target ||
+                generating ||
+                !target?.receipt ||
                 !sameAdvertiser(target.advertiser, image.advertiser)
               }
-              onClick={() => void attach()}
+              onClick={() => {
+                if (target?.receipt) void attach(target, image)
+              }}
             >
               {isPending ? 'Working…' : 'Confirm & attach image'}
             </Button>
@@ -163,39 +121,6 @@ export function AttachMockup() {
         </DialogContent>
       </Dialog>
     </>
-  )
-}
-
-function LeadSearchResults({
-  leads,
-  target,
-  onSelect,
-  disabled,
-}: {
-  leads: LeadTarget[] | null
-  target: LeadTarget | null
-  onSelect: (lead: LeadTarget) => void
-  disabled: boolean
-}) {
-  return (
-    <div className="space-y-2">
-      {leads?.map((lead) => (
-        <Button
-          key={lead.id}
-          variant={target?.id === lead.id ? 'secondary' : 'outline'}
-          className="h-auto w-full justify-start whitespace-normal text-left"
-          onClick={() => onSelect(lead)}
-          disabled={disabled}
-        >
-          {lead.name} · {lead.advertiser} · #{lead.id}
-        </Button>
-      ))}
-      {leads?.length === 0 && (
-        <p className="text-sm text-muted-foreground">
-          No matching leads found. Try a more specific name.
-        </p>
-      )}
-    </div>
   )
 }
 
@@ -224,8 +149,8 @@ function AttachmentPreview({
       />
       {!sameAdvertiser(target.advertiser, image.advertiser) && (
         <p role="alert" className="text-sm text-destructive">
-          This lead’s advertiser does not match {image.advertiser}. Select the
-          matching lead instead.
+          This lead’s advertiser does not match {image.advertiser}. Download the
+          image and check the original lead before attaching it manually.
         </p>
       )}
     </div>

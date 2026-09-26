@@ -12,14 +12,12 @@ type NutshellLead = {
   name?: string
   description?: string
   rev: string
-  creator?: { emails?: string[] } | null
-  assignee?: { emails?: string[] } | null
   primaryAccount?: { name: string }
   primaryAccountName?: string
   file?: NutshellFile[]
 }
 
-export async function mockupNutshellRequest<T>(
+async function mockupNutshellRequest<T>(
   method: string,
   params: Record<string, unknown>,
   credentials: string,
@@ -46,7 +44,7 @@ export async function mockupNutshellRequest<T>(
   return body.result as T
 }
 
-export function leadTarget(lead: NutshellLead): LeadTarget {
+function leadTarget(lead: NutshellLead): LeadTarget {
   return {
     id: Number(lead.id),
     name: lead.description || lead.name || `Lead ${lead.id}`,
@@ -56,66 +54,6 @@ export function leadTarget(lead: NutshellLead): LeadTarget {
       lead.description ||
       '',
   }
-}
-
-export async function searchMockupLeads(
-  query: string,
-  credentials: string,
-  userEmail: string,
-) {
-  const result = await mockupNutshellRequest<{
-    leads?: NutshellLead[]
-    accounts?: { id: number }[]
-  }>('searchUniversal', { string: query }, credentials)
-  const companyLeads = await Promise.all(
-    (result.accounts || [])
-      .slice(0, 5)
-      .map((account) =>
-        mockupNutshellRequest<NutshellLead[]>(
-          'findLeads',
-          { query: { accountId: account.id }, limit: 20, stubResponses: false },
-          credentials,
-        ),
-      ),
-  )
-  const candidates = [
-    ...new Map(
-      [...(result.leads || []), ...companyLeads.flat()].map((lead) => [
-        Number(lead.id),
-        lead,
-      ]),
-    ).values(),
-  ]
-  const email = userEmail.trim().toLowerCase()
-  const matches: LeadTarget[] = []
-  // Universal search returns stubs without user relationships. Fetch full
-  // records in small batches to match creator or assignee emails.
-  for (let i = 0; i < candidates.length && matches.length < 20; i += 5) {
-    const leads = await Promise.all(
-      candidates
-        .slice(i, i + 5)
-        .map((lead) =>
-          lead.creator === undefined
-            ? mockupNutshellRequest<NutshellLead>(
-                'getLead',
-                { leadId: lead.id },
-                credentials,
-              )
-            : lead,
-        ),
-    )
-    for (const lead of leads) {
-      if (
-        email &&
-        [
-          ...(lead.creator?.emails || []),
-          ...(lead.assignee?.emails || []),
-        ].some((value) => value.trim().toLowerCase() === email)
-      )
-        matches.push(leadTarget(lead))
-    }
-  }
-  return matches.slice(0, 20)
 }
 
 /** Retry the same deterministic filename, retaining ALL existing lead files. No newLead call here. */
@@ -132,7 +70,7 @@ export async function attachMockup(
   const target = leadTarget(lead)
   if (!sameAdvertiser(target.advertiser, image.advertiser))
     throw new Error(
-      'The lead’s advertiser does not match this mockup. Select the matching lead instead.',
+      'The original lead’s advertiser does not match this mockup.',
     )
   const name = `billboard-concept-${image.id}.jpg`
   let file = lead.file?.find((item) => item.name === name)

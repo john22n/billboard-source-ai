@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { NextResponse } from 'next/server'
-import { createOpenAI } from '@ai-sdk/openai'
 import {
   APICallError,
+  createGateway,
   stepCountIs,
   streamText,
   tool,
@@ -218,15 +218,15 @@ export async function POST(request: Request) {
   }
   let stage = 'configuration'
   try {
-    const provider = createOpenAI({
-      apiKey: serverConfig.openai.requireApiKey(),
+    const provider = createGateway({
+      apiKey: serverConfig.aiGateway.requireApiKey(),
     })
     stage = 'system-prompt'
     const { prompt } = await getSystemPrompt()
     const { tools, captured } = wizardTools(session, input.data)
     stage = 'conversation'
     const result = streamText({
-      model: provider('gpt-5.4-mini'),
+      model: provider('openai/gpt-5.4-mini'),
       system: `${prompt}\n\n${toolInstructions}`,
       messages: conversation(input.data),
       tools,

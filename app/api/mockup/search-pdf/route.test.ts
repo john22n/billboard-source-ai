@@ -67,8 +67,14 @@ it('searches all pages and returns a matching page beyond the first', async () =
     (message: { content: unknown }) => message.content,
   )
   expect(
-    content.filter((part: { type: string }) => part.type === 'image'),
-  ).toHaveLength(3)
+    content.filter((part: { type: string }) => part.type === 'file'),
+  ).toEqual(
+    Array(3).fill({
+      type: 'file',
+      mediaType: 'image/jpeg',
+      data: 'data:image/jpeg;base64,/9j/2Q==',
+    }),
+  )
   expect(JSON.stringify(input)).toContain('PDF page 3 of 3')
   expect(JSON.stringify(input)).toContain('company logo')
 })

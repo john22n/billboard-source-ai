@@ -25,6 +25,7 @@ type Store = {
     id: number | undefined,
     advertiser: string | null | undefined,
     attachmentFailed: boolean,
+    receipt?: string,
   ) => void
   start: (lead?: Record<string, unknown>) => void
   clear: () => void
@@ -79,13 +80,14 @@ export const useMockupStore = create<Store>((set, get) => ({
       })
     }
   },
-  recordSubmittedLead(id, advertiser, attachmentFailed) {
+  recordSubmittedLead(id, advertiser, attachmentFailed, receipt) {
     if (!id) return
     get().update({
       lastLead: {
         id: Number(id),
         name: advertiser || 'Submitted lead',
         advertiser: advertiser || '',
+        receipt,
       },
       attachmentFailed,
     })

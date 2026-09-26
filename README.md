@@ -130,3 +130,11 @@ pnpm exec playwright test creative-studio.spec.ts
 Playwright starts an isolated Next.js server and a temporary PostgreSQL cluster containing only a test user. Both stop after the run, and the database files are removed. Shell and `.env` service credentials are cleared for the app; the suite does not use the dev or production database.
 
 The Creative Studio test opens the actual dashboard with a signed test session and exercises all seven intake answers, editable approval, website palette propagation, generation, download, failed revision/retry, refresh persistence, and reset. AI and telephony HTTP responses are mocked, so it verifies the browser workflow and request contracts—not live model quality or website extraction. Existing API/unit tests cover those server-side contracts. The tiny JPEG fixtures are synthetic, not customer artwork.
+
+## Creative Studio AI and attachments
+
+Set the server-only `AI_GATEWAY_API_KEY` in the local environment and the relevant Vercel environments. Creative Studio uses Vercel AI Gateway for OpenAI chat and PDF search (`openai/gpt-5.4-mini`) and image generation/editing (`openai/gpt-image-2.5-sunburst`). It does not fall back to `OPENAI_API_KEY`; other application features still use that direct key.
+
+There is no daily image quota. The existing chat and PDF request rate limits remain. Migration `0009_remove_mockup_quotas.sql` drops the unused quota table; apply it through the normal, approved database rollout after the quota-free code is deployed. Historical migrations remain unchanged.
+
+If an image upload fails after Nutshell creates a lead, **Retry image attachment** sends only the original image to that exact lead. The server verifies a signed receipt binding the lead, image, advertiser, and login session, and the browser preserves it across refreshes in the same tab. The retry never creates another lead or offers an alternate lead. Older saved mockups without this receipt must be downloaded and attached manually; do not resubmit the Lead Form to retry an image.

@@ -9,9 +9,19 @@ beforeEach(() => {
 
 describe('active mockup lifecycle', () => {
   it('remembers the exact created lead for attachment retry and does not invent a lead ID', () => {
-    useMockupStore.getState().recordSubmittedLead(42, 'Alpine', true)
+    useMockupStore.getState().initialize('rep:1')
+    useMockupStore
+      .getState()
+      .recordSubmittedLead(42, 'Alpine', true, 'lead-42-receipt')
+    useMockupStore.setState({ sessionKey: null })
+    useMockupStore.getState().initialize('rep:1')
     expect(useMockupStore.getState().state).toMatchObject({
-      lastLead: { id: 42, name: 'Alpine', advertiser: 'Alpine' },
+      lastLead: {
+        id: 42,
+        name: 'Alpine',
+        advertiser: 'Alpine',
+        receipt: 'lead-42-receipt',
+      },
       attachmentFailed: true,
     })
     useMockupStore.getState().recordSubmittedLead(undefined, 'Other', false)

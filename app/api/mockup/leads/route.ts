@@ -3,39 +3,10 @@ import { z } from 'zod'
 import { getSession } from '@/lib/auth'
 import { serverConfig } from '@/lib/config'
 import { imageSchema } from '@/lib/mockup/state'
-import { attachMockup, searchMockupLeads } from '@/lib/mockup/nutshell'
-import { verifyImage } from '@/lib/mockup/receipts'
+import { attachMockup } from '@/lib/mockup/nutshell'
+import { verifyArtifact, verifyImage } from '@/lib/mockup/receipts'
 
 export const maxDuration = 90
-
-export async function GET(request: Request) {
-  const session = await getSession()
-  if (!session)
-    return NextResponse.json(
-      { error: 'Please sign in again.' },
-      { status: 401 },
-    )
-  const q = new URL(request.url).searchParams.get('q')?.trim() || ''
-  if (q.length < 2 || q.length > 150)
-    return NextResponse.json(
-      { error: 'Enter 2–150 characters.' },
-      { status: 400 },
-    )
-  try {
-    const credentials = Buffer.from(
-      `${session.email}:${serverConfig.nutshell.requireApiKey()}`,
-    ).toString('base64')
-    return NextResponse.json(
-      { leads: await searchMockupLeads(q, credentials, session.email) },
-      { headers: { 'Cache-Control': 'no-store' } },
-    )
-  } catch {
-    return NextResponse.json(
-      { error: 'Could not search Nutshell. Please try again.' },
-      { status: 502 },
-    )
-  }
-}
 
 export async function POST(request: Request) {
   const session = await getSession()
@@ -48,9 +19,10 @@ export async function POST(request: Request) {
     .object({
       leadId: z.number().int().positive(),
       confirmedLeadId: z.number().int().positive(),
+      receipt: z.string().min(1).max(6000),
       image: imageSchema,
     })
-    .safeParse(await request.json())
+    .safeParse(await request.json().catch(() => null))
   if (!input.success || input.data.leadId !== input.data.confirmedLeadId)
     return NextResponse.json(
       { error: 'Confirm the target lead and selected image first.' },
@@ -58,6 +30,24 @@ export async function POST(request: Request) {
     )
   try {
     await verifyImage(session, input.data.image)
+    await verifyArtifact(
+      session,
+      'attachment',
+      input.data.image.dataUrl,
+      input.data.image.advertiser,
+      `${input.data.leadId}:${input.data.image.id}`,
+      input.data.receipt,
+    )
+  } catch {
+    return NextResponse.json(
+      {
+        error:
+          'Retry only the original image against its created lead. Your download remains available.',
+      },
+      { status: 400 },
+    )
+  }
+  try {
     const credentials = Buffer.from(
       `${session.email}:${serverConfig.nutshell.requireApiKey()}`,
     ).toString('base64')

@@ -138,6 +138,8 @@ for (const placement of ['Form views', 'Lead tools']) {
     let history: Message[] = []
     let answered = 0
     let revisions = 0
+    let createdLeads = 0
+    let attached: Record<string, unknown> | undefined
     const unexpected: string[] = []
     await page.route('**/api/**', async (route) => {
       unexpected.push(new URL(route.request().url()).pathname)
@@ -713,6 +715,30 @@ for (const placement of ['Form views', 'Lead tools']) {
         ),
       ).toBe(true)
       await page.setViewportSize({ width: 1440, height: 1000 })
+      await page.route('**/api/nutshell/create-lead', (route) => {
+        createdLeads++
+        expect(route.request().postDataJSON()).toMatchObject({
+          entityName: 'Example AI',
+          mockupImage: revisedImage,
+        })
+        return route.fulfill({
+          json: {
+            success: true,
+            leadId: 42,
+            imageAttachmentFailed: true,
+            imageAttachmentReceipt: 'lead-42-receipt',
+          },
+        })
+      })
+      await page.route('**/api/mockup/leads', (route) => {
+        expect(route.request().method()).toBe('POST')
+        attached = route.request().postDataJSON()
+        return route.fulfill({ json: { success: true } })
+      })
+      await page.getByRole('button', { name: 'Nutshell', exact: true }).click()
+      await expect(
+        studio.getByRole('button', { name: 'Retry image attachment' }),
+      ).toBeVisible()
     }
 
     await page.reload()
@@ -732,6 +758,64 @@ for (const placement of ['Form views', 'Lead tools']) {
       'download',
       'billboard-concept-22222222-2222-4222-8222-222222222222.jpg',
     )
+    if (placement === 'Lead tools') {
+      const retry = studio.getByRole('button', {
+        name: 'Retry image attachment',
+      })
+      await retry.click()
+      const dialog = page.getByRole('dialog', {
+        name: 'Send this mockup to Nutshell',
+      })
+      await expect(dialog.getByText('Confirm: Example AI (#42)')).toBeVisible()
+      await expect(dialog.getByRole('textbox')).toHaveCount(0)
+      await expect(dialog.getByRole('img')).toHaveAttribute(
+        'src',
+        revisedImage.dataUrl,
+      )
+      await dialog.screenshot({
+        path: testInfo.outputPath('same-lead-attachment.png'),
+        animations: 'disabled',
+      })
+      await dialog
+        .getByRole('button', { name: 'Confirm & attach image' })
+        .click()
+      await expect(dialog).toBeHidden()
+      await expect(retry).toHaveCount(0)
+      expect(attached).toEqual({
+        leadId: 42,
+        confirmedLeadId: 42,
+        receipt: 'lead-42-receipt',
+        image: revisedImage,
+      })
+      expect(createdLeads).toBe(1)
+
+      // A tab saved before target receipts existed must not guess a lead.
+      await page.evaluate(() => {
+        const saved = JSON.parse(
+          sessionStorage.getItem('billboard-active-mockup')!,
+        )
+        delete saved.state.lastLead.receipt
+        saved.state.attachmentFailed = true
+        sessionStorage.setItem('billboard-active-mockup', JSON.stringify(saved))
+      })
+      await page.reload()
+      await tab.click()
+      await retry.click()
+      await expect(dialog.getByRole('alert')).toContainText(
+        'Do not resubmit the Lead Form.',
+      )
+      await expect(
+        dialog.getByRole('button', { name: 'Confirm & attach image' }),
+      ).toBeDisabled()
+      await page.setViewportSize({ width: 390, height: 844 })
+      await dialog.screenshot({
+        path: testInfo.outputPath('legacy-attachment-mobile.png'),
+        animations: 'disabled',
+      })
+      await page.keyboard.press('Escape')
+      await expect(dialog).toBeHidden()
+      await page.setViewportSize({ width: 1440, height: 1000 })
+    }
     await studio
       .getByRole('button', { name: 'Start Mockup', exact: true })
       .click()
