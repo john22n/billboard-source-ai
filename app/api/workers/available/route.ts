@@ -169,6 +169,12 @@ export async function GET() {
     )
   } catch (error) {
     if (isMissingConfig(error)) {
+      if (process.env.NODE_ENV === 'development') {
+        return Response.json(
+          { workers: [] },
+          { headers: { 'Cache-Control': 'no-store' } },
+        )
+      }
       console.error(
         '❌ Missing required Twilio config for /api/workers/available:',
         error.message,
