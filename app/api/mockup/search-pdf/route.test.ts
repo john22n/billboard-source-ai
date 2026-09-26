@@ -5,7 +5,10 @@ vi.mock('@/lib/auth', () => ({
   getSession: async () => (auth.signedIn ? { userId: 'rep' } : null),
 }))
 vi.mock('@/lib/config', () => ({
-  serverConfig: { openai: { requireApiKey: () => 'test' } },
+  serverConfig: {
+    openai: { requireApiKey: () => 'direct-test-key' },
+    aiGateway: { requireApiKey: () => 'gateway-test-key' },
+  },
 }))
 vi.mock('@/lib/rate-limit', () => ({
   rateLimit: async () => ({ allowed: auth.allowed }),
@@ -24,30 +27,19 @@ const request = (body: unknown = { query: 'company logo', pages }) =>
   })
 function providerResult(pageNumber: number | null) {
   return Response.json({
-    id: 'resp_pdf',
-    created_at: 1790112545,
-    model: 'gpt-5.4-mini',
-    output: [
+    content: [
       {
-        id: 'msg_pdf',
-        type: 'message',
-        role: 'assistant',
-        status: 'completed',
-        content: [
-          {
-            type: 'output_text',
-            text: JSON.stringify({
-              pageNumber,
-              reason: pageNumber
-                ? 'Logo is on this page.'
-                : 'No matching image found.',
-            }),
-            annotations: [],
-          },
-        ],
+        type: 'text',
+        text: JSON.stringify({
+          pageNumber,
+          reason: pageNumber
+            ? 'Logo is on this page.'
+            : 'No matching image found.',
+        }),
       },
     ],
-    usage: { input_tokens: 10, output_tokens: 20, total_tokens: 30 },
+    finishReason: 'stop',
+    usage: { inputTokens: 10, outputTokens: 20 },
   })
 }
 beforeEach(() => {
@@ -59,17 +51,23 @@ afterEach(() => vi.unstubAllGlobals())
 
 it('searches all pages and returns a matching page beyond the first', async () => {
   const response = await POST(request())
+  expect(fetcher.mock.calls[0][0]).toBe(
+    'https://ai-gateway.vercel.sh/v1/ai/language-model',
+  )
+  const headers = new Headers(fetcher.mock.calls[0][1]?.headers)
+  expect(headers.get('authorization')).toBe('Bearer gateway-test-key')
+  expect(headers.get('ai-language-model-id')).toBe('openai/gpt-5.4-mini')
   expect(response.status).toBe(200)
   expect(await response.json()).toEqual({
     pageNumber: 3,
     reason: 'Logo is on this page.',
   })
-  const input = JSON.parse(String(fetcher.mock.calls[0][1]?.body)).input
+  const input = JSON.parse(String(fetcher.mock.calls[0][1]?.body)).prompt
   const content = input.flatMap(
     (message: { content: unknown }) => message.content,
   )
   expect(
-    content.filter((part: { type: string }) => part.type === 'input_image'),
+    content.filter((part: { type: string }) => part.type === 'image'),
   ).toHaveLength(3)
   expect(JSON.stringify(input)).toContain('PDF page 3 of 3')
   expect(JSON.stringify(input)).toContain('company logo')

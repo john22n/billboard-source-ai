@@ -29,6 +29,7 @@ vi.mock('@/lib/auth', () => ({ getSession: mocks.session }))
 vi.mock('@/lib/config', () => ({
   serverConfig: {
     openai: { requireApiKey: () => 'test' },
+    aiGateway: { requireApiKey: () => 'gateway-test-key' },
     auth: { jwtSecret: 'test-secret-that-is-long-enough-for-hs256-signing' },
   },
 }))
@@ -46,9 +47,6 @@ vi.mock('@/db', () => ({ db: {} }))
 vi.mock('ai', async (importOriginal) => ({
   ...(await importOriginal<typeof import('ai')>()),
   streamText: mocks.streamText,
-}))
-vi.mock('@ai-sdk/openai', () => ({
-  createOpenAI: () => (id: string) => ({ modelId: id }),
 }))
 import { POST } from './route'
 
@@ -170,6 +168,8 @@ it('sends the editable prompt plus the protected tool frame and returns the repl
     brand: null,
   })
   const options = mocks.streamText.mock.calls[0][0]
+  expect(options.model.modelId).toBe('openai/gpt-5.4-mini')
+  expect(options.model.provider).toBe('gateway')
   expect(options.system).toBe(`Custom wizard prompt\n\n${toolInstructions}`)
   expect(options.system).not.toContain(defaultSystemPrompt.slice(0, 40))
   expect(options.messages).toEqual([
