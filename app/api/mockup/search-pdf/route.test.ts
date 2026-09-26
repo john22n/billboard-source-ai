@@ -7,7 +7,6 @@ vi.mock('@/lib/auth', () => ({
 vi.mock('@/lib/config', () => ({
   serverConfig: {
     openai: { requireApiKey: () => 'direct-test-key' },
-    aiGateway: { requireApiKey: () => 'gateway-test-key' },
   },
 }))
 vi.mock('@/lib/rate-limit', () => ({
@@ -27,19 +26,26 @@ const request = (body: unknown = { query: 'company logo', pages }) =>
   })
 function providerResult(pageNumber: number | null) {
   return Response.json({
-    content: [
+    output: [
       {
-        type: 'text',
-        text: JSON.stringify({
-          pageNumber,
-          reason: pageNumber
-            ? 'Logo is on this page.'
-            : 'No matching image found.',
-        }),
+        type: 'message',
+        role: 'assistant',
+        id: 'msg_pdf',
+        content: [
+          {
+            type: 'output_text',
+            text: JSON.stringify({
+              pageNumber,
+              reason: pageNumber
+                ? 'Logo is on this page.'
+                : 'No matching image found.',
+            }),
+            annotations: [],
+          },
+        ],
       },
     ],
-    finishReason: 'stop',
-    usage: { inputTokens: 10, outputTokens: 20 },
+    usage: { input_tokens: 10, output_tokens: 20 },
   })
 }
 beforeEach(() => {
@@ -51,28 +57,27 @@ afterEach(() => vi.unstubAllGlobals())
 
 it('searches all pages and returns a matching page beyond the first', async () => {
   const response = await POST(request())
-  expect(fetcher.mock.calls[0][0]).toBe(
-    'https://ai-gateway.vercel.sh/v1/ai/language-model',
-  )
+  expect(fetcher.mock.calls[0][0]).toBe('https://api.openai.com/v1/responses')
   const headers = new Headers(fetcher.mock.calls[0][1]?.headers)
-  expect(headers.get('authorization')).toBe('Bearer gateway-test-key')
-  expect(headers.get('ai-language-model-id')).toBe('openai/gpt-5.4-mini')
+  expect(headers.get('authorization')).toBe('Bearer direct-test-key')
   expect(response.status).toBe(200)
   expect(await response.json()).toEqual({
     pageNumber: 3,
     reason: 'Logo is on this page.',
   })
-  const input = JSON.parse(String(fetcher.mock.calls[0][1]?.body)).prompt
+  const body = JSON.parse(String(fetcher.mock.calls[0][1]?.body))
+  expect(body.model).toBe('gpt-5.4-mini')
+  expect(body.text.format).toMatchObject({ type: 'json_schema', strict: true })
+  const input = body.input
   const content = input.flatMap(
     (message: { content: unknown }) => message.content,
   )
   expect(
-    content.filter((part: { type: string }) => part.type === 'file'),
+    content.filter((part: { type: string }) => part.type === 'input_image'),
   ).toEqual(
     Array(3).fill({
-      type: 'file',
-      mediaType: 'image/jpeg',
-      data: 'data:image/jpeg;base64,/9j/2Q==',
+      type: 'input_image',
+      image_url: 'data:image/jpeg;base64,/9j/2Q==',
     }),
   )
   expect(JSON.stringify(input)).toContain('PDF page 3 of 3')

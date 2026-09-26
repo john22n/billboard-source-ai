@@ -10,8 +10,7 @@ const fetcher = vi.fn<typeof fetch>(async (input, init) => {
 })
 
 beforeEach(() => {
-  vi.stubEnv('AI_GATEWAY_API_KEY', 'gateway-test-key')
-  vi.stubEnv('OPENAI_API_KEY', 'direct-key-not-to-use')
+  vi.stubEnv('OPENAI_API_KEY', 'direct-test-key')
   vi.stubGlobal('fetch', fetcher)
   fetcher.mockClear()
 })
@@ -21,15 +20,15 @@ afterEach(() => {
 })
 
 it.each([[], [png, jpeg]])(
-  'routes image generation and edits through Gateway (references: %j)',
+  'sends image generation and edits directly to OpenAI (references: %j)',
   async (...references) => {
     expect(await renderBillboard('Alpine billboard', references)).toBe(jpeg)
     expect(sent.url).toBe(
-      `https://ai-gateway.vercel.sh/v1/images/${references.length ? 'edits' : 'generations'}`,
+      `https://api.openai.com/v1/images/${references.length ? 'edits' : 'generations'}`,
     )
-    expect(sent.headers.get('authorization')).toBe('Bearer gateway-test-key')
+    expect(sent.headers.get('authorization')).toBe('Bearer direct-test-key')
     const expected = {
-      model: 'openai/gpt-image-2.5-sunburst',
+      model: 'gpt-image-2.5-sunburst',
       prompt: 'Alpine billboard',
       size: '1536x1024',
       quality: 'high',
@@ -62,10 +61,10 @@ it.each([[], [png, jpeg]])(
   },
 )
 
-it('does not fall back to a direct OpenAI key when Gateway is unconfigured', async () => {
-  vi.stubEnv('AI_GATEWAY_API_KEY', '')
+it('rejects image requests before fetching when the OpenAI key is missing', async () => {
+  vi.stubEnv('OPENAI_API_KEY', '')
   await expect(renderBillboard('Alpine billboard', [])).rejects.toThrow(
-    'AI_GATEWAY_API_KEY',
+    'OPENAI_API_KEY',
   )
   expect(fetcher).not.toHaveBeenCalled()
 })
