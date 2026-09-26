@@ -393,6 +393,10 @@ it('blocks the wrong advertiser and requires explicit confirmation to retry the 
   )
   await act(async () => button('Retry image attachment').click())
   expect(document.body.textContent).toContain('Confirm: Alpine (#42)')
+  expect(document.querySelector('[role="dialog"] input')).toBeNull()
+  expect(document.body.textContent).not.toContain(
+    'Company / advertiser or lead name',
+  )
   expect(fetch).not.toHaveBeenCalled()
   vi.mocked(fetch).mockResolvedValueOnce(
     Response.json({ target: { id: 42, name: 'Alpine', advertiser: 'Alpine' } }),
