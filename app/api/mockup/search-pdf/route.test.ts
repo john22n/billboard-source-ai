@@ -26,6 +26,9 @@ const request = (body: unknown = { query: 'company logo', pages }) =>
   })
 function providerResult(pageNumber: number | null) {
   return Response.json({
+    id: 'resp_pdf',
+    created_at: 1_790_000_000,
+    model: 'gpt-5.4-mini',
     output: [
       {
         type: 'message',

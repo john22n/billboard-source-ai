@@ -133,7 +133,7 @@ The Creative Studio test opens the actual dashboard with a signed test session a
 
 ## Creative Studio AI and attachments
 
-Set the server-only `AI_GATEWAY_API_KEY` in the local environment and the relevant Vercel environments. Creative Studio uses Vercel AI Gateway for OpenAI chat and PDF search (`openai/gpt-5.4-mini`) and image generation/editing (`openai/gpt-image-2.5-sunburst`). It does not fall back to `OPENAI_API_KEY`; other application features still use that direct key.
+Set the server-only `OPENAI_API_KEY` in the local environment and the relevant Vercel environments. Creative Studio calls OpenAI directly for chat and PDF search (`gpt-5.4-mini`) and image generation/editing (`gpt-image-2.5-sunburst`), using the same key as the other OpenAI features. API usage is billed to that OpenAI project.
 
 There is no daily image quota. The existing chat and PDF request rate limits remain. Migration `0009_remove_mockup_quotas.sql` drops the unused quota table; apply it through the normal, approved database rollout after the quota-free code is deployed. Historical migrations remain unchanged.
 

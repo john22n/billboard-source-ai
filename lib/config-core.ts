@@ -103,9 +103,6 @@ export interface ServerConfig {
     requireApiKey: () => string
     requireAdminKey: () => string
   }
-  aiGateway: {
-    requireApiKey: () => string
-  }
   twilio: {
     accountSid: string | null
     authToken: string | null
@@ -549,14 +546,6 @@ export function createServerConfig(env: EnvSource): ServerConfig {
       useNeon: isVercel,
     },
     openai,
-    aiGateway: {
-      requireApiKey: () =>
-        requiredString(
-          env,
-          'AI_GATEWAY_API_KEY',
-          'serverConfig.aiGateway.apiKey',
-        ),
-    },
     twilio,
     taskRouter,
     cron,
