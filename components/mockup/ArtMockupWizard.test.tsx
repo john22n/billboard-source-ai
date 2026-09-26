@@ -389,7 +389,9 @@ it('blocks the wrong advertiser and requires explicit confirmation to retry the 
   expect(fetch).not.toHaveBeenCalled()
   await act(async () => button('Close').click())
   await act(async () =>
-    useMockupStore.getState().recordSubmittedLead(42, 'Alpine', true),
+    useMockupStore
+      .getState()
+      .recordSubmittedLead(42, 'Alpine', true, 'lead-42-receipt'),
   )
   await act(async () => button('Retry image attachment').click())
   expect(document.body.textContent).toContain('Confirm: Alpine (#42)')
@@ -402,7 +404,12 @@ it('blocks the wrong advertiser and requires explicit confirmation to retry the 
     Response.json({ target: { id: 42, name: 'Alpine', advertiser: 'Alpine' } }),
   )
   await act(async () => button('Confirm & attach image').click())
-  expect(body()).toEqual({ leadId: 42, confirmedLeadId: 42, image })
+  expect(body()).toEqual({
+    leadId: 42,
+    confirmedLeadId: 42,
+    receipt: 'lead-42-receipt',
+    image,
+  })
   expect(useMockupStore.getState().state.attachmentFailed).toBe(false)
 })
 

@@ -7,12 +7,13 @@ import { serverConfig } from '@/lib/config'
  */
 export async function renderBillboard(prompt: string, references: string[]) {
   const client = new OpenAI({
-    apiKey: serverConfig.openai.requireApiKey(),
+    apiKey: serverConfig.aiGateway.requireApiKey(),
+    baseURL: 'https://ai-gateway.vercel.sh/v1',
     maxRetries: 0,
     timeout: 180_000,
   })
   const options = {
-    model: 'gpt-image-2.5-sunburst',
+    model: 'openai/gpt-image-2.5-sunburst',
     prompt,
     n: 1,
     size: '1536x1024' as const,

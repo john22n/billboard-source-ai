@@ -23,7 +23,12 @@ export const imageSchema = z.object({
   receipt: z.string().max(6000),
 })
 export type MockupImage = z.infer<typeof imageSchema>
-export type LeadTarget = { id: number; name: string; advertiser: string }
+export type LeadTarget = {
+  id: number
+  name: string
+  advertiser: string
+  receipt?: string
+}
 
 export const WIZARD_ERROR =
   'The wizard could not respond. Your conversation and selected image are unchanged. Please try again.'
