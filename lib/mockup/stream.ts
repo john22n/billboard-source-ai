@@ -16,13 +16,15 @@ export type WizardReply = UIMessage<{
   brand: Brand | null
 }>
 
-/** Final-answer text supersedes interim commentary within the same response. */
+/** Nonempty final-answer text supersedes commentary within the same response. */
 export function replyText(message: WizardReply | undefined) {
   const text = (message?.parts ?? []).filter((part) => part.type === 'text')
   const answer = text.filter(
     (part) => part.providerMetadata?.openai?.phase === 'final_answer',
   )
-  return (answer.length ? answer : text).map((part) => part.text).join('')
+  return (answer.some((part) => part.text.trim()) ? answer : text)
+    .map((part) => part.text)
+    .join('')
 }
 
 /**
