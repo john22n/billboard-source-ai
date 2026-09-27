@@ -235,6 +235,17 @@ function MockupComposer({
 }) {
   const { state, busy: isPending, sessionKey } = useMockupStore()
   const messageId = useId()
+  const input = useRef<HTMLTextAreaElement>(null)
+  const previousMessages = useRef(state.messages)
+  useEffect(() => {
+    if (
+      previousMessages.current !== state.messages &&
+      state.messages.at(-1)?.role === 'assistant'
+    ) {
+      input.current?.focus({ preventScroll: true })
+    }
+    previousMessages.current = state.messages
+  }, [state.messages])
   const isLoading = isPending || !sessionKey
   return (
     <footer className="max-h-[65%] shrink-0 overflow-y-auto border-t bg-background px-4 py-3 sm:px-6">
@@ -251,6 +262,7 @@ function MockupComposer({
             Message
           </Label>
           <Textarea
+            ref={input}
             id={messageId}
             value={draft}
             disabled={!sessionKey}

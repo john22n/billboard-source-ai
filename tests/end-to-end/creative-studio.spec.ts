@@ -368,6 +368,9 @@ for (const placement of ['Form views', 'Lead tools']) {
       expect(chats[0].leadContext).toBe('')
     }
     expect(chats).toHaveLength(1)
+    await expect(
+      studio.getByRole('textbox', { name: 'Message', exact: true }),
+    ).toBeFocused()
     expect(
       (await studio.getByRole('log').innerText()).split(
         questions[firstQuestion],
