@@ -199,10 +199,9 @@ function MockupWelcome() {
         Create a billboard
       </h3>
       <p className="text-base text-muted-foreground">
-        Describe the billboard you want. Your current lead form is included
-        automatically; the wizard asks only for missing details, reviews the
-        advertiser’s website, then renders the mockup. Attach a logo or
-        background any time.
+        Enter “Start” to begin. The wizard will guide you through a series of
+        questions, one at a time, to create your billboard mockup. Your current
+        lead form is included as context. Attach a logo or background any time.
       </p>
     </div>
   )
@@ -265,7 +264,7 @@ function MockupComposer({
                 ? 'Describe a revision, or say Start for a new mockup…'
                 : state.messages.length
                   ? 'Reply to the wizard… (or say skip)'
-                  : 'Describe your billboard…'
+                  : 'Enter Start to begin…'
             }
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {

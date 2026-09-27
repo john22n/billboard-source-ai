@@ -280,9 +280,12 @@ for (const placement of ['Form views', 'Lead tools']) {
     await expect(
       studio.getByText('Active session only', { exact: false }),
     ).toHaveCount(0)
-    await expect(studio.getByText('Say “Start”', { exact: false })).toHaveCount(
-      0,
-    )
+    await expect(
+      studio.getByText('Enter “Start” to begin.', { exact: false }),
+    ).toBeVisible()
+    await expect(
+      studio.getByRole('textbox', { name: 'Message', exact: true }),
+    ).toHaveAttribute('placeholder', 'Enter Start to begin…')
     await expect(
       studio.getByRole('button', { name: 'Use current lead form' }),
     ).toHaveCount(0)
