@@ -105,6 +105,29 @@ async function send(text: string) {
   })
 }
 
+it('automatically asks the first missing question once across two views and remounts', async () => {
+  useMockupStore.getState().clear()
+  useMockupStore.getState().initialize('rep:1')
+  useFormStore.getState().updateField('entityName', 'Alpine Dental')
+  vi.mocked(fetch).mockResolvedValueOnce(
+    streamed('What is the advertiser’s website?'),
+  )
+  await act(async () =>
+    root.render(
+      <React.StrictMode>
+        <ArtMockupWizard key="inline" />
+        <ArtMockupWizard key="outer" />
+      </React.StrictMode>,
+    ),
+  )
+  expect(fetch).toHaveBeenCalledTimes(1)
+  expect(body().leadContext).toBe('Advertiser: Alpine Dental')
+  expect(log()).toContain('What is the advertiser’s website?')
+  await act(async () => root.render(<ArtMockupWizard key="remounted" />))
+  expect(fetch).toHaveBeenCalledTimes(1)
+  expect(log()).toContain('What is the advertiser’s website?')
+})
+
 it('accepts a first request without Start and sends fresh lead context on each turn', async () => {
   useFormStore.getState().updateField('entityName', 'Alpine Dental')
   useFormStore.getState().updateField('website', 'https://alpine.example')

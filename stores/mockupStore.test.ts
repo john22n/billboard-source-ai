@@ -8,6 +8,21 @@ beforeEach(() => {
 })
 
 describe('active mockup lifecycle', () => {
+  it('queues the first question for a fresh session but not a restored conversation', () => {
+    useMockupStore.getState().initialize('rep:1')
+    expect(useMockupStore.getState().opening).toBe('Start')
+    useMockupStore.setState({ opening: null })
+    useMockupStore.getState().initialize('rep:1')
+    expect(useMockupStore.getState().opening).toBeNull()
+    useMockupStore.getState().update({
+      messages: [{ role: 'assistant', text: 'What is the advertiser’s name?' }],
+    })
+    useMockupStore.setState({ sessionKey: null })
+    useMockupStore.getState().initialize('rep:1')
+    expect(useMockupStore.getState().opening).toBeNull()
+    expect(useMockupStore.getState().state.messages).toHaveLength(1)
+  })
+
   it('remembers the exact created lead for attachment retry and does not invent a lead ID', () => {
     useMockupStore.getState().initialize('rep:1')
     useMockupStore
