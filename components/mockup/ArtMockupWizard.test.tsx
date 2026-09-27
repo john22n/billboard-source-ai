@@ -13,6 +13,7 @@ import { ArtMockupWizard } from './ArtMockupWizard'
 import { AttachMockup } from './AttachMockup'
 import { useMockupSession } from '@/hooks/useMockupSession'
 import { useMockupStore } from '@/stores/mockupStore'
+import { useFormStore } from '@/stores/formStore'
 
 let root: Root
 let container: HTMLDivElement
@@ -31,6 +32,7 @@ beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn()
   useMockupStore.getState().clear()
   useMockupStore.getState().initialize('rep:1')
+  useFormStore.getState().reset()
   container = document.createElement('div')
   document.body.append(container)
   root = createRoot(container)
@@ -102,6 +104,43 @@ async function send(text: string) {
       .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
   })
 }
+
+it('accepts a first request without Start and sends fresh lead context on each turn', async () => {
+  useFormStore.getState().updateField('entityName', 'Alpine Dental')
+  useFormStore.getState().updateField('website', 'https://alpine.example')
+  useFormStore.getState().updateField('targetCity', 'Boulder')
+  useFormStore.getState().updateField('phone', '303-555-0123')
+  vi.mocked(fetch)
+    .mockResolvedValueOnce(streamed('What should the billboard focus on?'))
+    .mockResolvedValueOnce(streamed('What text is required?'))
+    .mockResolvedValueOnce(streamed('What tone would you like?'))
+  await act(async () => root.render(<ArtMockupWizard />))
+  expect(fetch).not.toHaveBeenCalled()
+  expect(container.textContent).not.toContain('Say “Start”')
+  expect(container.textContent).not.toContain('Use current lead form')
+  expect(container.querySelector('textarea')?.placeholder).not.toContain(
+    'Start',
+  )
+  await send('Create a billboard for the business in my form')
+  expect(body().messages).toEqual([
+    { role: 'user', text: 'Create a billboard for the business in my form' },
+  ])
+  expect(body().leadContext).toContain('Advertiser: Alpine Dental')
+  expect(body().leadContext).toContain('Website: https://alpine.example')
+  expect(body().leadContext).toContain('Market: Boulder')
+  expect(body().leadContext).not.toContain('303-555-0123')
+  await act(async () =>
+    useFormStore.getState().updateField('targetCity', 'Denver'),
+  )
+  await send('Focus on family dentistry')
+  expect(body(1).leadContext).toContain('Market: Denver')
+  expect(body(1).leadContext).not.toContain('Boulder')
+  expect(body(1).messages).toHaveLength(3)
+  await act(async () => useFormStore.getState().reset())
+  await send('Use the headline "Smile Bigger"')
+  expect(body(2).leadContext).toBe('')
+  expect(body(2).messages).toHaveLength(5)
+})
 
 it('sends Start on the rep’s behalf once, even with two Studio views mounted', async () => {
   vi.mocked(fetch).mockResolvedValueOnce(
