@@ -42,6 +42,21 @@ const idle = {
   pending: null,
 }
 
+/** Restore only this login's saved mockup, tolerating unavailable browser storage. */
+function restoreSession(key: string) {
+  let state = restart()
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(STORAGE) || 'null')
+    if (saved?.key === key && Array.isArray(saved.state?.messages))
+      state = { ...state, ...saved.state }
+    else sessionStorage.removeItem(STORAGE)
+  } catch {
+    // update() reports the persistence warning if storage is unavailable.
+  }
+  state.attachments = state.attachments.slice(0, 1)
+  return state
+}
+
 export const useMockupStore = create<Store>((set, get) => ({
   state: restart(),
   sessionKey: null,
@@ -51,17 +66,14 @@ export const useMockupStore = create<Store>((set, get) => ({
   storageWarning: '',
   initialize(key) {
     if (get().sessionKey === key) return
-    let state = restart()
-    try {
-      const saved = JSON.parse(sessionStorage.getItem(STORAGE) || 'null')
-      if (saved?.key === key && Array.isArray(saved.state?.messages))
-        state = { ...state, ...saved.state }
-      else sessionStorage.removeItem(STORAGE)
-    } catch {
-      // A browser can deny access entirely. update() reports the persistence warning.
-    }
-    state.attachments = state.attachments.slice(0, 1)
-    set({ sessionKey: key, state, epoch: get().epoch + 1, ...idle })
+    const state = restoreSession(key)
+    set({
+      sessionKey: key,
+      state,
+      epoch: get().epoch + 1,
+      ...idle,
+      opening: !state.messages.length && !state.image ? 'Start' : null,
+    })
     get().update({})
   },
   update(change) {

@@ -52,11 +52,12 @@ function MockupConversation() {
     end.current?.scrollIntoView({ block: 'nearest' })
   }, [state.messages.length, isPending, pending?.reply.length])
 
-  // "Start" is sent on the rep's behalf so the wizard opens with Question 1.
+  // Claim the opening from shared state so two views or Strict Mode send it once.
   useEffect(() => {
-    if (!opening || !sessionKey) return
+    const store = useMockupStore.getState()
+    if (!store.opening || !store.sessionKey || store.busy) return
     useMockupStore.setState({ opening: null })
-    void sendMessage(opening)
+    void sendMessage(store.opening)
   }, [opening, sessionKey])
 
   function send() {

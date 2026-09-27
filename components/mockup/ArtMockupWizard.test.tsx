@@ -32,6 +32,9 @@ beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn()
   useMockupStore.getState().clear()
   useMockupStore.getState().initialize('rep:1')
+  // Turn-level tests start after the automatic opening has been claimed.
+  // The opening lifecycle test below initializes its own fresh session.
+  useMockupStore.setState({ opening: null })
   useFormStore.getState().reset()
   container = document.createElement('div')
   document.body.append(container)

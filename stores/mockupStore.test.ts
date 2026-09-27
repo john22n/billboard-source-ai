@@ -44,9 +44,9 @@ describe('active mockup lifecycle', () => {
     expect(useMockupStore.getState().state.attachmentFailed).toBe(true)
   })
 
-  it('queues Start only for an explicit reset and clears the previous conversation', () => {
+  it('queues a new opening after an explicit reset and clears the previous conversation', () => {
     useMockupStore.getState().initialize('rep:1')
-    expect(useMockupStore.getState().opening).toBeNull()
+    useMockupStore.setState({ opening: null })
     useMockupStore.getState().update({
       messages: [{ role: 'assistant', text: 'Old question' }],
     })

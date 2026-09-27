@@ -116,6 +116,7 @@ async function answerQuestions(
 }
 
 for (const placement of ['Form views', 'Lead tools']) {
+  const firstQuestion = placement === 'Lead tools' ? 1 : 0
   test(`Creative Studio in ${placement} chats through the wizard, renders a mockup, retries a revision, and resets`, async ({
     page,
     context,
@@ -273,10 +274,13 @@ for (const placement of ['Form views', 'Lead tools']) {
     await expect(
       studio.getByRole('button', { name: 'Use current lead form' }),
     ).toHaveCount(0)
+    await expect(studio.getByRole('log')).toContainText(
+      questions[firstQuestion],
+    )
     await expect(
       studio.getByRole('textbox', { name: 'Message', exact: true }),
-    ).toHaveAttribute('placeholder', 'Describe your billboard…')
-    expect(chats).toHaveLength(0)
+    ).toHaveValue('')
+    expect(chats).toHaveLength(1)
     await page.screenshot({
       path: testInfo.outputPath('gpp3-studio.png'),
       animations: 'disabled',
@@ -331,19 +335,12 @@ for (const placement of ['Form views', 'Lead tools']) {
       ).toBeVisible()
       await tab.click()
       await expect(draft).toHaveValue('Edited in full Studio')
-      await draft.fill('Create a billboard using my lead form')
-      await draft.press('Enter')
+      await draft.fill('')
       // The lead form's advertiser is offered up front, so the wizard skips Question 1.
       await expect(studio.getByRole('log')).toContainText(questions[1])
       await expect(studio.getByRole('log')).not.toContainText(questions[0])
       expect(chats[0].leadContext).toBe('Advertiser: Example AI')
     } else {
-      const message = studio.getByRole('textbox', {
-        name: 'Message',
-        exact: true,
-      })
-      await message.fill('Help me create a billboard')
-      await message.press('Enter')
       await expect(studio.getByRole('log')).toContainText(questions[0])
       expect(chats[0].leadContext).toBe('')
     }
