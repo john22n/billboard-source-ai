@@ -1,7 +1,12 @@
 'use client'
 
 import { create } from 'zustand'
-import { openingMessage, restart, type MockupState } from '@/lib/mockup/state'
+import {
+  openingMessage,
+  restart,
+  type MockupState,
+  type MockupImage,
+} from '@/lib/mockup/state'
 
 const STORAGE = 'billboard-active-mockup'
 type Store = {
@@ -26,6 +31,7 @@ type Store = {
     advertiser: string | null | undefined,
     attachmentFailed: boolean,
     receipt?: string,
+    image?: MockupImage,
   ) => void
   start: (lead?: Record<string, unknown>) => void
   clear: () => void
@@ -80,7 +86,7 @@ export const useMockupStore = create<Store>((set, get) => ({
       })
     }
   },
-  recordSubmittedLead(id, advertiser, attachmentFailed, receipt) {
+  recordSubmittedLead(id, advertiser, attachmentFailed, receipt, image) {
     if (!id) return
     get().update({
       lastLead: {
@@ -88,6 +94,7 @@ export const useMockupStore = create<Store>((set, get) => ({
         name: advertiser || 'Submitted lead',
         advertiser: advertiser || '',
         receipt,
+        image: attachmentFailed ? image : undefined,
       },
       attachmentFailed,
     })

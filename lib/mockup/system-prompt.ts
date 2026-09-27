@@ -97,7 +97,7 @@ The final image should show:
 
 * A wide horizontal billboard
 * The completed advertiser design printed on the billboard face
-* A clean blue sky background
+* A clean blue sky with the target location’s skyline in the background behind the billboard, subtle enough to keep the billboard dominant and readable. If no location was provided, use a clean blue sky without inventing a city. Respect any user-supplied background instead.
 * A realistic outdoor billboard structure
 * Clear readable billboard copy
 * Strong visual hierarchy
