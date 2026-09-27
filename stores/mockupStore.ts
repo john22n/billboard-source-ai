@@ -72,7 +72,6 @@ export const useMockupStore = create<Store>((set, get) => ({
       state,
       epoch: get().epoch + 1,
       ...idle,
-      opening: !state.messages.length && !state.image ? 'Start' : null,
     })
     get().update({})
   },

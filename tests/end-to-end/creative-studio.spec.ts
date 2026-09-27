@@ -286,18 +286,11 @@ for (const placement of ['Form views', 'Lead tools']) {
     await expect(
       studio.getByRole('button', { name: 'Use current lead form' }),
     ).toHaveCount(0)
-    await expect(studio.getByRole('log')).toContainText(
-      questions[firstQuestion],
-    )
+    await expect(studio.getByRole('log')).toBeEmpty()
     await expect(
       studio.getByRole('textbox', { name: 'Message', exact: true }),
     ).toHaveValue('')
-    expect(
-      (await studio.getByRole('log').innerText()).split(
-        questions[firstQuestion],
-      ),
-    ).toHaveLength(2)
-    expect(chats).toHaveLength(1)
+    expect(chats).toHaveLength(0)
     await page.screenshot({
       path: testInfo.outputPath('gpp3-studio.png'),
       animations: 'disabled',
@@ -353,15 +346,30 @@ for (const placement of ['Form views', 'Lead tools']) {
       await tab.click()
       await expect(draft).toHaveValue('Edited in full Studio')
       await draft.fill('')
+      expect(chats).toHaveLength(0)
+      await studio
+        .getByRole('button', { name: 'Start Mockup', exact: true })
+        .click()
       // The lead form's advertiser is offered up front, so the wizard skips Question 1.
       await expect(studio.getByRole('log')).toContainText(questions[1])
       await expect(studio.getByRole('log')).not.toContainText(questions[0])
       expect(chats[0].leadContext).toBe('Advertiser: Example AI')
     } else {
+      const message = studio.getByRole('textbox', {
+        name: 'Message',
+        exact: true,
+      })
+      await message.fill('Start')
+      await message.press('Enter')
       await expect(studio.getByRole('log')).toContainText(questions[0])
       expect(chats[0].leadContext).toBe('')
     }
     expect(chats).toHaveLength(1)
+    expect(
+      (await studio.getByRole('log').innerText()).split(
+        questions[firstQuestion],
+      ),
+    ).toHaveLength(2)
 
     const fixturePage = await context.newPage()
     await fixturePage.setViewportSize({ width: 600, height: 300 })
