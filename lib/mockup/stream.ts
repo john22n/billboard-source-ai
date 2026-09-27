@@ -16,11 +16,13 @@ export type WizardReply = UIMessage<{
   brand: Brand | null
 }>
 
-/** The reply text of a streaming or finished wizard message. */
+/** Final-answer text supersedes interim commentary within the same response. */
 export function replyText(message: WizardReply | undefined) {
-  return (message?.parts ?? [])
-    .flatMap((part) => (part.type === 'text' ? [part.text] : []))
-    .join('')
+  const text = (message?.parts ?? []).filter((part) => part.type === 'text')
+  const answer = text.filter(
+    (part) => part.providerMetadata?.openai?.phase === 'final_answer',
+  )
+  return (answer.length ? answer : text).map((part) => part.text).join('')
 }
 
 /**

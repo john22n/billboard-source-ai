@@ -43,6 +43,7 @@ const postSubmissionImage = {
 /**
  * The chat route answers with an AI SDK UI message stream. Text arrives in
  * several deltas; the image and brand ride on the finish chunk's metadata.
+ * OpenAI may repeat commentary as a final answer in the same response.
  */
 function wizardStream(turn: {
   reply: string
@@ -53,7 +54,18 @@ function wizardStream(turn: {
   const words = turn.reply.split(/(?<= )/)
   const chunks: Record<string, unknown>[] = [
     { type: 'start' },
-    { type: 'text-start', id: 't' },
+    {
+      type: 'text-start',
+      id: 'commentary',
+      providerMetadata: { openai: { phase: 'commentary' } },
+    },
+    { type: 'text-delta', id: 'commentary', delta: turn.reply },
+    { type: 'text-end', id: 'commentary' },
+    {
+      type: 'text-start',
+      id: 't',
+      providerMetadata: { openai: { phase: 'final_answer' } },
+    },
     ...words.map((delta) => ({ type: 'text-delta', id: 't', delta })),
   ]
   if (turn.error) chunks.push({ type: 'error', errorText: turn.error })
@@ -280,6 +292,11 @@ for (const placement of ['Form views', 'Lead tools']) {
     await expect(
       studio.getByRole('textbox', { name: 'Message', exact: true }),
     ).toHaveValue('')
+    expect(
+      (await studio.getByRole('log').innerText()).split(
+        questions[firstQuestion],
+      ),
+    ).toHaveLength(2)
     expect(chats).toHaveLength(1)
     await page.screenshot({
       path: testInfo.outputPath('gpp3-studio.png'),
