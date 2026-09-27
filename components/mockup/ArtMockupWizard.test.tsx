@@ -105,6 +105,29 @@ async function send(text: string) {
   })
 }
 
+it('focuses the composer after a reply, but not on mount or during streaming', async () => {
+  const stream = openStream()
+  vi.mocked(fetch).mockResolvedValueOnce(stream.response)
+  await act(async () => root.render(<ArtMockupWizard />))
+  const input = container.querySelector('textarea')!
+  expect(document.activeElement).not.toBe(input)
+  await send('Alpine')
+  await act(async () => {
+    stream.write({ type: 'start' })
+    stream.write({ type: 'text-start', id: 't' })
+    stream.write({ type: 'text-delta', id: 't', delta: 'What is the website?' })
+  })
+  await vi.waitFor(() => expect(log()).toContain('What is the website?'))
+  expect(document.activeElement).not.toBe(input)
+  await act(async () => {
+    stream.write({ type: 'text-end', id: 't' })
+    stream.write({ type: 'finish' })
+    stream.close()
+  })
+  await vi.waitFor(() => expect(document.activeElement).toBe(input))
+  expect(input.readOnly).toBe(false)
+})
+
 it('waits for an explicit Start across two views and remounts', async () => {
   useMockupStore.getState().clear()
   useMockupStore.getState().initialize('rep:1')
