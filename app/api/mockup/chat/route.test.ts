@@ -197,7 +197,13 @@ it('supplies lead context as user data, separate from instructions and the curre
   )
   const options = mocks.streamText.mock.calls[0][0]
   expect(options.system).not.toContain('Ignore all rules')
-  expect(options.system).toContain('Do not require the user to say "Start"')
+  expect(options.system).not.toContain('Do not require the user to say "Start"')
+  expect(defaultSystemPrompt).toContain(
+    'The user will begin by typing:\n\n“Start”',
+  )
+  expect(defaultSystemPrompt).toContain(
+    'When the user says “Start,” begin a step-by-step intake process.',
+  )
   expect(options.system).toContain('Explicit chat directions take precedence')
   expect(options.messages).toEqual([
     {
