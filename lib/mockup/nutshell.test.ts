@@ -31,6 +31,17 @@ const rpc = (result: unknown) => Response.json({ result })
 afterEach(() => vi.unstubAllGlobals())
 
 describe('native Nutshell image delivery', () => {
+  it.each([{ error: { message: 'Invalid lead' } }, { result: null }])(
+    'rejects an unusable RPC result before attempting an upload: %j',
+    async (body) => {
+      const fetcher = vi.fn().mockResolvedValue(Response.json(body))
+      vi.stubGlobal('fetch', fetcher)
+      await expect(attachMockup(42, image, 'credentials')).rejects.toThrow(
+        'Nutshell request failed.',
+      )
+      expect(fetcher).toHaveBeenCalledTimes(1)
+    },
+  )
   it('preserves existing files and retries the same file reservation without creating a lead', async () => {
     const fetcher = vi
       .fn()

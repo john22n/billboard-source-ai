@@ -35,6 +35,10 @@ const revisedImage = {
   id: '22222222-2222-4222-8222-222222222222',
   dataUrl: `data:image/jpeg;base64,${readFileSync(new URL('./fixtures/revised-billboard.jpg', import.meta.url)).toString('base64')}`,
 }
+const postSubmissionImage = {
+  ...image,
+  id: '33333333-3333-4333-8333-333333333333',
+}
 
 /**
  * The chat route answers with an AI SDK UI message stream. Text arrives in
@@ -194,7 +198,7 @@ for (const placement of ['Form views', 'Lead tools']) {
         return route.fulfill(wizardStream(json))
       }
       if (body.image) {
-        expect(body.image).toEqual(image)
+        expect(body.image).toEqual(revisions >= 2 ? revisedImage : image)
         expect(body.brand).toEqual(brand)
         // The model fails mid-stream: the client must discard the partial reply.
         if (++revisions === 1)
@@ -203,7 +207,7 @@ for (const placement of ['Form views', 'Lead tools']) {
           )
         return reply({
           reply: 'Here is the revised mockup.',
-          image: revisedImage,
+          image: revisions === 3 ? postSubmissionImage : revisedImage,
         })
       }
       if (!starting) answered++
@@ -739,6 +743,9 @@ for (const placement of ['Form views', 'Lead tools']) {
       await expect(
         studio.getByRole('button', { name: 'Retry image attachment' }),
       ).toBeVisible()
+      await revision.fill('Make the headline larger again')
+      await studio.getByRole('button', { name: 'Send message' }).click()
+      await expect(selected).toHaveAttribute('src', postSubmissionImage.dataUrl)
     }
 
     await page.reload()
@@ -753,10 +760,12 @@ for (const placement of ['Form views', 'Lead tools']) {
         'The selected page is preserved. Remove and reattach the PDF to search again after a refresh.',
       ),
     ).toBeVisible()
-    await expect(selected).toHaveAttribute('src', revisedImage.dataUrl)
+    const currentImage =
+      placement === 'Lead tools' ? postSubmissionImage : revisedImage
+    await expect(selected).toHaveAttribute('src', currentImage.dataUrl)
     await expect(download).toHaveAttribute(
       'download',
-      'billboard-concept-22222222-2222-4222-8222-222222222222.jpg',
+      `billboard-concept-${currentImage.id}.jpg`,
     )
     if (placement === 'Lead tools') {
       const retry = studio.getByRole('button', {
@@ -781,6 +790,7 @@ for (const placement of ['Form views', 'Lead tools']) {
         .click()
       await expect(dialog).toBeHidden()
       await expect(retry).toHaveCount(0)
+      await expect(selected).toHaveAttribute('src', postSubmissionImage.dataUrl)
       expect(attached).toEqual({
         leadId: 42,
         confirmedLeadId: 42,
@@ -827,8 +837,8 @@ for (const placement of ['Form views', 'Lead tools']) {
     await expect(studio.getByRole('button', { name: /^Remove / })).toHaveCount(
       0,
     )
-    expect(revisions).toBe(2)
-    expect(chats).toHaveLength(placement === 'Lead tools' ? 10 : 11)
+    expect(revisions).toBe(placement === 'Lead tools' ? 3 : 2)
+    expect(chats).toHaveLength(11)
     expect(unexpected).toEqual([])
   })
 }

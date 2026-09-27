@@ -391,7 +391,7 @@ it('blocks the wrong advertiser and requires explicit confirmation to retry the 
   await act(async () =>
     useMockupStore
       .getState()
-      .recordSubmittedLead(42, 'Alpine', true, 'lead-42-receipt'),
+      .recordSubmittedLead(42, 'Alpine', true, 'lead-42-receipt', image),
   )
   await act(async () => button('Retry image attachment').click())
   expect(document.body.textContent).toContain('Confirm: Alpine (#42)')
@@ -411,6 +411,70 @@ it('blocks the wrong advertiser and requires explicit confirmation to retry the 
     image,
   })
   expect(useMockupStore.getState().state.attachmentFailed).toBe(false)
+})
+
+it('retries the original submitted image after a revision and refresh without replacing the current design', async () => {
+  const revised = {
+    ...image,
+    id: '22345678-1234-4123-8123-123456789abc',
+    dataUrl: 'data:image/jpeg;base64,cmV2aXNlZA==',
+    receipt: 'revised-receipt',
+  }
+  useMockupStore.getState().update({ image })
+  useMockupStore
+    .getState()
+    .recordSubmittedLead(
+      42,
+      'Alpine',
+      true,
+      'original-attachment-receipt',
+      image,
+    )
+  vi.mocked(fetch).mockResolvedValueOnce(
+    streamed('Here is the revision.', { image: revised, brand: null }),
+  )
+  await act(async () => root.render(<ArtMockupWizard />))
+  await send('Make the text bigger')
+  await act(async () => {
+    useMockupStore.setState({ sessionKey: null })
+    useMockupStore.getState().initialize('rep:1')
+  })
+  expect(useMockupStore.getState().state.image).toEqual(revised)
+  await act(async () => button('Retry image attachment').click())
+  expect(
+    document.querySelector('[role="dialog"] img')?.getAttribute('src'),
+  ).toBe(image.dataUrl)
+  vi.mocked(fetch).mockResolvedValueOnce(Response.json({ success: true }))
+  await act(async () => button('Confirm & attach image').click())
+  expect(body(1)).toEqual({
+    leadId: 42,
+    confirmedLeadId: 42,
+    receipt: 'original-attachment-receipt',
+    image,
+  })
+  expect(useMockupStore.getState().state.attachmentFailed).toBe(false)
+  expect(useMockupStore.getState().state.image).toEqual(revised)
+  expect(useMockupStore.getState().state.lastLead?.image).toBeUndefined()
+})
+
+it('does not pair an older saved receipt with the currently selected image when the original is missing', async () => {
+  useMockupStore.getState().update({
+    image,
+    attachmentFailed: true,
+    lastLead: {
+      id: 42,
+      name: 'Alpine',
+      advertiser: 'Alpine',
+      receipt: 'older-receipt',
+    },
+  })
+  await act(async () => root.render(<AttachMockup />))
+  await act(async () => button('Retry image attachment').click())
+  expect(button('Confirm & attach image').disabled).toBe(true)
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain(
+    'original image',
+  )
+  expect(fetch).not.toHaveBeenCalled()
 })
 
 function SessionProbe() {
