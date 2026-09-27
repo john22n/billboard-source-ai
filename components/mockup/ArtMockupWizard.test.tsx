@@ -309,6 +309,55 @@ it('shows the reply as it streams and commits it once when the turn finishes', a
   expect(useMockupStore.getState().pending).toBeNull()
 })
 
+it.each([
+  'What is the advertiser’s name?',
+  'I will ask for the advertiser’s name first.',
+])(
+  'replaces commentary with the final question instead of joining both: %s',
+  async (commentary) => {
+    const question = 'What is the advertiser’s name?'
+    const stream = openStream()
+    vi.mocked(fetch).mockResolvedValueOnce(stream.response)
+    await act(async () => root.render(<ArtMockupWizard />))
+    await send('Start')
+    await act(async () => {
+      stream.write({ type: 'start' })
+      stream.write({
+        type: 'text-start',
+        id: 'commentary',
+        providerMetadata: { openai: { phase: 'commentary' } },
+      })
+      stream.write({ type: 'text-delta', id: 'commentary', delta: commentary })
+      stream.write({ type: 'text-end', id: 'commentary' })
+    })
+    await vi.waitFor(() => expect(log()).toContain(commentary))
+    await act(async () => {
+      stream.write({
+        type: 'text-start',
+        id: 'answer',
+        providerMetadata: { openai: { phase: 'final_answer' } },
+      })
+      stream.write({ type: 'text-delta', id: 'answer', delta: question })
+      stream.write({ type: 'text-end', id: 'answer' })
+    })
+    await vi.waitFor(() =>
+      expect(useMockupStore.getState().pending?.reply).toBe(question),
+    )
+    expect(log().split(question)).toHaveLength(2)
+    await act(async () => {
+      stream.write({
+        type: 'finish',
+        messageMetadata: { image: null, brand: null },
+      })
+      stream.close()
+    })
+    await vi.waitFor(() => expect(useMockupStore.getState().pending).toBeNull())
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(useMockupStore.getState().state.messages.at(-1)?.text).toBe(question)
+    expect(log().split(question)).toHaveLength(2)
+  },
+)
+
 it('supplies the ready message when the wizard renders an image without words', async () => {
   vi.mocked(fetch).mockResolvedValueOnce(streamed('', { image, brand: null }))
   await act(async () => root.render(<ArtMockupWizard />))
