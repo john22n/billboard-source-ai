@@ -39,7 +39,8 @@ export type MockupState = {
   attachments: CreativeAttachment[]
   brand: Brand | null
   image: MockupImage | null
-  lastLead: LeadTarget | null
+  /** The receipt-bound original, independent of later design revisions. */
+  lastLead: (LeadTarget & { image?: MockupImage }) | null
   attachmentFailed: boolean
 }
 

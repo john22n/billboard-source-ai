@@ -1,3 +1,4 @@
+import { nutshellRequest } from '@/lib/nutshell'
 import { sameAdvertiser, type LeadTarget, type MockupImage } from './state'
 
 type NutshellFile = {
@@ -22,25 +23,8 @@ async function mockupNutshellRequest<T>(
   params: Record<string, unknown>,
   credentials: string,
 ): Promise<T> {
-  const response = await fetch('https://app.nutshell.com/api/v1/json', {
-    method: 'POST',
-    headers: {
-      Authorization: `Basic ${credentials}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: crypto.randomUUID(),
-      method,
-      params,
-    }),
-    signal: AbortSignal.timeout(20_000),
-    cache: 'no-store',
-    redirect: 'error',
-  })
-  const body = await response.json()
-  if (!response.ok || body.error || !body.result)
-    throw new Error('Nutshell request failed.')
+  const body = await nutshellRequest(method, params, credentials)
+  if (body.error || !body.result) throw new Error('Nutshell request failed.')
   return body.result as T
 }
 

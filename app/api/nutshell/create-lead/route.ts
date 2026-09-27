@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { upsertNutshellLead } from '@/lib/dal'
+import { nutshellRequest } from '@/lib/nutshell'
 import {
   imageSchema,
   sameAdvertiser,
@@ -83,28 +84,6 @@ interface NutshellLeadRequest {
 
   // Transcript
   transcript: string
-}
-
-async function nutshellRequest(
-  method: string,
-  params: Record<string, unknown>,
-  credentials: string,
-) {
-  const response = await fetch('https://app.nutshell.com/api/v1/json', {
-    method: 'POST',
-    headers: {
-      Authorization: `Basic ${credentials}`,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      method,
-      params,
-      id: `${method}-${Date.now()}`,
-    }),
-  })
-  return response.json()
 }
 
 // Retry wrapper — retries up to `retries` times with exponential backoff

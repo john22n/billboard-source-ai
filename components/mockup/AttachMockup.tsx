@@ -16,15 +16,16 @@ import {
   sameAdvertiser,
   type LeadTarget,
   type MockupImage,
+  type MockupState,
 } from '@/lib/mockup/state'
 
 export function AttachMockup() {
   const { state, update, busy: generating } = useMockupStore()
   const [open, setOpen] = useState(false)
-  const [target, setTarget] = useState<LeadTarget | null>(null)
+  const [target, setTarget] = useState<MockupState['lastLead']>(null)
   const [isPending, setIsPending] = useState(false)
   const [message, setMessage] = useState('')
-  const image = state.image
+  const image = (open ? target?.image : state.lastLead?.image) ?? state.image
   if (!image || !state.attachmentFailed) return null
 
   async function attach(target: LeadTarget, image: MockupImage) {
@@ -45,13 +46,12 @@ export function AttachMockup() {
       const result = await response.json()
       if (!response.ok) throw new Error(result.error)
       const current = useMockupStore.getState()
-      if (
-        current.epoch !== epoch ||
-        current.state.lastLead?.id !== target.id ||
-        current.state.image?.id !== image.id
-      )
-        return
-      update({ attachmentFailed: false })
+      // Only clear the submitted snapshot, never a newer pending attachment.
+      if (current.epoch !== epoch || current.state.lastLead !== target) return
+      update({
+        attachmentFailed: false,
+        lastLead: { ...target, image: undefined },
+      })
     } catch (error) {
       setMessage(
         error instanceof Error
@@ -83,16 +83,17 @@ export function AttachMockup() {
           <DialogHeader>
             <DialogTitle>Send this mockup to Nutshell</DialogTitle>
             <DialogDescription>
-              Retry the image for the lead already created below. The target
-              cannot be changed, and this never creates a new lead.
+              Retry the original submitted image for the lead already created
+              below, not any later revision. The target cannot be changed, and
+              this never creates a new lead.
             </DialogDescription>
           </DialogHeader>
           {target && <AttachmentPreview target={target} image={image} />}
-          {!target?.receipt && (
+          {(!target?.receipt || !target.image) && (
             <p role="alert" className="text-sm text-destructive">
-              This older mockup has no verified attachment target. Download it
-              and attach it to the created lead manually. Do not resubmit the
-              Lead Form.
+              This older mockup has no verified attachment target or original
+              image. Download it and attach it to the created lead manually. Do
+              not resubmit the Lead Form.
             </p>
           )}
           {message && (
@@ -109,10 +110,12 @@ export function AttachMockup() {
                 isPending ||
                 generating ||
                 !target?.receipt ||
+                !target.image ||
                 !sameAdvertiser(target.advertiser, image.advertiser)
               }
               onClick={() => {
-                if (target?.receipt) void attach(target, image)
+                if (target?.receipt && target.image)
+                  void attach(target, target.image)
               }}
             >
               {isPending ? 'Working…' : 'Confirm & attach image'}

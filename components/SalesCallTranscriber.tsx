@@ -1181,21 +1181,21 @@ function useNutshellSubmission(
     setNutshellMessage('')
     setValidationErrors([])
     const formData = getFormData()
+    const mockupEpoch = useMockupStore.getState().epoch
+    const payload = buildNutshellPayload(
+      formData,
+      ballpark,
+      fullTranscript,
+      additionalContacts,
+    )
     try {
       const response = await fetch('/api/nutshell/create-lead', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(
-          buildNutshellPayload(
-            formData,
-            ballpark,
-            fullTranscript,
-            additionalContacts,
-          ),
-        ),
+        body: JSON.stringify(payload),
       })
       const result: NutshellResult = await response.json()
-      if (response.ok) {
+      if (response.ok && useMockupStore.getState().epoch === mockupEpoch) {
         useMockupStore
           .getState()
           .recordSubmittedLead(
@@ -1203,6 +1203,7 @@ function useNutshellSubmission(
             formData.entityName,
             !!result.imageAttachmentFailed,
             result.imageAttachmentReceipt,
+            payload.mockupImage,
           )
       }
       handleNutshellResponse(response, result, {
