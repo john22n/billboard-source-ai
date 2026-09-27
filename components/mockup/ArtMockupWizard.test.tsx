@@ -142,10 +142,11 @@ it('accepts a first request without Start and sends fresh lead context on each t
     .mockResolvedValueOnce(streamed('What tone would you like?'))
   await act(async () => root.render(<ArtMockupWizard />))
   expect(fetch).not.toHaveBeenCalled()
-  expect(container.textContent).not.toContain('Say “Start”')
+  expect(container.textContent).toContain('Enter “Start” to begin.')
+  expect(container.textContent).not.toContain('Describe the billboard you want')
   expect(container.textContent).not.toContain('Use current lead form')
-  expect(container.querySelector('textarea')?.placeholder).not.toContain(
-    'Start',
+  expect(container.querySelector('textarea')?.placeholder).toBe(
+    'Enter Start to begin…',
   )
   await send('Create a billboard for the business in my form')
   expect(body().messages).toEqual([
