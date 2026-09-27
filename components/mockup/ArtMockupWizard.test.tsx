@@ -143,6 +143,7 @@ it('accepts a first request without Start and sends fresh lead context on each t
 })
 
 it('sends Start on the rep’s behalf once, even with two Studio views mounted', async () => {
+  useFormStore.getState().updateField('entityName', 'Alpine')
   vi.mocked(fetch).mockResolvedValueOnce(
     streamed('What is the advertiser’s name?'),
   )
@@ -154,21 +155,20 @@ it('sends Start on the rep’s behalf once, even with two Studio views mounted',
       </>,
     ),
   )
-  await act(async () =>
-    useMockupStore.getState().start({ entityName: 'Alpine' }),
-  )
+  await act(async () => useMockupStore.getState().start())
   expect(fetch).toHaveBeenCalledTimes(1)
   expect(vi.mocked(fetch).mock.calls[0][0]).toBe('/api/mockup/chat')
   expect(body()).toEqual({
     messages: [
       {
         role: 'user',
-        text: 'Start\n\nHere is what I already know from the lead form:\nAdvertiser: Alpine',
+        text: 'Start',
       },
     ],
     attachments: [],
     image: null,
     brand: null,
+    leadContext: 'Advertiser: Alpine',
   })
   expect(useMockupStore.getState().state.messages.at(-1)).toEqual({
     role: 'assistant',
@@ -202,6 +202,7 @@ it('sends the conversation, blocks duplicates while pending, and appends the rep
     attachments: [],
     image: null,
     brand: null,
+    leadContext: '',
   })
   await act(async () =>
     finish(streamed('What is the goal?', { brand, image: null })),

@@ -58,10 +58,10 @@ export function restart(): MockupState {
 export const START_COMMAND = /^(start|start mockup)[.!]?$/i
 
 /**
- * Opening message for a new mockup. Only direct facts from the lead form are
+ * Current creative context. Only direct facts from the lead form are
  * offered; a caller's phone number is not automatically billboard copy.
  */
-export function openingMessage(lead: Record<string, unknown> = {}) {
+export function leadFormContext(lead: Record<string, unknown> = {}) {
   const value = (key: string) =>
     typeof lead[key] === 'string' && lead[key].trim() ? lead[key].trim() : ''
   const facts = [
@@ -78,13 +78,10 @@ export function openingMessage(lead: Record<string, unknown> = {}) {
     ['Focus', value('accomplishDetails')],
     ['Board type', value('boardType')],
   ].filter(([, fact]) => fact)
-  if (!facts.length) return 'Start'
-  return [
-    'Start',
-    '',
-    'Here is what I already know from the lead form:',
-    ...facts.map(([label, fact]) => `${label}: ${fact}`),
-  ].join('\n')
+  return facts
+    .map(([label, fact]) => `${label}: ${fact}`)
+    .join('\n')
+    .slice(0, 8000)
 }
 
 export function sameAdvertiser(a: string, b: string) {

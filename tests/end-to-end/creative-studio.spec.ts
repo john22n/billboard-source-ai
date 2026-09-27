@@ -170,14 +170,14 @@ for (const placement of ['Form views', 'Lead tools']) {
       const messages: Message[] = body.messages
       const latest = messages.at(-1)!
       expect(latest.role).toBe('user')
-      const starting = /^Start(\n|$)/.test(latest.text)
+      const starting = messages.length === 1
       if (starting) {
-        // "Start" always begins a fresh conversation without the previous mockup.
+        // The first request needs no Start; an explicit reset still clears artifacts.
         expect(messages).toHaveLength(1)
         expect(body.image).toBeNull()
         expect(body.brand).toBeNull()
         history = []
-        answered = latest.text.includes('Advertiser: Example AI') ? 1 : 0
+        answered = body.leadContext.includes('Advertiser: Example AI') ? 1 : 0
       } else {
         expect(messages.slice(0, -1)).toEqual(history)
         expect(
@@ -267,10 +267,26 @@ for (const placement of ['Form views', 'Lead tools']) {
     await expect(
       studio.getByText('Active session only', { exact: false }),
     ).toHaveCount(0)
+    await expect(studio.getByText('Say “Start”', { exact: false })).toHaveCount(
+      0,
+    )
+    await expect(
+      studio.getByRole('button', { name: 'Use current lead form' }),
+    ).toHaveCount(0)
+    await expect(
+      studio.getByRole('textbox', { name: 'Message', exact: true }),
+    ).toHaveAttribute('placeholder', 'Describe your billboard…')
+    expect(chats).toHaveLength(0)
     await page.screenshot({
       path: testInfo.outputPath('gpp3-studio.png'),
       animations: 'disabled',
     })
+    await page.setViewportSize({ width: 390, height: 844 })
+    await studio.screenshot({
+      path: testInfo.outputPath('studio-welcome-mobile.png'),
+      animations: 'disabled',
+    })
+    await page.setViewportSize({ width: 1440, height: 1000 })
     if (placement === 'Lead tools') {
       await expect(
         page.getByPlaceholder('Company Name', { exact: true }),
@@ -315,18 +331,21 @@ for (const placement of ['Form views', 'Lead tools']) {
       ).toBeVisible()
       await tab.click()
       await expect(draft).toHaveValue('Edited in full Studio')
-      await draft.fill('')
-      await studio
-        .getByRole('button', { name: 'Use current lead form', exact: true })
-        .click()
+      await draft.fill('Create a billboard using my lead form')
+      await draft.press('Enter')
       // The lead form's advertiser is offered up front, so the wizard skips Question 1.
       await expect(studio.getByRole('log')).toContainText(questions[1])
       await expect(studio.getByRole('log')).not.toContainText(questions[0])
+      expect(chats[0].leadContext).toBe('Advertiser: Example AI')
     } else {
-      await studio
-        .getByRole('button', { name: 'Start Mockup', exact: true })
-        .click()
+      const message = studio.getByRole('textbox', {
+        name: 'Message',
+        exact: true,
+      })
+      await message.fill('Help me create a billboard')
+      await message.press('Enter')
       await expect(studio.getByRole('log')).toContainText(questions[0])
+      expect(chats[0].leadContext).toBe('')
     }
     expect(chats).toHaveLength(1)
 

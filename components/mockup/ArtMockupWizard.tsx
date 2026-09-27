@@ -16,6 +16,7 @@ import { useMockupStore } from '@/stores/mockupStore'
 import { useFormStore } from '@/stores/formStore'
 import { getErrorMessage } from '@/lib/error-handling'
 import {
+  leadFormContext,
   MAX_MESSAGES,
   MOCKUP_READY,
   START_COMMAND,
@@ -189,7 +190,7 @@ function MockupHeader() {
 }
 
 function MockupWelcome() {
-  const { state, busy: isPending, sessionKey, start } = useMockupStore()
+  const { state } = useMockupStore()
   if (state.messages.length) return null
   return (
     <div className="space-y-4 py-6">
@@ -197,18 +198,11 @@ function MockupWelcome() {
         Create a billboard
       </h3>
       <p className="text-base text-muted-foreground">
-        Say “Start” and the wizard asks one question at a time, reviews the
+        Describe the billboard you want. Your current lead form is included
+        automatically; the wizard asks only for missing details, reviews the
         advertiser’s website, then renders the mockup. Attach a logo or
         background any time.
       </p>
-      <Button
-        variant="secondary"
-        size="sm"
-        disabled={isPending || !sessionKey}
-        onClick={() => start({ ...useFormStore.getState().getFormData() })}
-      >
-        Use current lead form
-      </Button>
     </div>
   )
 }
@@ -270,7 +264,7 @@ function MockupComposer({
                 ? 'Describe a revision, or say Start for a new mockup…'
                 : state.messages.length
                   ? 'Reply to the wizard… (or say skip)'
-                  : 'Say Start to begin…'
+                  : 'Describe your billboard…'
             }
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
@@ -325,6 +319,9 @@ async function sendMessage(text: string) {
       attachments: state.attachments,
       image: state.image,
       brand: state.brand,
+      leadContext: leadFormContext({
+        ...useFormStore.getState().getFormData(),
+      }),
     },
     (reply) => {
       if (current()) useMockupStore.setState({ pending: { text, reply } })
@@ -360,7 +357,9 @@ type ReplyOutcome =
  * reply text as it grows. Network, server and mid-stream failures become messages.
  */
 async function requestReply(
-  body: Pick<MockupState, 'messages' | 'attachments' | 'image' | 'brand'>,
+  body: Pick<MockupState, 'messages' | 'attachments' | 'image' | 'brand'> & {
+    leadContext: string
+  },
   onReply: (reply: string) => void,
 ): Promise<ReplyOutcome> {
   try {

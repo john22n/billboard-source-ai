@@ -1,12 +1,7 @@
 'use client'
 
 import { create } from 'zustand'
-import {
-  openingMessage,
-  restart,
-  type MockupState,
-  type MockupImage,
-} from '@/lib/mockup/state'
+import { restart, type MockupState, type MockupImage } from '@/lib/mockup/state'
 
 const STORAGE = 'billboard-active-mockup'
 type Store = {
@@ -33,7 +28,7 @@ type Store = {
     receipt?: string,
     image?: MockupImage,
   ) => void
-  start: (lead?: Record<string, unknown>) => void
+  start: () => void
   clear: () => void
 }
 
@@ -100,8 +95,8 @@ export const useMockupStore = create<Store>((set, get) => ({
     })
   },
   /** "Start" always discards the previous advertiser, image and references. */
-  start(lead) {
-    set({ epoch: get().epoch + 1, ...idle, opening: openingMessage(lead) })
+  start() {
+    set({ epoch: get().epoch + 1, ...idle, opening: 'Start' })
     get().update(restart())
   },
   clear() {

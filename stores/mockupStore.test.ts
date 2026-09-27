@@ -29,22 +29,18 @@ describe('active mockup lifecycle', () => {
     expect(useMockupStore.getState().state.attachmentFailed).toBe(true)
   })
 
-  it('queues an opening message that carries the current lead, and a plain Start without one', () => {
+  it('queues Start only for an explicit reset and clears the previous conversation', () => {
     useMockupStore.getState().initialize('rep:1')
     expect(useMockupStore.getState().opening).toBeNull()
     useMockupStore.getState().update({
       messages: [{ role: 'assistant', text: 'Old question' }],
     })
     useMockupStore.setState({ draft: 'half-typed', error: 'old failure' })
-    useMockupStore.getState().start({ entityName: 'Later entered advertiser' })
-    expect(useMockupStore.getState().opening).toContain(
-      'Advertiser: Later entered advertiser',
-    )
+    useMockupStore.getState().start()
+    expect(useMockupStore.getState().opening).toBe('Start')
     expect(useMockupStore.getState().state.messages).toEqual([])
     expect(useMockupStore.getState().draft).toBe('')
     expect(useMockupStore.getState().error).toBe('')
-    useMockupStore.getState().start()
-    expect(useMockupStore.getState().opening).toBe('Start')
   })
 
   it('restores only this authenticated session, never an old advertiser after logout/login', () => {

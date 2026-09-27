@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { openingMessage, restart, START_COMMAND } from './state'
+import { leadFormContext, restart, START_COMMAND } from './state'
 
 describe('mockup wizard state', () => {
-  it('opens with lead facts but never treats a caller phone as billboard copy', () => {
-    const opening = openingMessage({
+  it('supplies lead facts but never treats a caller phone as billboard copy', () => {
+    const context = leadFormContext({
       entityName: 'Alpine Dental',
       phone: '303-555-0123',
       targetCity: 'Boulder',
@@ -11,16 +11,21 @@ describe('mockup wizard state', () => {
       billboardPurpose: 'Calls',
       website: '  ',
     })
-    expect(opening.startsWith('Start\n')).toBe(true)
-    expect(opening).toContain('Advertiser: Alpine Dental')
-    expect(opening).toContain('Market: Boulder, CO')
-    expect(opening).toContain('Goal: Calls')
-    expect(opening).not.toContain('Website')
-    expect(opening).not.toContain('303-555-0123')
+    expect(context).toBe(
+      'Advertiser: Alpine Dental\nGoal: Calls\nMarket: Boulder, CO',
+    )
   })
-  it('opens with a plain Start when the lead form is empty', () => {
-    expect(openingMessage()).toBe('Start')
-    expect(openingMessage({ entityName: '' })).toBe('Start')
+  it('omits context when the lead form has no creative details', () => {
+    expect(leadFormContext()).toBe('')
+    expect(leadFormContext({ entityName: '', phone: '303-555-0123' })).toBe('')
+  })
+  it('bounds context to the API limit without shortening normal creative fields', () => {
+    expect(leadFormContext({ accomplishDetails: 'a'.repeat(7993) })).toBe(
+      `Focus: ${'a'.repeat(7993)}`,
+    )
+    expect(leadFormContext({ accomplishDetails: 'a'.repeat(7994) })).toBe(
+      `Focus: ${'a'.repeat(7993)}`,
+    )
   })
   it('restart discards the selected image and all prior creative direction', () => {
     expect(restart()).toEqual({
