@@ -8,10 +8,9 @@ beforeEach(() => {
 })
 
 describe('active mockup lifecycle', () => {
-  it('queues the first question for a fresh session but not a restored conversation', () => {
+  it('never queues an opening for a fresh or restored session', () => {
     useMockupStore.getState().initialize('rep:1')
-    expect(useMockupStore.getState().opening).toBe('Start')
-    useMockupStore.setState({ opening: null })
+    expect(useMockupStore.getState().opening).toBeNull()
     useMockupStore.getState().initialize('rep:1')
     expect(useMockupStore.getState().opening).toBeNull()
     useMockupStore.getState().update({

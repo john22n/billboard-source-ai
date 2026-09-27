@@ -108,7 +108,7 @@ async function send(text: string) {
   })
 }
 
-it('automatically asks the first missing question once across two views and remounts', async () => {
+it('waits for an explicit Start across two views and remounts', async () => {
   useMockupStore.getState().clear()
   useMockupStore.getState().initialize('rep:1')
   useFormStore.getState().updateField('entityName', 'Alpine Dental')
@@ -123,11 +123,14 @@ it('automatically asks the first missing question once across two views and remo
       </React.StrictMode>,
     ),
   )
+  expect(fetch).not.toHaveBeenCalled()
+  expect(log()).toBe('')
+  await act(async () => root.render(<ArtMockupWizard key="remounted" />))
+  expect(fetch).not.toHaveBeenCalled()
+  expect(log()).toBe('')
+  await act(async () => button('Start Mockup').click())
   expect(fetch).toHaveBeenCalledTimes(1)
   expect(body().leadContext).toBe('Advertiser: Alpine Dental')
-  expect(log()).toContain('What is the advertiser’s website?')
-  await act(async () => root.render(<ArtMockupWizard key="remounted" />))
-  expect(fetch).toHaveBeenCalledTimes(1)
   expect(log()).toContain('What is the advertiser’s website?')
 })
 
