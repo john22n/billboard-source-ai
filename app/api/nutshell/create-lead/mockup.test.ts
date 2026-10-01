@@ -10,16 +10,19 @@ vi.mock('@/lib/auth', () => ({
 }))
 vi.mock('@/lib/dal', () => ({ upsertNutshellLead: vi.fn() }))
 vi.mock('@/lib/config', () => ({
-  serverConfig: { nutshell: { requireApiKey: () => 'test-only' } },
+  serverConfig: {
+    nutshell: { requireApiKey: () => 'test-only' },
+    auth: { jwtSecret: 'test-secret-that-is-long-enough-for-hs256-signing' },
+  },
   isMissingConfig: () => false,
   configErrorResponseBody: () => ({}),
 }))
-vi.mock('@/lib/mockup/receipts', () => ({ verifyImage: vi.fn() }))
 vi.mock('@/lib/rate-limit', () => ({
   rateLimit: async () => ({ allowed: true }),
 }))
 import { POST as create } from './route'
 import { POST as retry } from '../../mockup/leads/route'
+import { signArtifact } from '@/lib/mockup/receipts'
 
 const image = {
   id: '12345678-1234-4123-8123-123456789abc',
@@ -27,8 +30,15 @@ const image = {
   dataUrl: 'data:image/jpeg;base64,/9j/2Q==',
   receipt: 'signed',
 }
-beforeEach(() => {
+beforeEach(async () => {
   vi.spyOn(console, 'log').mockImplementation(() => {})
+  image.receipt = await signArtifact(
+    { userId: 'rep', sessionStartedAt: 123 },
+    'image',
+    image.dataUrl,
+    image.advertiser,
+    image.id,
+  )
 })
 afterEach(() => {
   vi.restoreAllMocks()
@@ -93,18 +103,29 @@ it('returns successful lead creation on failed image upload; retry only attaches
     }),
   )
   expect(response.status).toBe(200)
-  expect(await response.json()).toMatchObject({
+  const created = await response.json()
+  expect(created).toMatchObject({
     success: true,
     leadId: 42,
     imageAttachmentFailed: true,
+    imageAttachmentReceipt: expect.any(String),
     message: 'Lead created; image could not be attached',
   })
-  const retried = await retry(
+  const request = (leadId: number, receipt = created.imageAttachmentReceipt) =>
     new Request('http://localhost/api/mockup/leads', {
       method: 'POST',
-      body: JSON.stringify({ leadId: 42, confirmedLeadId: 42, image }),
-    }),
-  )
+      body: JSON.stringify({
+        leadId,
+        confirmedLeadId: leadId,
+        receipt,
+        image,
+      }),
+    })
+  const callsBeforeRetry = vi.mocked(fetch).mock.calls.length
+  expect((await retry(request(73))).status).toBe(400)
+  expect((await retry(request(42, ''))).status).toBe(400)
+  expect(vi.mocked(fetch).mock.calls).toHaveLength(callsBeforeRetry)
+  const retried = await retry(request(42))
   expect(retried.status).toBe(200)
   expect(methods.filter((method) => method === 'newLead')).toHaveLength(1)
   expect(methods.filter((method) => method === 'editLead')).toHaveLength(1)

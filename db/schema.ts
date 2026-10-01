@@ -160,7 +160,7 @@ export type AppMetrics = InferSelectModel<typeof appMetrics>
 // Global administrator-managed instructions, separate from advertiser content.
 export const artWizardSettings = pgTable('art_wizard_settings', {
   id: integer('id').primaryKey().default(1),
-  imageGenerationPrompt: text('image_generation_prompt').notNull(),
+  systemPrompt: text('system_prompt').notNull(),
 })
 
 // Fixed-size buckets used for serverless-safe abuse controls. A key is reused
@@ -242,14 +242,3 @@ export const reportedIssues = pgTable(
 )
 
 export type ReportedIssue = InferSelectModel<typeof reportedIssues>
-
-// One bounded row per rep; creative content never enters persistent storage.
-export const mockupQuotas = pgTable('mockup_quotas', {
-  userId: varchar('user_id', { length: 21 })
-    .primaryKey()
-    .references(() => user.id, { onDelete: 'cascade' }),
-  day: varchar('day', { length: 10 }).notNull(),
-  successes: integer('successes').notNull().default(0),
-  reservation: varchar('reservation', { length: 36 }),
-  reservedUntil: timestamp('reserved_until', { withTimezone: true }),
-})

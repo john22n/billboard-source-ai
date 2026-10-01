@@ -1,12 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { upsertNutshellLead } from '@/lib/dal'
+import { nutshellRequest } from '@/lib/nutshell'
 import {
   imageSchema,
   sameAdvertiser,
   type MockupImage,
-} from '@/lib/mockup/intake'
-import { verifyImage } from '@/lib/mockup/receipts'
+} from '@/lib/mockup/state'
+import {
+  signArtifact,
+  verifyImage,
+  type MockupSession,
+} from '@/lib/mockup/receipts'
 import { attachMockup } from '@/lib/mockup/nutshell'
 import {
   configErrorResponseBody,
@@ -79,28 +84,6 @@ interface NutshellLeadRequest {
 
   // Transcript
   transcript: string
-}
-
-async function nutshellRequest(
-  method: string,
-  params: Record<string, unknown>,
-  credentials: string,
-) {
-  const response = await fetch('https://app.nutshell.com/api/v1/json', {
-    method: 'POST',
-    headers: {
-      Authorization: `Basic ${credentials}`,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      method,
-      params,
-      id: `${method}-${Date.now()}`,
-    }),
-  })
-  return response.json()
 }
 
 // Retry wrapper — retries up to `retries` times with exponential backoff
@@ -496,7 +479,7 @@ async function createLeadAndPersist(options: {
   noteParts: string[]
   credentials: string
   userEmail: string
-  createdByUserId: string
+  session: MockupSession
   contactIds: number[]
   accountId: number | null
   mockupImage?: MockupImage
@@ -507,7 +490,7 @@ async function createLeadAndPersist(options: {
     noteParts,
     credentials,
     userEmail,
-    createdByUserId,
+    session,
     contactIds,
     accountId,
   } = options
@@ -549,7 +532,7 @@ async function createLeadAndPersist(options: {
         description,
         status: 0,
         assigneeEmail: userEmail,
-        createdByUserId,
+        createdByUserId: session.userId,
         nutshellCreatedAt: new Date(),
       })
     } catch (dbError) {
@@ -557,8 +540,16 @@ async function createLeadAndPersist(options: {
     }
   }
   let imageAttachmentFailed = false
+  let imageAttachmentReceipt: string | undefined
   if (leadId && options.mockupImage) {
     try {
+      imageAttachmentReceipt = await signArtifact(
+        session,
+        'attachment',
+        options.mockupImage.dataUrl,
+        options.mockupImage.advertiser,
+        `${Number(leadId)}:${options.mockupImage.id}`,
+      )
       await attachMockup(Number(leadId), options.mockupImage, credentials)
     } catch {
       // Lead creation succeeded. Retry only the image against this exact lead.
@@ -571,6 +562,7 @@ async function createLeadAndPersist(options: {
     contactIds,
     accountId,
     imageAttachmentFailed,
+    imageAttachmentReceipt,
     message: imageAttachmentFailed
       ? 'Lead created; image could not be attached'
       : 'Lead created successfully in Nutshell',
@@ -653,7 +645,7 @@ export async function POST(req: NextRequest) {
       noteParts,
       credentials,
       userEmail,
-      createdByUserId: session.userId,
+      session,
       contactIds,
       accountId,
       mockupImage: data.mockupImage,

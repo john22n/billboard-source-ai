@@ -5,7 +5,9 @@ vi.mock('@/lib/auth', () => ({
   getSession: async () => (auth.signedIn ? { userId: 'rep' } : null),
 }))
 vi.mock('@/lib/config', () => ({
-  serverConfig: { openai: { requireApiKey: () => 'test' } },
+  serverConfig: {
+    openai: { requireApiKey: () => 'direct-test-key' },
+  },
 }))
 vi.mock('@/lib/rate-limit', () => ({
   rateLimit: async () => ({ allowed: auth.allowed }),
@@ -25,14 +27,13 @@ const request = (body: unknown = { query: 'company logo', pages }) =>
 function providerResult(pageNumber: number | null) {
   return Response.json({
     id: 'resp_pdf',
-    created_at: 1790112545,
+    created_at: 1_790_000_000,
     model: 'gpt-5.4-mini',
     output: [
       {
-        id: 'msg_pdf',
         type: 'message',
         role: 'assistant',
-        status: 'completed',
+        id: 'msg_pdf',
         content: [
           {
             type: 'output_text',
@@ -47,7 +48,7 @@ function providerResult(pageNumber: number | null) {
         ],
       },
     ],
-    usage: { input_tokens: 10, output_tokens: 20, total_tokens: 30 },
+    usage: { input_tokens: 10, output_tokens: 20 },
   })
 }
 beforeEach(() => {
@@ -59,18 +60,29 @@ afterEach(() => vi.unstubAllGlobals())
 
 it('searches all pages and returns a matching page beyond the first', async () => {
   const response = await POST(request())
+  expect(fetcher.mock.calls[0][0]).toBe('https://api.openai.com/v1/responses')
+  const headers = new Headers(fetcher.mock.calls[0][1]?.headers)
+  expect(headers.get('authorization')).toBe('Bearer direct-test-key')
   expect(response.status).toBe(200)
   expect(await response.json()).toEqual({
     pageNumber: 3,
     reason: 'Logo is on this page.',
   })
-  const input = JSON.parse(String(fetcher.mock.calls[0][1]?.body)).input
+  const body = JSON.parse(String(fetcher.mock.calls[0][1]?.body))
+  expect(body.model).toBe('gpt-5.4-mini')
+  expect(body.text.format).toMatchObject({ type: 'json_schema', strict: true })
+  const input = body.input
   const content = input.flatMap(
     (message: { content: unknown }) => message.content,
   )
   expect(
     content.filter((part: { type: string }) => part.type === 'input_image'),
-  ).toHaveLength(3)
+  ).toEqual(
+    Array(3).fill({
+      type: 'input_image',
+      image_url: 'data:image/jpeg;base64,/9j/2Q==',
+    }),
+  )
   expect(JSON.stringify(input)).toContain('PDF page 3 of 3')
   expect(JSON.stringify(input)).toContain('company logo')
 })

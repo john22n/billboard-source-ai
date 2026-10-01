@@ -130,3 +130,11 @@ pnpm exec playwright test creative-studio.spec.ts
 Playwright starts an isolated Next.js server and a temporary PostgreSQL cluster containing only a test user. Both stop after the run, and the database files are removed. Shell and `.env` service credentials are cleared for the app; the suite does not use the dev or production database.
 
 The Creative Studio test opens the actual dashboard with a signed test session and exercises all seven intake answers, editable approval, website palette propagation, generation, download, failed revision/retry, refresh persistence, and reset. AI and telephony HTTP responses are mocked, so it verifies the browser workflow and request contracts—not live model quality or website extraction. Existing API/unit tests cover those server-side contracts. The tiny JPEG fixtures are synthetic, not customer artwork.
+
+## Creative Studio AI and attachments
+
+Set the server-only `OPENAI_API_KEY` in the local environment and the relevant Vercel environments. Creative Studio calls OpenAI directly for chat and PDF search (`gpt-5.4-mini`) and image generation/editing (`gpt-image-2.5-sunburst`), using the same key as the other OpenAI features. API usage is billed to that OpenAI project.
+
+There is no daily image quota. The existing chat and PDF request rate limits remain. Migration `0009_remove_mockup_quotas.sql` drops the unused quota table; apply it through the normal, approved database rollout after the quota-free code is deployed. Historical migrations remain unchanged.
+
+If an image upload fails after Nutshell creates a lead, **Retry image attachment** sends only the original image to that exact lead. The server verifies a signed receipt binding the lead, image, advertiser, and login session, and the browser preserves the receipt and original image across refreshes in the same tab, separately from later design revisions. The retry never creates another lead, offers an alternate lead, or replaces the currently selected design. Older saved mockups without the receipt or original image must be downloaded and attached manually; do not resubmit the Lead Form to retry an image.

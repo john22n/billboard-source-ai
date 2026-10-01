@@ -1,7 +1,7 @@
 'use client'
 
 import { create } from 'zustand'
-import { importLead, restart, type MockupState } from '@/lib/mockup/intake'
+import { restart, type MockupState, type MockupImage } from '@/lib/mockup/state'
 
 const STORAGE = 'billboard-active-mockup'
 type Store = {
@@ -13,6 +13,10 @@ type Store = {
   pdfSource: File | null
   draft: string
   error: string
+  /** A message the wizard should send on the rep's behalf, such as "Start". */
+  opening: string | null
+  /** The turn in flight: the rep's message and the reply streamed so far. */
+  pending: { text: string; reply: string } | null
   setDraft: (draft: string) => void
   storageWarning: string
   initialize: (key: string) => void
@@ -21,47 +25,53 @@ type Store = {
     id: number | undefined,
     advertiser: string | null | undefined,
     attachmentFailed: boolean,
+    receipt?: string,
+    image?: MockupImage,
   ) => void
-  start: (lead?: Record<string, unknown>) => void
+  start: () => void
   clear: () => void
+}
+
+const idle = {
+  busy: false,
+  preparingFiles: false,
+  pdfSource: null,
+  draft: '',
+  error: '',
+  opening: null,
+  pending: null,
+}
+
+/** Restore only this login's saved mockup, tolerating unavailable browser storage. */
+function restoreSession(key: string) {
+  let state = restart()
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(STORAGE) || 'null')
+    if (saved?.key === key && Array.isArray(saved.state?.messages))
+      state = { ...state, ...saved.state }
+    else sessionStorage.removeItem(STORAGE)
+  } catch {
+    // update() reports the persistence warning if storage is unavailable.
+  }
+  state.attachments = state.attachments.slice(0, 1)
+  return state
 }
 
 export const useMockupStore = create<Store>((set, get) => ({
   state: restart(),
   sessionKey: null,
   epoch: 0,
-  busy: false,
-  preparingFiles: false,
-  pdfSource: null,
-  draft: '',
-  error: '',
+  ...idle,
   setDraft: (draft) => set({ draft }),
   storageWarning: '',
   initialize(key) {
     if (get().sessionKey === key) return
-    let state = { ...restart(), started: false }
-    try {
-      const saved = JSON.parse(sessionStorage.getItem(STORAGE) || 'null')
-      if (
-        saved?.key === key &&
-        saved.state?.intake &&
-        Array.isArray(saved.state.messages)
-      )
-        state = { ...state, ...saved.state }
-      else sessionStorage.removeItem(STORAGE)
-    } catch {
-      // A browser can deny access entirely. update() reports the persistence warning.
-    }
-    state.attachments = state.attachments.slice(0, 1)
+    const state = restoreSession(key)
     set({
       sessionKey: key,
       state,
       epoch: get().epoch + 1,
-      busy: false,
-      preparingFiles: false,
-      pdfSource: null,
-      draft: '',
-      error: '',
+      ...idle,
     })
     get().update({})
   },
@@ -82,30 +92,23 @@ export const useMockupStore = create<Store>((set, get) => ({
       })
     }
   },
-  recordSubmittedLead(id, advertiser, attachmentFailed) {
+  recordSubmittedLead(id, advertiser, attachmentFailed, receipt, image) {
     if (!id) return
     get().update({
       lastLead: {
         id: Number(id),
         name: advertiser || 'Submitted lead',
         advertiser: advertiser || '',
+        receipt,
+        image: attachmentFailed ? image : undefined,
       },
       attachmentFailed,
     })
   },
-  start(lead) {
-    set({
-      epoch: get().epoch + 1,
-      busy: false,
-      preparingFiles: false,
-      pdfSource: null,
-      draft: '',
-      error: '',
-    })
-    get().update({
-      ...restart(),
-      ...(lead ? { intake: importLead(lead) } : {}),
-    })
+  /** "Start" always discards the previous advertiser, image and references. */
+  start() {
+    set({ epoch: get().epoch + 1, ...idle, opening: 'Start' })
+    get().update(restart())
   },
   clear() {
     try {
@@ -117,11 +120,7 @@ export const useMockupStore = create<Store>((set, get) => ({
       state: restart(),
       sessionKey: null,
       epoch: get().epoch + 1,
-      busy: false,
-      preparingFiles: false,
-      pdfSource: null,
-      draft: '',
-      error: '',
+      ...idle,
       storageWarning: '',
     })
   },

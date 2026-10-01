@@ -1,57 +1,29 @@
 import { readFileSync } from 'node:fs'
 import { SignJWT } from 'jose'
-import { expect, test } from 'playwright/test'
+import { expect, test, type Locator } from 'playwright/test'
 import { baseUrl, jwtSecret, userId } from './environment'
 
-const answers = [
-  {
-    field: 'advertiser',
-    value: 'Example AI',
-    question: 'What is the advertiser’s name?',
-  },
-  {
-    field: 'website',
-    value: 'https://example.com',
-    question: 'What is their website? You can say skip.',
-  },
-  {
-    field: 'goal',
-    value: 'Awareness',
-    question:
-      'What should this billboard accomplish: awareness, calls, visits, an event, political, hiring, an opening, or an offer?',
-  },
-  {
-    field: 'market',
-    value: 'Denver',
-    question: 'Which city, market, or audience should it reach?',
-  },
-  {
-    field: 'focus',
-    value: 'AI Integration',
-    question: 'What product, service, event, or message should it focus on?',
-  },
-  {
-    field: 'required',
-    value: 'website and website content',
-    question:
-      'What exact text must appear? Include any phone, website, slogan, date, address, candidate name, or legal disclaimer—or say skip.',
-  },
-  {
-    field: 'tone',
-    value: 'Professional',
-    question:
-      'What tone feels right: professional, bold, premium, fun, urgent, community, political, minimal, or family-friendly? Unsure is fine.',
-  },
+const questions = [
+  'What is the advertiser’s name?',
+  'What is the advertiser’s website?',
+  'What is the main goal of this billboard?',
+  'What city, market, or audience is this billboard targeting?',
+  'What product, service, event, or message should the billboard focus on?',
+  'Is there any required text that must appear on the billboard?',
+  'What tone should the design have?',
 ]
-const summary = {
-  headline: 'AI for your business',
-  supporting: 'AI Integration',
-  contact: 'example.com',
-  direction:
-    'Navy #14283f background, orange #ed7b32 accents, cream #f9e7c4 text.',
-  caution:
-    'Keep the headline short and the website easy to read at driving speed.',
-}
+const answers = [
+  'Example AI',
+  'https://example.com',
+  'Awareness',
+  'Denver',
+  'AI Integration',
+  'website and website content',
+  'Professional',
+]
+const brand = { website: 'https://example.com', logo: null, receipt: null }
+const wizardError =
+  'The wizard could not respond. Your conversation and selected image are unchanged. Please try again.'
 const image = {
   id: '11111111-1111-4111-8111-111111111111',
   advertiser: 'Example AI',
@@ -63,9 +35,101 @@ const revisedImage = {
   id: '22222222-2222-4222-8222-222222222222',
   dataUrl: `data:image/jpeg;base64,${readFileSync(new URL('./fixtures/revised-billboard.jpg', import.meta.url)).toString('base64')}`,
 }
+const postSubmissionImage = {
+  ...image,
+  id: '33333333-3333-4333-8333-333333333333',
+}
+
+/**
+ * The chat route answers with an AI SDK UI message stream. Text arrives in
+ * several deltas; the image and brand ride on the finish chunk's metadata.
+ * OpenAI may repeat commentary as a final answer in the same response.
+ */
+function wizardStream(turn: {
+  reply: string
+  image?: unknown
+  brand?: unknown
+  error?: string
+}) {
+  const words = turn.reply.split(/(?<= )/)
+  const chunks: Record<string, unknown>[] = [
+    { type: 'start' },
+    {
+      type: 'text-start',
+      id: 'commentary',
+      providerMetadata: { openai: { phase: 'commentary' } },
+    },
+    { type: 'text-delta', id: 'commentary', delta: turn.reply },
+    { type: 'text-end', id: 'commentary' },
+    {
+      type: 'text-start',
+      id: 't',
+      providerMetadata: { openai: { phase: 'final_answer' } },
+    },
+    ...words.map((delta) => ({ type: 'text-delta', id: 't', delta })),
+  ]
+  if (turn.error) chunks.push({ type: 'error', errorText: turn.error })
+  else
+    chunks.push(
+      { type: 'text-end', id: 't' },
+      {
+        type: 'finish',
+        messageMetadata: {
+          image: turn.image ?? null,
+          brand: turn.brand ?? null,
+        },
+      },
+    )
+  return {
+    status: 200,
+    headers: {
+      'content-type': 'text/event-stream',
+      'x-vercel-ai-ui-message-stream': 'v1',
+    },
+    body: chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join(''),
+  }
+}
+
+/** Page 2, not the gray cover or orange logo page, must supply the reference. */
+function expectPageTwoColors(colors: number[][]) {
+  const expected = [
+    [200, 229, 245],
+    [69, 133, 90],
+  ]
+  expected.forEach((pixel, index) =>
+    pixel.forEach((value, channel) =>
+      expect(Math.abs(colors[index][channel] - value)).toBeLessThan(4),
+    ),
+  )
+}
+
+function expectCompactImage(file: { dataUrl: string }) {
+  expect(file.dataUrl).toMatch(/^data:image\/(png|jpeg);base64,/)
+  expect(file.dataUrl.length).toBeLessThanOrEqual(400_000)
+}
+
+/** Answers each remaining wizard question from the shared script, one turn at a time. */
+async function answerQuestions(
+  studio: Locator,
+  firstQuestion: number,
+  afterAnswer: (index: number) => Promise<unknown>,
+) {
+  const message = studio.getByRole('textbox', { name: 'Message', exact: true })
+  for (const [offset, answer] of answers.slice(firstQuestion).entries()) {
+    const index = firstQuestion + offset
+    await expect(studio.getByRole('log')).toContainText(questions[index])
+    await message.fill(answer)
+    await message.press('Enter')
+    await expect(message).toHaveValue('')
+    await expect(message).toBeFocused()
+    await expect(message).toBeEditable()
+    await afterAnswer(index)
+  }
+}
 
 for (const placement of ['Form views', 'Lead tools']) {
-  test(`Creative Studio in ${placement} completes intake, approves the summary, retries a revision, and resets`, async ({
+  const firstQuestion = placement === 'Lead tools' ? 1 : 0
+  test(`Creative Studio in ${placement} chats through the wizard, renders a mockup, retries a revision, and resets`, async ({
     page,
     context,
   }, testInfo) => {
@@ -86,18 +150,13 @@ for (const placement of ['Form views', 'Lead tools']) {
       },
     ])
 
-    let intake: Record<string, string | null> = {
-      advertiser: null,
-      website: null,
-      goal: null,
-      market: null,
-      focus: null,
-      required: null,
-      tone: null,
-      boardType: 'Static',
-    }
-    let answerCount = 0
-    const generations: Record<string, unknown>[] = []
+    type Message = { role: 'user' | 'assistant'; text: string }
+    const chats: Record<string, unknown>[] = []
+    let history: Message[] = []
+    let answered = 0
+    let revisions = 0
+    let createdLeads = 0
+    let attached: Record<string, unknown> | undefined
     const unexpected: string[] = []
     await page.route('**/api/**', async (route) => {
       unexpected.push(new URL(route.request().url()).pathname)
@@ -117,56 +176,61 @@ for (const placement of ['Form views', 'Lead tools']) {
     })) {
       await page.route(`**${path}`, (route) => route.fulfill(response))
     }
-    await page.route('**/api/mockup/intake', async (route) => {
+    // The wizard is mocked: it replies with the next scripted question, then an image.
+    await page.route('**/api/mockup/chat', async (route) => {
       const body = route.request().postDataJSON()
-      const answer = answers[answerCount++]
-      expect(body).toMatchObject({
-        intake,
-        message: answer.value,
-        review: false,
-      })
-      expect(
-        body.attachments.map((file: { name: string }) => file.name),
-      ).toEqual(['scene.pdf'])
-      expect(body.attachments[0]).toMatchObject({
-        pageNumber: 2,
-        pageCount: 3,
-        searchQuery: 'mountain background',
-      })
-      expect(body.attachmentInstructions).toContain(answer.value)
-      intake = { ...intake, [answer.field]: answer.value }
-      return route.fulfill({
-        json: {
-          intake,
-          ...(answerCount === answers.length
-            ? {
-                summary,
-                brand: {
-                  notes: 'Website palette reviewed.',
-                  fallback: '',
-                  logo: null,
-                  receipt: null,
-                },
-              }
-            : {}),
-        },
-      })
-    })
-    await page.route('**/api/mockup/generate', async (route) => {
-      generations.push(route.request().postDataJSON())
-      if (generations.length === 2)
-        return route.fulfill({
-          status: 502,
-          json: {
-            error:
-              'The image could not be generated. Your selected image is unchanged.',
-          },
+      chats.push(body)
+      const messages: Message[] = body.messages
+      const latest = messages.at(-1)!
+      expect(latest.role).toBe('user')
+      const starting = messages.length === 1
+      if (starting) {
+        // The first request needs no Start; an explicit reset still clears artifacts.
+        expect(messages).toHaveLength(1)
+        expect(body.image).toBeNull()
+        expect(body.brand).toBeNull()
+        history = []
+        answered = body.leadContext.includes('Advertiser: Example AI') ? 1 : 0
+      } else {
+        expect(messages.slice(0, -1)).toEqual(history)
+        expect(
+          body.attachments.map((file: { name: string }) => file.name),
+        ).toEqual(['scene.pdf'])
+        expect(body.attachments[0]).toMatchObject({
+          pageNumber: 2,
+          pageCount: 3,
+          searchQuery: 'mountain background',
         })
-      return route.fulfill({
-        json: {
-          image: generations.length === 1 ? image : revisedImage,
-        },
-      })
+      }
+      const reply = (json: {
+        reply: string
+        image?: unknown
+        brand?: unknown
+      }) => {
+        history = [...history, latest, { role: 'assistant', text: json.reply }]
+        return route.fulfill(wizardStream(json))
+      }
+      if (body.image) {
+        expect(body.image).toEqual(revisions >= 2 ? revisedImage : image)
+        expect(body.brand).toEqual(brand)
+        // The model fails mid-stream: the client must discard the partial reply.
+        if (++revisions === 1)
+          return route.fulfill(
+            wizardStream({ reply: 'Adjusting the ', error: wizardError }),
+          )
+        return reply({
+          reply: 'Here is the revised mockup.',
+          image: revisions === 3 ? postSubmissionImage : revisedImage,
+        })
+      }
+      if (!starting) answered++
+      if (answered >= questions.length)
+        return reply({
+          reply: 'Here is your billboard mockup. Tell me what to change.',
+          image,
+          brand,
+        })
+      return reply({ reply: questions[answered] })
     })
     // Prevent accidental calls to external maps, analytics, or communication providers.
     await page.route(
@@ -194,8 +258,6 @@ for (const placement of ['Form views', 'Lead tools']) {
       await page
         .getByPlaceholder('Company Name', { exact: true })
         .fill('Example AI')
-      intake.advertiser = 'Example AI'
-      answerCount = 1
     }
     const tab = page
       .getByRole('tablist', { name: placement })
@@ -210,7 +272,7 @@ for (const placement of ['Form views', 'Lead tools']) {
       studio.getByRole('heading', { name: 'Creative Studio', exact: true }),
     ).toBeVisible()
     await expect(
-      studio.getByRole('textbox', { name: 'Your answer', exact: true }),
+      studio.getByRole('textbox', { name: 'Message', exact: true }),
     ).toBeEnabled()
     await expect(
       studio.getByText('One billboard. One clear idea.', { exact: false }),
@@ -218,10 +280,37 @@ for (const placement of ['Form views', 'Lead tools']) {
     await expect(
       studio.getByText('Active session only', { exact: false }),
     ).toHaveCount(0)
+    await expect(
+      studio.getByText('Enter “Start” to begin.', { exact: false }),
+    ).toBeVisible()
+    await expect(
+      studio.getByRole('textbox', { name: 'Message', exact: true }),
+    ).toHaveAttribute('placeholder', 'Enter Start to begin…')
+    await expect(
+      studio.getByRole('button', { name: 'Use current lead form' }),
+    ).toHaveCount(0)
+    const answerFromForm = studio.getByRole('button', {
+      name: 'Answer from form',
+      exact: true,
+    })
+    await expect(answerFromForm).toBeEnabled({
+      enabled: placement === 'Lead tools',
+    })
+    await expect(studio.getByRole('log')).toBeEmpty()
+    await expect(
+      studio.getByRole('textbox', { name: 'Message', exact: true }),
+    ).toHaveValue('')
+    expect(chats).toHaveLength(0)
     await page.screenshot({
       path: testInfo.outputPath('gpp3-studio.png'),
       animations: 'disabled',
     })
+    await page.setViewportSize({ width: 390, height: 844 })
+    await studio.screenshot({
+      path: testInfo.outputPath('studio-welcome-mobile.png'),
+      animations: 'disabled',
+    })
+    await page.setViewportSize({ width: 1440, height: 1000 })
     if (placement === 'Lead tools') {
       await expect(
         page.getByPlaceholder('Company Name', { exact: true }),
@@ -232,10 +321,11 @@ for (const placement of ['Form views', 'Lead tools']) {
         ),
       ).toHaveCount(0)
       const draft = studio.getByRole('textbox', {
-        name: 'Your answer',
+        name: 'Message',
         exact: true,
       })
       await draft.fill('Unsaved website draft')
+      await expect(answerFromForm).toBeDisabled()
       const tools = page.getByRole('tablist', { name: 'Lead tools' })
       await tools.getByRole('tab', { name: 'Pricing', exact: true }).click()
       await tab.click()
@@ -266,11 +356,46 @@ for (const placement of ['Form views', 'Lead tools']) {
       ).toBeVisible()
       await tab.click()
       await expect(draft).toHaveValue('Edited in full Studio')
+      await draft.fill('')
+      expect(chats).toHaveLength(0)
+      await expect(answerFromForm).toBeEnabled()
+      await answerFromForm.click()
+      // The lead form's advertiser is offered up front, so the wizard skips Question 1.
+      await expect(studio.getByRole('log')).toContainText(questions[1])
+      await expect(studio.getByRole('log')).not.toContainText(questions[0])
+      expect(chats[0].leadContext).toBe('Advertiser: Example AI')
+      expect(chats[0].messages).toEqual([
+        {
+          role: 'user',
+          text: expect.stringContaining('Use my current lead form'),
+        },
+      ])
+      await expect(studio.getByRole('log')).toContainText(
+        'Advertiser: Example AI',
+      )
+      await studio.screenshot({
+        path: testInfo.outputPath('studio-form-answers.png'),
+        animations: 'disabled',
+      })
     } else {
-      await studio
-        .getByRole('button', { name: 'Start Mockup', exact: true })
-        .click()
+      const message = studio.getByRole('textbox', {
+        name: 'Message',
+        exact: true,
+      })
+      await message.fill('Start')
+      await message.press('Enter')
+      await expect(studio.getByRole('log')).toContainText(questions[0])
+      expect(chats[0].leadContext).toBe('')
     }
+    expect(chats).toHaveLength(1)
+    await expect(
+      studio.getByRole('textbox', { name: 'Message', exact: true }),
+    ).toBeFocused()
+    expect(
+      (await studio.getByRole('log').innerText()).split(
+        questions[firstQuestion],
+      ),
+    ).toHaveLength(2)
 
     const fixturePage = await context.newPage()
     await fixturePage.setViewportSize({ width: 600, height: 300 })
@@ -391,7 +516,7 @@ for (const placement of ['Form views', 'Lead tools']) {
       { bytes: [...photo] },
     )
     await studio
-      .getByRole('textbox', { name: 'Your answer', exact: true })
+      .getByRole('textbox', { name: 'Message', exact: true })
       .dispatchEvent('drop', { dataTransfer: dropped })
     await dropped.dispose()
     await expect(
@@ -471,73 +596,31 @@ for (const placement of ['Form views', 'Lead tools']) {
         [...context.getImageData(5, canvas.height - 5, 1, 1).data].slice(0, 3),
       ]
     })
-    // Page 2, not the gray cover or orange logo page, must supply the reference.
-    for (const [index, expected] of [
-      [200, 229, 245],
-      [69, 133, 90],
-    ].entries())
-      expected.forEach((value, channel) =>
-        expect(Math.abs(colors[index][channel] - value)).toBeLessThan(4),
-      )
+    expectPageTwoColors(colors)
     await studio.screenshot({
       path: testInfo.outputPath('studio-attachments.png'),
       animations: 'disabled',
     })
 
-    for (const answer of answers.slice(answerCount)) {
-      await expect(studio.getByText(answer.question)).toBeVisible()
-      await studio
-        .getByRole('textbox', { name: 'Your answer', exact: true })
-        .fill(answer.value)
-      await studio
-        .getByRole('textbox', { name: 'Your answer', exact: true })
-        .press('Enter')
-      await expect(
-        studio.getByRole('textbox', { name: 'Your answer', exact: true }),
-      ).toHaveValue('')
-      await expect(
-        studio.getByRole('textbox', { name: 'Your answer', exact: true }),
-      ).toBeFocused()
-      await expect(
-        studio.getByRole('textbox', { name: 'Your answer', exact: true }),
-      ).toBeEditable()
-    }
-    expect(answerCount).toBe(7)
-    // The required-copy question appears once, not again after the website-content answer.
+    const message = studio.getByRole('textbox', {
+      name: 'Message',
+      exact: true,
+    })
+    await answerQuestions(studio, answered, (index) =>
+      index === 3
+        ? studio.screenshot({
+            path: testInfo.outputPath('studio-conversation.png'),
+            animations: 'disabled',
+          })
+        : Promise.resolve(),
+    )
+    expect(answered).toBe(7)
     await expect(
-      studio.getByRole('log').getByText(answers[5].question),
+      studio.getByRole('log').getByText(questions[5], { exact: false }),
     ).toHaveCount(1)
     await expect(
-      studio.getByText('Billboard summary', { exact: true }),
-    ).toHaveCount(0)
-    const brief = studio.getByRole('region', { name: 'Brief summary' })
-    await expect(
-      brief.getByRole('heading', { name: summary.headline }),
+      studio.getByText('Here is your billboard mockup.', { exact: false }),
     ).toBeVisible()
-    await expect(
-      brief.getByText(summary.supporting, { exact: true }),
-    ).toBeVisible()
-    await expect(
-      brief.getByText(summary.contact, { exact: true }),
-    ).toBeVisible()
-    await expect(
-      studio.getByText(summary.caution, { exact: true }),
-    ).toBeVisible()
-    await expect(
-      studio.getByText(summary.direction, { exact: true }),
-    ).toHaveCount(0)
-    await expect(
-      studio.getByRole('textbox', { name: 'Headline', exact: true }),
-    ).toHaveCount(0)
-    expect(generations).toHaveLength(0)
-
-    await page.screenshot({
-      path: testInfo.outputPath('orange-summary.png'),
-      animations: 'disabled',
-    })
-    await studio
-      .getByRole('button', { name: 'Generate mockup', exact: true })
-      .click()
     const selected = studio.getByRole('img', {
       name: 'Selected outdoor billboard concept for Example AI',
     })
@@ -560,17 +643,13 @@ for (const placement of ['Form views', 'Lead tools']) {
         exact: true,
       }),
     ).toHaveCount(0)
-    expect(generations[0]).toMatchObject({
-      approved: true,
-      previous: null,
-      revision: '',
-      intake: {
-        website: 'https://example.com',
-        required: 'website and website content',
-      },
-      summary,
+    const generation = chats.at(-1)!
+    expect(generation).toMatchObject({ image: null, brand: null })
+    expect((generation.messages as Message[]).at(-1)).toEqual({
+      role: 'user',
+      text: 'Professional',
     })
-    const references = generations[0].attachments as {
+    const references = generation.attachments as {
       sourceType: string
       dataUrl: string
     }[]
@@ -582,10 +661,7 @@ for (const placement of ['Form views', 'Lead tools']) {
       pageCount: 3,
       searchQuery: 'mountain background',
     })
-    for (const file of references) {
-      expect(file.dataUrl).toMatch(/^data:image\/(png|jpeg);base64,/)
-      expect(file.dataUrl.length).toBeLessThanOrEqual(400_000)
-    }
+    references.forEach(expectCompactImage)
     const download = studio.getByRole('link', {
       name: 'Download selected mockup',
     })
@@ -599,13 +675,15 @@ for (const placement of ['Form views', 'Lead tools']) {
     )
     expect(await downloaded.failure()).toBeNull()
 
-    const revision = studio.getByRole('textbox', {
-      name: 'Revision instructions',
-    })
+    const revision = message
     await revision.fill('Make the headline larger')
-    await studio.getByRole('button', { name: 'Generate revision' }).click()
+    await studio.getByRole('button', { name: 'Send message' }).click()
     await expect(studio.getByRole('alert')).toContainText(
-      'Your selected image is unchanged',
+      'Your conversation and selected image are unchanged',
+    )
+    await expect(studio.getByRole('log')).not.toContainText('Adjusting the')
+    await expect(studio.getByRole('log')).not.toContainText(
+      'Make the headline larger',
     )
     await expect(selected).toHaveAttribute('src', image.dataUrl)
     await expect(revision).toHaveValue('Make the headline larger')
@@ -618,17 +696,17 @@ for (const placement of ['Form views', 'Lead tools']) {
       await views.getByRole('tab', { name: 'Creative Studio' }).click()
       await expect(revision).toHaveValue('Make the headline larger')
       await expect(studio.getByRole('alert')).toContainText(
-        'Your selected image is unchanged',
+        'Your conversation and selected image are unchanged',
       )
       await expect(selected).toHaveAttribute('src', image.dataUrl)
       await views.getByRole('tab', { name: 'Lead Form & Pricing' }).click()
       await tab.click()
       await expect(revision).toHaveValue('Make the headline larger')
       await expect(studio.getByRole('alert')).toContainText(
-        'Your selected image is unchanged',
+        'Your conversation and selected image are unchanged',
       )
     }
-    await studio.getByRole('button', { name: 'Generate revision' }).click()
+    await studio.getByRole('button', { name: 'Send message' }).click()
     await expect(download).toHaveAttribute(
       'download',
       'billboard-concept-22222222-2222-4222-8222-222222222222.jpg',
@@ -636,12 +714,18 @@ for (const placement of ['Form views', 'Lead tools']) {
     await expect(studio.getByRole('alert')).toHaveCount(0)
     await expect(selected).toHaveAttribute('src', revisedImage.dataUrl)
     await expect(selected).toHaveJSProperty('naturalWidth', 24)
-    expect(generations[2]).toMatchObject({
-      approved: false,
-      previous: image,
-      revision: 'Make the headline larger',
+    expect(chats.at(-1)).toMatchObject({
+      image,
+      brand,
       attachments: references,
     })
+    expect((chats.at(-1)!.messages as Message[]).at(-1)).toEqual({
+      role: 'user',
+      text: 'Make the headline larger',
+    })
+    await expect(studio.getByRole('log')).toContainText(
+      'Here is the revised mockup.',
+    )
 
     if (placement === 'Lead tools') {
       await expect(
@@ -685,7 +769,7 @@ for (const placement of ['Form views', 'Lead tools']) {
       })
       await revision.fill('Keep the background and simplify the headline')
       const sendRevision = studio.getByRole('button', {
-        name: 'Generate revision',
+        name: 'Send message',
       })
       await sendRevision.evaluate((button) =>
         button.scrollIntoView({ block: 'center' }),
@@ -702,6 +786,33 @@ for (const placement of ['Form views', 'Lead tools']) {
         ),
       ).toBe(true)
       await page.setViewportSize({ width: 1440, height: 1000 })
+      await page.route('**/api/nutshell/create-lead', (route) => {
+        createdLeads++
+        expect(route.request().postDataJSON()).toMatchObject({
+          entityName: 'Example AI',
+          mockupImage: revisedImage,
+        })
+        return route.fulfill({
+          json: {
+            success: true,
+            leadId: 42,
+            imageAttachmentFailed: true,
+            imageAttachmentReceipt: 'lead-42-receipt',
+          },
+        })
+      })
+      await page.route('**/api/mockup/leads', (route) => {
+        expect(route.request().method()).toBe('POST')
+        attached = route.request().postDataJSON()
+        return route.fulfill({ json: { success: true } })
+      })
+      await page.getByRole('button', { name: 'Nutshell', exact: true }).click()
+      await expect(
+        studio.getByRole('button', { name: 'Retry image attachment' }),
+      ).toBeVisible()
+      await revision.fill('Make the headline larger again')
+      await studio.getByRole('button', { name: 'Send message' }).click()
+      await expect(selected).toHaveAttribute('src', postSubmissionImage.dataUrl)
     }
 
     await page.reload()
@@ -716,23 +827,85 @@ for (const placement of ['Form views', 'Lead tools']) {
         'The selected page is preserved. Remove and reattach the PDF to search again after a refresh.',
       ),
     ).toBeVisible()
-    await expect(selected).toHaveAttribute('src', revisedImage.dataUrl)
+    const currentImage =
+      placement === 'Lead tools' ? postSubmissionImage : revisedImage
+    await expect(selected).toHaveAttribute('src', currentImage.dataUrl)
     await expect(download).toHaveAttribute(
       'download',
-      'billboard-concept-22222222-2222-4222-8222-222222222222.jpg',
+      `billboard-concept-${currentImage.id}.jpg`,
     )
+    if (placement === 'Lead tools') {
+      const retry = studio.getByRole('button', {
+        name: 'Retry image attachment',
+      })
+      await retry.click()
+      const dialog = page.getByRole('dialog', {
+        name: 'Send this mockup to Nutshell',
+      })
+      await expect(dialog.getByText('Confirm: Example AI (#42)')).toBeVisible()
+      await expect(dialog.getByRole('textbox')).toHaveCount(0)
+      await expect(dialog.getByRole('img')).toHaveAttribute(
+        'src',
+        revisedImage.dataUrl,
+      )
+      await dialog.screenshot({
+        path: testInfo.outputPath('same-lead-attachment.png'),
+        animations: 'disabled',
+      })
+      await dialog
+        .getByRole('button', { name: 'Confirm & attach image' })
+        .click()
+      await expect(dialog).toBeHidden()
+      await expect(retry).toHaveCount(0)
+      await expect(selected).toHaveAttribute('src', postSubmissionImage.dataUrl)
+      expect(attached).toEqual({
+        leadId: 42,
+        confirmedLeadId: 42,
+        receipt: 'lead-42-receipt',
+        image: revisedImage,
+      })
+      expect(createdLeads).toBe(1)
+
+      // A tab saved before target receipts existed must not guess a lead.
+      await page.evaluate(() => {
+        const saved = JSON.parse(
+          sessionStorage.getItem('billboard-active-mockup')!,
+        )
+        delete saved.state.lastLead.receipt
+        saved.state.attachmentFailed = true
+        sessionStorage.setItem('billboard-active-mockup', JSON.stringify(saved))
+      })
+      await page.reload()
+      await tab.click()
+      await retry.click()
+      await expect(dialog.getByRole('alert')).toContainText(
+        'Do not resubmit the Lead Form.',
+      )
+      await expect(
+        dialog.getByRole('button', { name: 'Confirm & attach image' }),
+      ).toBeDisabled()
+      await page.setViewportSize({ width: 390, height: 844 })
+      await dialog.screenshot({
+        path: testInfo.outputPath('legacy-attachment-mobile.png'),
+        animations: 'disabled',
+      })
+      await page.keyboard.press('Escape')
+      await expect(dialog).toBeHidden()
+      await page.setViewportSize({ width: 1440, height: 1000 })
+    }
     await studio
       .getByRole('button', { name: 'Start Mockup', exact: true })
       .click()
     await expect(selected).toHaveCount(0)
-    await expect(
-      studio.getByText(answers[0].question, { exact: true }),
-    ).toBeVisible()
-    await expect(studio.getByRole('log')).toBeEmpty()
+    await expect(studio.getByRole('log')).toContainText(questions[0])
+    await expect(studio.getByRole('log')).not.toContainText(
+      'Here is the revised mockup.',
+    )
     await expect(studio.getByRole('button', { name: /^Remove / })).toHaveCount(
       0,
     )
-    expect(generations).toHaveLength(3)
+    expect(revisions).toBe(placement === 'Lead tools' ? 3 : 2)
+    expect(chats).toHaveLength(11)
     expect(unexpected).toEqual([])
   })
 }

@@ -6,57 +6,23 @@ vi.mock('@/lib/auth', () => ({
 vi.mock('@/lib/config', () => ({
   serverConfig: { nutshell: { requireApiKey: () => 'test-only' } },
 }))
-vi.mock('@/lib/mockup/receipts', () => ({ verifyImage: vi.fn() }))
+vi.mock('@/lib/mockup/receipts', () => ({
+  verifyImage: vi.fn(),
+  verifyArtifact: vi.fn(),
+}))
 vi.mock('@/lib/rate-limit', () => ({
   rateLimit: vi.fn(() => {
     throw new Error('Database unavailable')
   }),
 }))
 
-import { GET, POST } from './route'
+import { POST } from './route'
 import { getSession } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 
 afterEach(() => {
   vi.clearAllMocks()
   vi.unstubAllGlobals()
-})
-
-it('returns deduplicated Nutshell candidates without database rate limiting', async () => {
-  const lead = {
-    id: 42,
-    name: 'Spring',
-    primaryAccountName: 'Green Oasis',
-    creator: { emails: ['rep@example.test'] },
-  }
-  const fetcher = vi
-    .fn()
-    .mockResolvedValueOnce(
-      Response.json({ result: { leads: [lead], accounts: [{ id: 15 }] } }),
-    )
-    .mockResolvedValueOnce(
-      Response.json({
-        result: [
-          lead,
-          { ...lead, id: 73, name: 'Summer' },
-          { ...lead, id: 99, creator: { emails: ['other@example.test'] } },
-        ],
-      }),
-    )
-  vi.stubGlobal('fetch', fetcher)
-
-  const response = await GET(
-    new Request('http://localhost/api/mockup/leads?q=Green%20Oasis'),
-  )
-  expect(response.status).toBe(200)
-  expect(await response.json()).toEqual({
-    leads: [
-      { id: 42, name: 'Spring', advertiser: 'Green Oasis' },
-      { id: 73, name: 'Summer', advertiser: 'Green Oasis' },
-    ],
-  })
-  expect(response.headers.get('Cache-Control')).toBe('no-store')
-  expect(rateLimit).not.toHaveBeenCalled()
 })
 
 it('attaches only to the confirmed selected lead without database rate limiting', async () => {
@@ -93,7 +59,12 @@ it('attaches only to the confirmed selected lead without database rate limiting'
   const request = (confirmedLeadId: number) =>
     new Request('http://localhost/api/mockup/leads', {
       method: 'POST',
-      body: JSON.stringify({ leadId: 73, confirmedLeadId, image }),
+      body: JSON.stringify({
+        leadId: 73,
+        confirmedLeadId,
+        image,
+        receipt: 'lead-73-receipt',
+      }),
     })
   expect((await POST(request(42))).status).toBe(400)
   expect(fetcher).not.toHaveBeenCalled()
@@ -116,13 +87,16 @@ it('attaches only to the confirmed selected lead without database rate limiting'
   expect(rateLimit).not.toHaveBeenCalled()
 })
 
-it('still requires authentication before searching Nutshell', async () => {
+it('still requires authentication before retrying an attachment', async () => {
   vi.mocked(getSession).mockResolvedValueOnce(null)
   const fetcher = vi.fn()
   vi.stubGlobal('fetch', fetcher)
   expect(
-    (await GET(new Request('http://localhost/api/mockup/leads?q=Green')))
-      .status,
+    (
+      await POST(
+        new Request('http://localhost/api/mockup/leads', { method: 'POST' }),
+      )
+    ).status,
   ).toBe(401)
   expect(fetcher).not.toHaveBeenCalled()
 })
