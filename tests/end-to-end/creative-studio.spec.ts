@@ -289,6 +289,13 @@ for (const placement of ['Form views', 'Lead tools']) {
     await expect(
       studio.getByRole('button', { name: 'Use current lead form' }),
     ).toHaveCount(0)
+    const answerFromForm = studio.getByRole('button', {
+      name: 'Answer from form',
+      exact: true,
+    })
+    await expect(answerFromForm).toBeEnabled({
+      enabled: placement === 'Lead tools',
+    })
     await expect(studio.getByRole('log')).toBeEmpty()
     await expect(
       studio.getByRole('textbox', { name: 'Message', exact: true }),
@@ -318,6 +325,7 @@ for (const placement of ['Form views', 'Lead tools']) {
         exact: true,
       })
       await draft.fill('Unsaved website draft')
+      await expect(answerFromForm).toBeDisabled()
       const tools = page.getByRole('tablist', { name: 'Lead tools' })
       await tools.getByRole('tab', { name: 'Pricing', exact: true }).click()
       await tab.click()
@@ -350,13 +358,18 @@ for (const placement of ['Form views', 'Lead tools']) {
       await expect(draft).toHaveValue('Edited in full Studio')
       await draft.fill('')
       expect(chats).toHaveLength(0)
-      await studio
-        .getByRole('button', { name: 'Start Mockup', exact: true })
-        .click()
+      await expect(answerFromForm).toBeEnabled()
+      await answerFromForm.click()
       // The lead form's advertiser is offered up front, so the wizard skips Question 1.
       await expect(studio.getByRole('log')).toContainText(questions[1])
       await expect(studio.getByRole('log')).not.toContainText(questions[0])
       expect(chats[0].leadContext).toBe('Advertiser: Example AI')
+      expect(chats[0].messages).toEqual([
+        {
+          role: 'user',
+          text: expect.stringContaining('Use my current lead form'),
+        },
+      ])
     } else {
       const message = studio.getByRole('textbox', {
         name: 'Message',

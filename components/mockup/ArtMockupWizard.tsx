@@ -298,11 +298,43 @@ function MockupComposer({
             )}
           </Button>
         </MockupAttachments>
+        <AnswerFromForm />
         <p role="status" className="sr-only">
           {isPending ? 'Working…' : ''}
         </p>
       </form>
     </footer>
+  )
+}
+
+function AnswerFromForm() {
+  const { busy, sessionKey, draft } = useMockupStore()
+  const hasFormContext = useFormStore((store) =>
+    Boolean(leadFormContext({ ...store.getFormData() })),
+  )
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={busy || !sessionKey || !hasFormContext || !!draft.trim()}
+        onClick={() =>
+          void sendMessage(
+            'Use my current lead form to answer the questions you can, including the current question. Briefly confirm the answers supported by that data, then ask the next missing question. Do not invent missing answers or override my explicit chat directions. This is not a request to revise an existing image.',
+          )
+        }
+      >
+        Answer from form
+      </Button>
+      <span className="text-xs text-muted-foreground">
+        {!hasFormContext
+          ? 'Add creative details to the lead form first.'
+          : draft.trim()
+            ? 'Send or clear your draft to use form answers.'
+            : 'Uses known details; asks for anything missing.'}
+      </span>
+    </div>
   )
 }
 

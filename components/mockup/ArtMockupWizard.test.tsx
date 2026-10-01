@@ -192,6 +192,52 @@ it('accepts a first request without Start and sends fresh lead context on each t
   expect(body(2).messages).toHaveLength(5)
 })
 
+it('answers from fresh form context without resetting the conversation or changing a draft', async () => {
+  useMockupStore.getState().update({
+    messages: [{ role: 'assistant', text: 'What is their website?' }],
+  })
+  await act(async () => root.render(<ArtMockupWizard />))
+  expect(button('Answer from form').disabled).toBe(true)
+  await act(async () => {
+    useFormStore.getState().updateField('phone', '303-555-0123')
+  })
+  expect(button('Answer from form').disabled).toBe(true)
+  await act(async () => {
+    useFormStore.getState().updateField('website', 'https://alpine.example')
+    useMockupStore.getState().setDraft('Keep my unfinished answer')
+  })
+  expect(button('Answer from form').disabled).toBe(true)
+  await act(async () => useMockupStore.getState().setDraft(''))
+  expect(button('Answer from form').disabled).toBe(false)
+  const stream = openStream()
+  vi.mocked(fetch).mockResolvedValueOnce(stream.response)
+  await act(async () => button('Answer from form').click())
+  expect(body().leadContext).toBe('Website: https://alpine.example')
+  expect(body().messages[0]).toEqual({
+    role: 'assistant',
+    text: 'What is their website?',
+  })
+  expect(body().messages.at(-1)).toEqual({
+    role: 'user',
+    text: expect.stringContaining('Use my current lead form'),
+  })
+  expect(body().messages.at(-1).text).toContain('Do not invent missing answers')
+  expect(button('Answer from form').disabled).toBe(true)
+  await act(async () => button('Answer from form').click())
+  expect(fetch).toHaveBeenCalledTimes(1)
+  await act(async () => {
+    stream.write({ type: 'start' })
+    stream.write({ type: 'text-start', id: 't' })
+    stream.write({ type: 'text-delta', id: 't', delta: 'What is the goal?' })
+    stream.write({ type: 'text-end', id: 't' })
+    stream.write({ type: 'finish' })
+    stream.close()
+  })
+  await vi.waitFor(() => expect(log()).toContain('What is the goal?'))
+  await act(async () => useFormStore.getState().reset())
+  expect(button('Answer from form').disabled).toBe(true)
+})
+
 it('sends Start on the rep’s behalf once, even with two Studio views mounted', async () => {
   useFormStore.getState().updateField('entityName', 'Alpine')
   vi.mocked(fetch).mockResolvedValueOnce(
