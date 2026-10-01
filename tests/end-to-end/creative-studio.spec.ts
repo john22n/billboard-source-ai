@@ -370,6 +370,13 @@ for (const placement of ['Form views', 'Lead tools']) {
           text: expect.stringContaining('Use my current lead form'),
         },
       ])
+      await expect(studio.getByRole('log')).toContainText(
+        'Advertiser: Example AI',
+      )
+      await studio.screenshot({
+        path: testInfo.outputPath('studio-form-answers.png'),
+        animations: 'disabled',
+      })
     } else {
       const message = studio.getByRole('textbox', {
         name: 'Message',

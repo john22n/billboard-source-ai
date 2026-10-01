@@ -238,26 +238,33 @@ it('answers from fresh form context without resetting the conversation or changi
   expect(button('Answer from form').disabled).toBe(true)
 })
 
-it('submits a bare-domain website as an explicit form answer and retains it in chat', async () => {
-  useFormStore.getState().updateField('entityName', 'Adversarial')
-  useFormStore.getState().updateField('website', 'john22n-iii.com')
-  useMockupStore.getState().update({
-    messages: [
-      { role: 'assistant', text: 'What is the advertiser’s website?' },
-    ],
-  })
-  vi.mocked(fetch).mockResolvedValueOnce(streamed('What tone would you like?'))
-  await act(async () => root.render(<ArtMockupWizard />))
-  await act(async () => button('Answer from form').click())
-  expect(body().leadContext).toContain('Website: john22n-iii.com')
-  expect(body().messages.at(-1).text).toContain('Website: john22n-iii.com')
-  expect(log()).toContain('Website: john22n-iii.com')
-  await act(async () => useFormStore.getState().reset())
-  vi.mocked(fetch).mockResolvedValueOnce(streamed('Any required text?'))
-  await send('Professional')
-  expect(body(1).leadContext).toBe('')
-  expect(body(1).messages[1].text).toContain('Website: john22n-iii.com')
-})
+it.each(['', 'x'.repeat(8000)])(
+  'submits a bare-domain website as an explicit, bounded form answer and retains it in chat',
+  async (focus) => {
+    useFormStore.getState().updateField('entityName', 'Adversarial')
+    useFormStore.getState().updateField('website', 'john22n-iii.com')
+    useFormStore.getState().updateField('accomplishDetails', focus)
+    useMockupStore.getState().update({
+      messages: [
+        { role: 'assistant', text: 'What is the advertiser’s website?' },
+      ],
+    })
+    vi.mocked(fetch).mockResolvedValueOnce(
+      streamed('What tone would you like?'),
+    )
+    await act(async () => root.render(<ArtMockupWizard />))
+    await act(async () => button('Answer from form').click())
+    expect(body().leadContext).toContain('Website: john22n-iii.com')
+    expect(body().messages.at(-1).text).toContain('Website: john22n-iii.com')
+    expect(body().messages.at(-1).text.length).toBeLessThanOrEqual(4000)
+    expect(log()).toContain('Website: john22n-iii.com')
+    await act(async () => useFormStore.getState().reset())
+    vi.mocked(fetch).mockResolvedValueOnce(streamed('Any required text?'))
+    await send('Professional')
+    expect(body(1).leadContext).toBe('')
+    expect(body(1).messages[1].text).toContain('Website: john22n-iii.com')
+  },
+)
 
 it('sends Start on the rep’s behalf once, even with two Studio views mounted', async () => {
   useFormStore.getState().updateField('entityName', 'Alpine')
