@@ -14,6 +14,12 @@ import { Textarea } from '@/components/ui/textarea'
 type Instruction = { title: string; context: string; text: string }
 type Saved = { prompt: string; isDefault: boolean }
 
+function promptLoadError(status: number, apiError?: string) {
+  if (status === 401) return 'Your session has expired. Sign in and retry.'
+  if (status === 403) return 'Admin access is required to edit the prompt.'
+  return apiError || 'Could not load the prompt. Please retry.'
+}
+
 export default function ArtWizardTab() {
   const [saved, setSaved] = useState<Saved | null>(null)
   const [instructions, setInstructions] = useState<Instruction[]>([])
@@ -28,17 +34,19 @@ export default function ArtWizardTab() {
           cache: 'no-store',
           signal: controller.signal,
         })
+        const data = await response.json().catch(() => null)
         if (!response.ok)
-          throw new Error('Could not load the prompt. Please retry.')
-        const data = await response.json()
+          throw new Error(promptLoadError(response.status, data?.error))
         if (!controller.signal.aborted) {
           setSaved({ prompt: data.prompt, isDefault: !!data.isDefault })
           setInstructions(data.instructions ?? [])
         }
-      } catch {
+      } catch (cause) {
         if (!controller.signal.aborted)
           setError(
-            'Could not load the prompt. Check your admin access and retry.',
+            cause instanceof Error
+              ? cause.message
+              : 'Could not load the prompt. Please retry.',
           )
       }
     }

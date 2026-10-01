@@ -143,10 +143,40 @@ it('keeps unsaved edits after a failed save and allows retrying', async () => {
   expect(container.textContent).toContain('Prompt saved')
 })
 
-it('shows a load error instead of an editable empty prompt and supports retry', async () => {
+it('shows the API storage error instead of blaming admin access', async () => {
+  fetchMock.mockResolvedValueOnce(
+    Response.json(
+      { error: 'Could not load Creative Studio instructions. Please retry.' },
+      { status: 500 },
+    ),
+  )
+  await act(async () => root.render(<ArtWizardTab />))
+  expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+    'Could not load Creative Studio instructions. Please retry.',
+  )
+  expect(container.textContent).not.toContain('admin access')
+  expect(container.querySelector('textarea')).toBeNull()
+})
+
+it.each([
+  [401, 'Your session has expired. Sign in and retry.'],
+  [403, 'Admin access is required to edit the prompt.'],
+])(
+  'explains an authorization response with status %i',
+  async (status, error) => {
+    fetchMock.mockResolvedValueOnce(
+      Response.json({ error: 'Authorization failed' }, { status }),
+    )
+    await act(async () => root.render(<ArtWizardTab />))
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(error)
+    expect(container.querySelector('textarea')).toBeNull()
+  },
+)
+
+it('shows a network error instead of an editable empty prompt and supports retry', async () => {
   fetchMock.mockRejectedValueOnce(new Error('Offline'))
   await act(async () => root.render(<ArtWizardTab />))
-  expect(container.querySelector('[role="alert"]')).not.toBeNull()
+  expect(container.querySelector('[role="alert"]')?.textContent).toBe('Offline')
   expect(container.querySelector('textarea')).toBeNull()
   fetchMock.mockResolvedValueOnce(Response.json({ prompt: 'Loaded on retry' }))
   await act(async () => container.querySelector('button')!.click())

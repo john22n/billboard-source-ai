@@ -77,7 +77,8 @@ export async function GET() {
       { ...(await getSystemPrompt()), instructions },
       { headers },
     )
-  } catch {
+  } catch (error) {
+    console.error('Failed to load Creative Studio instructions', error)
     return NextResponse.json(
       { error: 'Could not load Creative Studio instructions. Please retry.' },
       { status: 500, headers },

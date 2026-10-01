@@ -2,17 +2,20 @@ import { SignJWT } from 'jose'
 import { expect, test } from 'playwright/test'
 import { baseUrl, jwtSecret } from './environment'
 
-test('admin edits the wizard system prompt and restores the original in one click', async ({
-  page,
-  context,
-}, testInfo) => {
-  test.setTimeout(60_000)
+test.beforeEach(async ({ context }) => {
   const token = await new SignJWT({ userId: 'e2e-studio-admin' })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime('1h')
     .sign(new TextEncoder().encode(jwtSecret))
   await context.addCookies([{ name: 'auth_token', value: token, url: baseUrl }])
+})
+
+test('admin edits the wizard system prompt and restores the original in one click', async ({
+  page,
+  context,
+}, testInfo) => {
+  test.setTimeout(60_000)
   // Other admin widgets are unrelated; prompt reads/writes use the real API and disposable DB.
   await page.route('**/api/**', (route) => {
     const path = new URL(route.request().url()).pathname
@@ -107,6 +110,48 @@ test('admin edits the wizard system prompt and restores the original in one clic
   ).toBe(true)
   await page.screenshot({
     path: testInfo.outputPath('admin-prompt-mobile.png'),
+    fullPage: true,
+  })
+})
+
+test('admin sees a storage error without a false access warning', async ({
+  page,
+}, testInfo) => {
+  await page.route('**/api/**', (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path === '/api/admin/art-wizard')
+      return route.fulfill({
+        status: 500,
+        json: {
+          error: 'Could not load Creative Studio instructions. Please retry.',
+        },
+      })
+    if (path === '/api/issues') return route.fulfill({ json: { issues: [] } })
+    if (path.endsWith('/usage')) return route.fulfill({ json: null })
+    if (path === '/api/twilio-token')
+      return route.fulfill({
+        status: 503,
+        json: { error: 'Telephony disabled in browser tests' },
+      })
+    if (path === '/api/taskrouter/worker-status')
+      return route.fulfill({ json: { status: 'offline', success: true } })
+    return route.fulfill({ json: {} })
+  })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto('/admin')
+  await page.getByRole('tab', { name: 'Creative Studio' }).click()
+
+  await expect(
+    page
+      .getByRole('alert')
+      .getByText('Could not load Creative Studio instructions. Please retry.'),
+  ).toBeVisible()
+  await expect(page.getByText(/check your admin access/i)).toHaveCount(0)
+  await expect(
+    page.getByRole('textbox', { name: 'Mockup Wizard system prompt' }),
+  ).toHaveCount(0)
+  await page.screenshot({
+    path: testInfo.outputPath('admin-prompt-storage-error.png'),
     fullPage: true,
   })
 })

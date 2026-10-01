@@ -109,10 +109,15 @@ it('rejects malformed JSON and attempts to change protected instructions', async
 })
 
 it('does not report success when storage fails', async () => {
+  const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
   mocks.save.mockRejectedValue(new Error('database unavailable'))
   expect((await PUT(request({ prompt: 'New instructions' }))).status).toBe(500)
   mocks.reset.mockRejectedValue(new Error('database unavailable'))
   expect((await DELETE()).status).toBe(500)
   mocks.read.mockRejectedValue(new Error('database unavailable'))
   expect((await GET()).status).toBe(500)
+  expect(consoleError).toHaveBeenCalledWith(
+    'Failed to load Creative Studio instructions',
+    expect.any(Error),
+  )
 })
