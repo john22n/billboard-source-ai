@@ -2,7 +2,7 @@
 
 import { useRef, useState, useEffect, useMemo, useCallback } from 'react'
 import dynamic from 'next/dynamic'
-import { Mic, MicOff, type LucideIcon } from 'lucide-react'
+import { ChevronDown, Mic, MicOff, type LucideIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -15,6 +15,13 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { useBillboardFormExtraction } from '@/hooks/useBillboardFormExtraction'
 import {
   useTwilioContext,
@@ -34,6 +41,10 @@ import {
 } from '@/lib/error-handling'
 import { useFormStore } from '@/stores/formStore'
 import { isAutoLogoutDue, useAutoLogout } from '@/hooks/useAutoLogout'
+import { useMockupSession } from '@/hooks/useMockupSession'
+import { useMockupStore } from '@/stores/mockupStore'
+import { ArtMockupWizard } from '@/components/mockup/ArtMockupWizard'
+import { useDashboardStore } from '@/stores/dashboardStore'
 
 type NutshellFormData = ReturnType<
   ReturnType<typeof useFormStore.getState>['getFormData']
@@ -53,6 +64,7 @@ function buildNutshellPayload(
   additionalContacts: AdditionalContacts,
 ) {
   return {
+    mockupImage: useMockupStore.getState().state.image || undefined,
     name: valueOrEmpty(formData.name),
     phone: valueOrEmpty(formData.phone),
     email: valueOrEmpty(formData.email),
@@ -92,6 +104,8 @@ function buildNutshellPayload(
 type NutshellResult = {
   error?: string
   missingFields?: unknown
+  leadId?: number
+  imageAttachmentFailed?: boolean
 }
 
 type NutshellResponseActions = {
@@ -108,8 +122,11 @@ function handleNutshellResponse(
 ) {
   if (response.ok) {
     actions.updateSubmissionStatus('success')
-    actions.updateSubmissionMessage('Lead created')
-    showSuccessToast('Lead sent to Nutshell')
+    const message = result.imageAttachmentFailed
+      ? 'Lead created; image could not be attached. Download it from Creative Studio. Do not resubmit the Lead Form.'
+      : 'Lead created'
+    actions.updateSubmissionMessage(message)
+    showSuccessToast(message)
     actions.clearAll()
     return
   }
@@ -399,7 +416,7 @@ function CallHeader(props: CallHeaderProps) {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <div className="min-w-0">
             <CardTitle className="text-lg sm:text-xl font-bold tracking-tight truncate">
-              Billboard Lead Form
+              GPP3
               {userEmail && (
                 <span className="text-[10px] sm:text-xs font-normal ml-2 opacity-75 hidden sm:inline">
                   ({userEmail})
@@ -541,6 +558,7 @@ function LeadActions({
   onClearAll,
 }: LeadActionsProps) {
   const [unqualifiedDialogOpen, setUnqualifiedDialogOpen] = useState(false)
+  const image = useMockupStore((state) => state.state.image)
 
   const handleUnqualifiedDelete = () => {
     onClearAll()
@@ -549,6 +567,11 @@ function LeadActions({
 
   return (
     <div className="mt-auto flex flex-shrink-0 flex-col items-center gap-1 border-t border-slate-200 bg-white pt-2 sm:gap-2">
+      {image && (
+        <p className="px-2 text-center text-xs text-muted-foreground">
+          Nutshell will include the selected mockup for {image.advertiser}.
+        </p>
+      )}
       {nutshellStatus !== 'idle' && (
         <span
           role="status"
@@ -613,10 +636,59 @@ function LeadActions({
   )
 }
 
+const leadToolTabClass =
+  'h-9 min-w-0 rounded-none border-x-0 border-t-0 border-b-2 border-transparent bg-transparent px-1 text-[10px] font-semibold tracking-wide text-slate-500 shadow-none transition-colors hover:text-slate-900 data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent sm:text-xs'
+
+function MapToolTab({
+  active,
+  provider,
+  onSelect,
+}: {
+  active: boolean
+  provider: string
+  onSelect: (provider: string) => void
+}) {
+  return (
+    <div
+      className={`flex h-9 min-w-0 items-center border-b-2 ${active ? 'border-primary' : 'border-transparent'}`}
+    >
+      <TabsTrigger value="maps" className={`${leadToolTabClass} border-b-0`}>
+        Maps
+      </TabsTrigger>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Choose map"
+            className="size-7 shrink-0 rounded-none text-slate-500"
+          >
+            <ChevronDown className="size-3" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start">
+          <DropdownMenuRadioGroup value={provider} onValueChange={onSelect}>
+            <DropdownMenuRadioItem value="google-map">
+              Google Map
+            </DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="bsi-map">
+              BSI Map
+            </DropdownMenuRadioItem>
+          </DropdownMenuRadioGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  )
+}
+
 function TabbedBody(props: TabbedBodyProps) {
+  const activeTab = useDashboardStore((state) => state.activeTab)
+  const setActiveTab = useDashboardStore((state) => state.setActiveTab)
   const [sidePanel, setSidePanel] = useState<
-    'pricing' | 'google-map' | 'bsi-map' | 'inventory'
+    'pricing' | 'maps' | 'inventory' | 'mockup'
   >('pricing')
+  const [mapProvider, setMapProvider] = useState('google-map')
+  const [studioOpened, setStudioOpened] = useState(false)
   const {
     resetTrigger,
     callerPhone,
@@ -639,11 +711,17 @@ function TabbedBody(props: TabbedBodyProps) {
   return (
     <CardContent className="px-1.5 pb-1.5 pt-2 sm:px-2 sm:pb-2 flex flex-col flex-1 min-h-0 overflow-hidden">
       <Tabs
-        defaultValue="form"
-        onValueChange={() => setSidePanel('pricing')}
+        value={activeTab}
+        onValueChange={(tab) => {
+          setActiveTab(tab)
+          setSidePanel('pricing')
+        }}
         className="w-full flex-1 flex flex-col gap-0 min-h-0 overflow-hidden"
       >
-        <TabsList className="grid w-full grid-cols-5 mb-2 bg-slate-100 p-0.5 sm:p-1 rounded-lg h-8 sm:h-9 flex-shrink-0">
+        <TabsList
+          aria-label="Form views"
+          className="grid w-full grid-cols-5 mb-2 bg-slate-100 p-0.5 sm:p-1 rounded-lg h-8 sm:h-9 flex-shrink-0"
+        >
           <TabsTrigger
             value="form"
             className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs"
@@ -673,26 +751,38 @@ function TabbedBody(props: TabbedBodyProps) {
             <span className="sm:hidden">Inv</span>
           </TabsTrigger>
           <TabsTrigger
-            value="transcript"
+            value="mockup"
             className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs"
           >
-            <span className="hidden sm:inline">Transcript</span>
-            <span className="sm:hidden">Trans</span>
+            <span className="hidden sm:inline">Creative Studio</span>
+            <span className="sm:hidden whitespace-normal leading-tight">
+              Creative Studio
+            </span>
           </TabsTrigger>
         </TabsList>
+        <TabsContent
+          value="mockup"
+          className="mt-0 flex-1 min-h-0 overflow-hidden"
+        >
+          <ArtMockupWizard />
+        </TabsContent>
         <TabsContent
           value="form"
           forceMount
           className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=inactive]:hidden data-[state=active]:flex data-[state=active]:flex-col"
         >
           <div
-            className={`h-full min-h-0 gap-2 overflow-hidden sm:gap-1 ${
+            className={`h-full min-h-0 gap-2 sm:gap-1 ${
               sidePanel === 'pricing'
-                ? 'flex flex-col xl:flex-row'
-                : 'grid grid-cols-1 xl:grid-cols-[minmax(0,3fr)_minmax(360px,2fr)]'
+                ? 'flex flex-col overflow-hidden xl:flex-row'
+                : sidePanel === 'mockup'
+                  ? 'flex flex-col overflow-y-auto xl:grid xl:grid-cols-[minmax(0,3fr)_minmax(360px,2fr)] xl:overflow-hidden'
+                  : 'grid grid-cols-1 overflow-hidden xl:grid-cols-[minmax(0,3fr)_minmax(360px,2fr)]'
             }`}
           >
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div
+              className={`flex flex-1 flex-col overflow-hidden ${sidePanel === 'mockup' ? 'min-h-96 shrink-0 xl:min-h-0' : 'min-h-0'}`}
+            >
               <LeadForm
                 key={resetTrigger}
                 inboundPhone={callerPhone}
@@ -702,37 +792,38 @@ function TabbedBody(props: TabbedBodyProps) {
 
             <Tabs
               value={sidePanel}
-              onValueChange={(value) => setSidePanel(value as typeof sidePanel)}
-              className={`min-h-0 overflow-hidden ${
+              onValueChange={(value) => {
+                setSidePanel(value as typeof sidePanel)
+                if (value === 'mockup') setStudioOpened(true)
+              }}
+              className={`min-w-0 overflow-hidden ${
                 sidePanel === 'pricing'
-                  ? 'w-full xl:w-[400px] xl:flex-shrink-0'
-                  : ''
+                  ? 'min-h-0 w-full xl:w-[400px] xl:flex-shrink-0'
+                  : sidePanel === 'mockup'
+                    ? 'h-[calc(100dvh-13rem)] min-h-128 shrink-0 xl:h-auto xl:min-h-0'
+                    : 'min-h-0'
               }`}
             >
-              <TabsList className="mx-auto mb-1 grid h-9 w-full max-w-lg grid-cols-4 rounded-none border-b border-slate-200 bg-transparent p-0">
-                <TabsTrigger
-                  value="pricing"
-                  className="h-9 rounded-none border-x-0 border-t-0 border-b-2 border-transparent bg-transparent text-[10px] font-semibold tracking-wide text-slate-500 shadow-none transition-colors hover:text-slate-900 data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent sm:text-xs"
-                >
+              <TabsList
+                aria-label="Lead tools"
+                className="mx-auto mb-1 grid h-9 w-full grid-cols-4 shrink-0 rounded-none border-b border-slate-200 bg-transparent p-0"
+              >
+                <TabsTrigger value="pricing" className={leadToolTabClass}>
                   Pricing
                 </TabsTrigger>
-                <TabsTrigger
-                  value="google-map"
-                  className="h-9 rounded-none border-x-0 border-t-0 border-b-2 border-transparent bg-transparent text-[10px] font-semibold tracking-wide text-slate-500 shadow-none transition-colors hover:text-slate-900 data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent sm:text-xs"
-                >
-                  Google Map
-                </TabsTrigger>
-                <TabsTrigger
-                  value="bsi-map"
-                  className="h-9 rounded-none border-x-0 border-t-0 border-b-2 border-transparent bg-transparent text-[10px] font-semibold tracking-wide text-slate-500 shadow-none transition-colors hover:text-slate-900 data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent sm:text-xs"
-                >
-                  BSI Map
-                </TabsTrigger>
-                <TabsTrigger
-                  value="inventory"
-                  className="h-9 rounded-none border-x-0 border-t-0 border-b-2 border-transparent bg-transparent text-[10px] font-semibold tracking-wide text-slate-500 shadow-none transition-colors hover:text-slate-900 data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent sm:text-xs"
-                >
+                <MapToolTab
+                  active={sidePanel === 'maps'}
+                  provider={mapProvider}
+                  onSelect={(value) => {
+                    setMapProvider(value)
+                    setSidePanel('maps')
+                  }}
+                />
+                <TabsTrigger value="inventory" className={leadToolTabClass}>
                   Inventory
+                </TabsTrigger>
+                <TabsTrigger value="mockup" className={leadToolTabClass}>
+                  Creative Studio
                 </TabsTrigger>
               </TabsList>
 
@@ -749,23 +840,24 @@ function TabbedBody(props: TabbedBodyProps) {
                 />
               </TabsContent>
               <TabsContent
-                value="google-map"
+                value="maps"
                 className="mt-0 min-h-0 overflow-hidden data-[state=active]:block"
               >
-                <GoogleMapPanel
-                  key={`google-map-${resetTrigger}`}
-                  initialLocation={currentMarketLocation.query}
-                  exclusiveView
-                />
-              </TabsContent>
-              <TabsContent
-                value="bsi-map"
-                className="mt-0 min-h-0 overflow-hidden data-[state=active]:block"
-              >
-                <ArcGISMapPanel
-                  key={`arcgis-map-${resetTrigger}`}
-                  initialLocation={currentMarketLocation.query}
-                />
+                <h2 className="px-2 pb-1 text-xs font-semibold text-muted-foreground">
+                  {mapProvider === 'google-map' ? 'Google Map' : 'BSI Map'}
+                </h2>
+                {mapProvider === 'google-map' ? (
+                  <GoogleMapPanel
+                    key={`google-map-${resetTrigger}`}
+                    initialLocation={currentMarketLocation.query}
+                    exclusiveView
+                  />
+                ) : (
+                  <ArcGISMapPanel
+                    key={`arcgis-map-${resetTrigger}`}
+                    initialLocation={currentMarketLocation.query}
+                  />
+                )}
               </TabsContent>
               <TabsContent
                 value="inventory"
@@ -776,6 +868,14 @@ function TabbedBody(props: TabbedBodyProps) {
                   state={currentMarketLocation.state}
                   collapseFilters
                 />
+              </TabsContent>
+
+              <TabsContent
+                value="mockup"
+                forceMount
+                className="mt-0 min-h-0 overflow-hidden data-[state=inactive]:hidden"
+              >
+                {studioOpened && <ArtMockupWizard />}
               </TabsContent>
 
               <LeadActions
@@ -823,9 +923,13 @@ function TabbedBody(props: TabbedBodyProps) {
         </TabsContent>
         <TabsContent
           value="transcript"
+          id="dashboard-transcript"
+          aria-label="Transcript"
+          aria-labelledby={undefined}
           className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col"
         >
-          <div className="h-full overflow-hidden">
+          <h2 className="mb-2 px-2 text-sm font-semibold">Transcript</h2>
+          <div className="flex-1 min-h-0 overflow-hidden">
             <TranscriptView
               key={`transcript-${resetTrigger}`}
               ref={scrollRef}
@@ -954,6 +1058,27 @@ function formatTranscript(transcripts: TranscriptionState['transcripts']) {
     .join('\n')
 }
 
+function useTranscriptHistory({
+  transcripts,
+  interimTranscript,
+}: TranscriptionState) {
+  useEffect(() => {
+    const first = transcripts.find((item) => item.text.trim())
+    let transcriptStartedAt = first?.timestamp ?? null
+    if (!first && interimTranscript.trim()) {
+      transcriptStartedAt =
+        useDashboardStore.getState().transcriptStartedAt ?? Date.now()
+    }
+    useDashboardStore.setState({ transcriptStartedAt })
+  }, [transcripts, interimTranscript])
+  useEffect(
+    () => () => {
+      useDashboardStore.setState({ transcriptStartedAt: null })
+    },
+    [],
+  )
+}
+
 function useTranscriptExtraction(
   transcripts: TranscriptionState['transcripts'],
   interimTranscript: TranscriptionState['interimTranscript'],
@@ -1069,6 +1194,15 @@ function useNutshellSubmission(
         ),
       })
       const result: NutshellResult = await response.json()
+      if (response.ok) {
+        useMockupStore
+          .getState()
+          .recordSubmittedLead(
+            result.leadId,
+            formData.entityName,
+            !!result.imageAttachmentFailed,
+          )
+      }
       handleNutshellResponse(response, result, {
         updateSubmissionStatus: setNutshellStatus,
         updateSubmissionMessage: setNutshellMessage,
@@ -1220,6 +1354,7 @@ function TranscriberContent({
   currentMarketLocation,
   scrollRef,
 }: TranscriberContentProps) {
+  useTranscriptHistory(transcription)
   return (
     <div className="h-full overflow-hidden flex items-center justify-center m-0 p-0">
       <div className="max-w-[1800px] w-full h-full flex flex-col px-2 sm:px-0">
@@ -1279,6 +1414,7 @@ export default function SalesCallTranscriber({
 }: {
   sessionIssuedAt: number
 }) {
+  useMockupSession()
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const [billboardContext, setBillboardContext] = useState<string>('')
   const [isLoadingBillboard, setIsLoadingBillboard] = useState(false)

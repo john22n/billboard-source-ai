@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect } from 'react'
+import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 
 export default function Error({
@@ -31,8 +32,8 @@ export default function Error({
         <Button onClick={reset} variant="default">
           Try again
         </Button>
-        <Button onClick={() => (window.location.href = '/')} variant="outline">
-          Go home
+        <Button asChild variant="outline">
+          <Link href="/">Go home</Link>
         </Button>
       </div>
     </div>
