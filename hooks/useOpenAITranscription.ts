@@ -4,6 +4,7 @@ import { useRef, useState, useCallback } from 'react'
 import { Call } from '@twilio/voice-sdk'
 import type { TranscriptItem } from '@/types/sales-call'
 import { REALTIME_TRANSCRIPTION_MODEL } from '@/lib/openai-pricing'
+import { watchTranscriptionTurns } from '@/lib/transcription-turns'
 
 interface UseOpenAITranscriptionOptions {
   onStatusChange?: (status: string) => void
@@ -13,6 +14,7 @@ interface TranscriptionSession {
   pc: RTCPeerConnection
   dc: RTCDataChannel | null
   speaker: 'agent' | 'caller'
+  close: () => Promise<void>
 }
 
 interface CostLog {
@@ -100,12 +102,32 @@ export function useOpenAITranscription(
       speaker: 'agent' | 'caller',
       ephemeralKey: string,
     ): Promise<TranscriptionSession | null> => {
+      const pc = new RTCPeerConnection()
+      let stopTurns: (() => boolean) | undefined
+      let closed = false
+      let pendingTurns = 0
+      let finishTranscript: (() => void) | undefined
+      const close = async () => {
+        if (closed) return
+        closed = true
+        // Give the final committed turn a bounded chance to arrive before closing.
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, 2000)
+          finishTranscript = () => {
+            clearTimeout(timer)
+            resolve()
+          }
+          stopTurns?.()
+          if (pendingTurns === 0) finishTranscript()
+        })
+        pc.close()
+      }
       try {
-        const pc = new RTCPeerConnection()
         const audioTrack = stream.getAudioTracks()[0]
 
         if (!audioTrack) {
           console.error(`No audio track for ${speaker}`)
+          await close()
           return null
         }
 
@@ -114,34 +136,18 @@ export function useOpenAITranscription(
 
         const dc = pc.createDataChannel('oai-events')
 
-        dc.onopen = () => {
+        dc.onopen = async () => {
           console.log(`${speaker} data channel opened`)
-
-          const sessionConfig = {
-            type: 'session.update',
-            session: {
-              type: 'transcription',
-              audio: {
-                input: {
-                  format: { type: 'audio/pcm', rate: 24000 },
-                  transcription: {
-                    model: 'whisper-1',
-                    language: 'en',
-                    prompt:
-                      'Billboard, billboard advertising, bulletin, poster, digital billboard, static bulletin, out-of-home, OOH, CPM, impressions, DEC, daily effective circulation, vinyl, trivision, LED, Nutshell, Billboard Source',
-                  },
-                  turn_detection: {
-                    type: 'server_vad',
-                    threshold: 0.5,
-                    prefix_padding_ms: 500,
-                    silence_duration_ms: 1000,
-                  },
-                },
-              },
-            },
+          try {
+            // Keep the server-issued model/configuration; do not override it.
+            stopTurns = await watchTranscriptionTurns(stream, dc, () => {
+              pendingTurns += 1
+            })
+            if (closed) stopTurns()
+          } catch {
+            reportStatus('Could not start transcription turn detection')
+            await close()
           }
-
-          dc.send(JSON.stringify(sessionConfig))
         }
 
         dc.onmessage = (event) => {
@@ -170,6 +176,8 @@ export function useOpenAITranscription(
               setTranscripts((prev) => [...prev, newTranscript])
               setInterimTranscript('')
               setInterimSpeaker(null)
+              pendingTurns = Math.max(0, pendingTurns - 1)
+              if (pendingTurns === 0) finishTranscript?.()
             }
 
             if (message.type === 'error') {
@@ -197,6 +205,7 @@ export function useOpenAITranscription(
 
         if (!sdpResponse.ok) {
           console.error(`${speaker} API error:`, await sdpResponse.text())
+          await close()
           return null
         }
 
@@ -208,13 +217,14 @@ export function useOpenAITranscription(
         await pc.setRemoteDescription(answer)
         console.log(`${speaker} session connected`)
 
-        return { pc, dc, speaker }
+        return { pc, dc, speaker, close }
       } catch (error) {
         console.error(`${speaker} session failed:`, error)
+        await close()
         return null
       }
     },
-    [],
+    [reportStatus],
   )
 
   const createTrackedTranscriptionSession = useCallback(
@@ -270,10 +280,7 @@ export function useOpenAITranscription(
         // in flight. Discard those late sessions instead of reviving a stopped
         // transcription after the call has already ended.
         if (generation !== transcriptionGeneration.current) {
-          newSessions.forEach((session) => {
-            session.dc?.close()
-            session.pc.close()
-          })
+          await Promise.all(newSessions.map((session) => session.close()))
           return
         }
 
@@ -295,11 +302,9 @@ export function useOpenAITranscription(
     costLogs.current = []
 
     // Close all sessions
-    sessions.current.forEach((session) => {
-      session.dc?.close()
-      session.pc.close()
-    })
+    const sessionsToClose = sessions.current
     sessions.current = []
+    await Promise.all(sessionsToClose.map((session) => session.close()))
 
     if (logsToUpdate.length > 0) {
       try {

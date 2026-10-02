@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { createPendingLog } from '@/lib/dal'
-import { REALTIME_TRANSCRIPTION_MODEL } from '@/lib/openai-pricing'
+import {
+  REALTIME_TRANSCRIPTION_MODEL,
+  transcriptionSession,
+} from '@/lib/openai-transcription'
 import {
   configErrorResponseBody,
   isMissingConfig,
@@ -10,17 +13,6 @@ import {
 import { rateLimit } from '@/lib/rate-limit'
 
 export async function GET() {
-  const instructions = `
-You are transcribing a live sales call in real time.
-Your tasks:
-- Accurately transcribe everything said by both speakers.
-- Identify and label speakers clearly (e.g., "Sales Rep:", "Customer:").
-- Update form fields dynamically as the conversation progresses, based on what is being discussed.
-- Use JSON updates to represent progress (e.g., {"field": "customer_needs", "value": "They are interested in premium support"}).
-- Do NOT summarize — keep context incremental.
-- Use Spanish ("es") for transcription text if the call is in Spanish.
-`.trim()
-
   try {
     const session = await getSession()
     if (!session?.userId) {
@@ -51,21 +43,7 @@ Your tasks:
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          session: {
-            type: 'transcription',
-            audio: {
-              input: {
-                transcription: {
-                  language: 'en',
-                  model: 'gpt-4o-transcribe',
-                  prompt: instructions,
-                },
-                noise_reduction: {
-                  type: 'near_field',
-                },
-              },
-            },
-          },
+          session: transcriptionSession(),
         }),
       },
     )
