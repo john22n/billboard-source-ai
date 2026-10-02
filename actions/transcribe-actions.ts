@@ -5,6 +5,7 @@ import { serverConfig } from '@/lib/config'
 import { getSession } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { z } from 'zod'
+import { transcriptionSession } from '@/lib/openai-transcription'
 
 const MAX_TEXT = 100_000
 const MAX_BASE64_AUDIO = Math.ceil((25 * 1024 * 1024 * 4) / 3) + 4
@@ -60,7 +61,7 @@ function getOpenAIClient() {
 
 /**
  * Create a Realtime transcription session for sales calls
- * Uses gpt-4o-transcribe model for high-accuracy transcription
+ * Clients must commit audio turns; speaker labels are not supported.
  */
 export async function createTranscriptionSession(options?: {
   language?: string
@@ -74,6 +75,12 @@ export async function createTranscriptionSession(options?: {
     if (!input.success) {
       return { success: false, error: 'Input too large' }
     }
+    if (input.data?.speakerLabels) {
+      return {
+        success: false,
+        error: 'Realtime transcription does not support speaker labels',
+      }
+    }
     const openaiApiKey = serverConfig.openai.requireApiKey()
 
     const response = await fetch(
@@ -85,17 +92,10 @@ export async function createTranscriptionSession(options?: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'gpt-4o-transcribe',
-          voice: 'alloy', // Required but not used for transcription-only
-          modalities: ['text'], // Transcription only, no audio output
-          instructions:
-            input.data?.customInstructions ||
-            'Transcribe the sales call accurately. Identify different speakers. Include timestamps.',
-          input_audio_format: 'pcm16',
-          input_audio_transcription: {
-            model: 'whisper-1',
-          },
-          turn_detection: null, // Disable turn detection for continuous transcription
+          session: transcriptionSession(
+            input.data?.language,
+            input.data?.customInstructions,
+          ),
         }),
       },
     )
@@ -110,8 +110,8 @@ export async function createTranscriptionSession(options?: {
     const data = await response.json()
     return {
       success: true,
-      token: data.client_secret.value,
-      sessionId: data.id,
+      token: data.value,
+      sessionId: data.session?.id,
       expiresAt: data.expires_at,
     }
   } catch {

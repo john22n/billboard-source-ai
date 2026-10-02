@@ -7,6 +7,7 @@ import OpenAI from 'openai'
 import { serverConfig } from '@/lib/config'
 import { getSession } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
+import { FILE_TRANSCRIPTION_MODEL } from '@/lib/openai-transcription'
 
 const MAX_TEXT = 100_000
 const MAX_BASE64_AUDIO = Math.ceil((25 * 1024 * 1024 * 4) / 3) + 4
@@ -83,7 +84,7 @@ export async function createRealtimeSession() {
     const openaiApiKey = serverConfig.openai.requireApiKey()
 
     const response = await fetch(
-      'https://api.openai.com/v1/realtime/sessions',
+      'https://api.openai.com/v1/realtime/client_secrets',
       {
         method: 'POST',
         headers: {
@@ -91,8 +92,11 @@ export async function createRealtimeSession() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'gpt-4o-realtime-preview-2024-12-17',
-          voice: 'alloy',
+          session: {
+            type: 'realtime',
+            model: 'gpt-realtime-2.1',
+            audio: { output: { voice: 'alloy' } },
+          },
         }),
       },
     )
@@ -108,8 +112,8 @@ export async function createRealtimeSession() {
     const data = await response.json()
     return {
       success: true,
-      token: data.client_secret.value,
-      sessionId: data.id,
+      token: data.value,
+      sessionId: data.session?.id,
     }
   } catch {
     console.error('Error creating realtime session')
@@ -199,7 +203,7 @@ export async function generateStructuredResponse(prompt: string) {
   }
 }
 
-// Transcribe audio using OpenAI Whisper (native client)
+// Transcribe audio using the file transcription API (native client)
 export async function transcribeAudio(
   audioBase64: string,
   filename: string = 'audio.wav',
@@ -212,8 +216,7 @@ export async function transcribeAudio(
 
     const transcription = await getOpenAIClient().audio.transcriptions.create({
       file: prepared.file,
-      model: 'whisper-1',
-      language: 'en',
+      model: FILE_TRANSCRIPTION_MODEL,
     })
 
     return {

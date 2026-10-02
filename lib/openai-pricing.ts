@@ -1,6 +1,7 @@
 // lib/openai-pricing.ts
 
-export const REALTIME_TRANSCRIPTION_MODEL = 'gpt-realtime-whisper'
+import { REALTIME_TRANSCRIPTION_MODEL } from './openai-transcription'
+export { REALTIME_TRANSCRIPTION_MODEL } from './openai-transcription'
 
 interface TokenPricing {
   inputPerMillion: number
@@ -45,6 +46,8 @@ const EMBEDDING_PRICING: Record<string, EmbeddingPricing> = {
 
 const DURATION_PRICING: Record<string, DurationPricing> = {
   [REALTIME_TRANSCRIPTION_MODEL]: { perMinute: 0.017 },
+  'gpt-transcribe': { perMinute: 0.0045 },
+  'gpt-realtime-whisper': { perMinute: 0.017 },
   'gpt-4o-transcribe': { perMinute: 0.006 },
   'gpt-4o-mini-transcribe': { perMinute: 0.003 },
   'whisper-1': { perMinute: 0.006 },
@@ -62,7 +65,7 @@ const MODEL_PREFIXES: Array<[string, string]> = [
 function normalizeModelId(model: string): string {
   const normalized = model.toLowerCase()
   if (normalized.includes('gpt-realtime-whisper')) {
-    return REALTIME_TRANSCRIPTION_MODEL
+    return 'gpt-realtime-whisper'
   }
   return (
     MODEL_PREFIXES.find(([prefix]) => normalized.startsWith(prefix))?.[1] ??
