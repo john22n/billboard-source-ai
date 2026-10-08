@@ -250,6 +250,12 @@ it('supplies lead context as user data, separate from instructions and the curre
   expect(defaultSystemPrompt).toContain(
     'When the user says “Start,” begin a step-by-step intake process.',
   )
+  expect(defaultSystemPrompt).toContain(
+    '10. The final output should be one finished billboard mockup image, not a list of concepts.',
+  )
+  expect(defaultSystemPrompt).toContain(
+    'Final image requirements:\n\nCreate one realistic billboard mockup.',
+  )
   expect(options.system).toContain('Explicit chat directions take precedence')
   expect(options.messages).toEqual([
     {
@@ -551,15 +557,11 @@ it('returns a retryable error when the wizard cannot be prepared', async () => {
   )
 })
 
-it('applies custom image settings to both formats and keeps the no-labels rule', async () => {
+it('uses the wizard system prompt for both renders with only ratios configured separately', async () => {
   mocks.systemPrompt.mockResolvedValue({
-    prompt: 'Custom wizard prompt',
+    prompt: 'Use a charcoal background and warm ivory lettering.',
     isDefault: false,
     imageSettings: {
-      sharedPrompt: 'CUSTOM SHARED',
-      bulletinPrompt: 'CUSTOM BULLETIN',
-      revisionPrompt: 'CUSTOM REVISION',
-      posterPrompt: 'CUSTOM POSTER',
       bulletin: { width: 5, height: 2 },
       poster: { width: 3, height: 2 },
     },
@@ -571,13 +573,15 @@ it('applies custom image settings to both formats and keeps the no-labels rule',
   const [bulletinPrompt, posterPrompt] = mocks.render.mock.calls.map(
     ([prompt]) => prompt as string,
   )
-  expect(bulletinPrompt).toContain('CUSTOM SHARED\nCUSTOM BULLETIN')
   expect(bulletinPrompt).toContain('ratio of 5:2')
   expect(bulletinPrompt).not.toContain('24:7')
-  expect(posterPrompt).toContain('CUSTOM SHARED\nCUSTOM POSTER')
   expect(posterPrompt).toContain('ratio of 3:2')
   expect(posterPrompt).not.toContain('13:6')
   for (const prompt of [bulletinPrompt, posterPrompt]) {
+    expect(prompt).toContain(
+      'Use a charcoal background and warm ivory lettering.',
+    )
+    expect(prompt).not.toContain('clean blue sky')
     expect(prompt).toContain(noLabels)
     expect(prompt).not.toMatch(/(?<!not )(add|include) (a )?(format )?label/i)
   }
