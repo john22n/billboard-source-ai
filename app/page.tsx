@@ -1,9 +1,8 @@
 'use client'
 
-import { LoginForm } from "@/components/login-form"
-import Spline from "@splinetool/react-spline"
-
-
+import { LoginForm } from '@/components/login-form'
+import { LaunchAnnouncement } from '@/components/launch-announcement'
+import Spline from '@splinetool/react-spline'
 
 export default function Home() {
   return (
@@ -18,6 +17,7 @@ export default function Home() {
       <div className="bg-muted relative hidden lg:block">
         <Spline scene="https://prod.spline.design/1eapv4LnOygEqB66/scene.splinecode" />
       </div>
+      <LaunchAnnouncement />
     </div>
   )
 }
