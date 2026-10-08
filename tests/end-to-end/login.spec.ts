@@ -1,5 +1,20 @@
 import { expect, test } from 'playwright/test'
 
+for (const path of ['/', '/login']) {
+  test(`launch announcement appears on a fresh visit to ${path}`, async ({
+    page,
+  }) => {
+    await page.goto(path)
+    const announcement = page.getByRole('complementary', {
+      name: 'GeoPoePoe3 launch announcement',
+    })
+    await expect(announcement).toBeVisible()
+    await expect(announcement).toContainText('October 20th')
+    await page.getByRole('button', { name: 'Dismiss announcement' }).click()
+    await expect(announcement).toHaveCount(0)
+  })
+}
+
 test('login validates email and lets users return from the password step', async ({
   page,
 }) => {
