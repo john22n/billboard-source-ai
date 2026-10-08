@@ -368,6 +368,38 @@ it('renders a new billboard with uploads as references and signs the result', as
   expect(followUp.status).not.toBe(400)
 })
 
+it('generates a bulletin then adapts that exact design into a separately signed poster', async () => {
+  const poster = 'data:image/jpeg;base64,/9j/AA=='
+  mocks.render.mockResolvedValueOnce(jpeg).mockResolvedValueOnce(poster)
+  mocks.streamText.mockImplementationOnce(
+    streams(async ({ tools }) => {
+      await tools.generate_billboard.execute({
+        advertiser: 'Alpine Dental',
+        prompt: 'Headline "Smile Bigger". Keep the mountain photography.',
+        revision: false,
+      })
+      return 'Both formats are ready.'
+    }),
+  )
+  const response = await POST(
+    request({ messages: [{ role: 'user', text: 'Generate both formats' }] }),
+  )
+  const result = await readWizardReply(response.body!)
+  expect(mocks.render).toHaveBeenCalledTimes(2)
+  expect(mocks.render.mock.calls[0][0]).toContain('24:7')
+  expect(mocks.render.mock.calls[1][0]).toContain('13:6')
+  expect(mocks.render.mock.calls[1][1][0]).toBe(jpeg)
+  expect(result?.metadata).toMatchObject({
+    image: { advertiser: 'Alpine Dental', dataUrl: jpeg },
+    poster: {
+      advertiser: 'Alpine Dental',
+      dataUrl: poster,
+      sourceId: result?.metadata?.image?.id,
+      receipt: expect.any(String),
+    },
+  })
+})
+
 it('edits the current image for revisions and keeps its advertiser', async () => {
   const id = '11111111-1111-4111-8111-111111111111'
   const image = {
