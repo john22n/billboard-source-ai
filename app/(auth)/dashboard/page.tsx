@@ -58,7 +58,7 @@ export default async function Page() {
       />
       <SidebarInset className="flex flex-col h-dvh min-h-0 overflow-hidden bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
         <SiteHeader />
-        <LaunchAnnouncement />
+        <LaunchAnnouncement autoDismiss />
         <div className="flex-1 min-h-0 overflow-hidden p-0 m-0">
           <Suspense fallback={<DashboardSkeleton />}>
             <SalesCallTranscriber sessionIssuedAt={session.sessionStartedAt} />

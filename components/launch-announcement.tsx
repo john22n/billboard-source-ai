@@ -1,10 +1,20 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Radar, X } from 'lucide-react'
 
-export function LaunchAnnouncement() {
+export function LaunchAnnouncement({
+  autoDismiss = false,
+}: {
+  autoDismiss?: boolean
+}) {
   const [dismissed, setDismissed] = useState(false)
+
+  useEffect(() => {
+    if (!autoDismiss || dismissed) return
+    const timeout = window.setTimeout(() => setDismissed(true), 5000)
+    return () => window.clearTimeout(timeout)
+  }, [autoDismiss, dismissed])
 
   if (dismissed) return null
 
