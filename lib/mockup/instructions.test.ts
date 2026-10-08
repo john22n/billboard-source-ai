@@ -1,5 +1,8 @@
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { billboardImagePrompt, toolInstructions } from './instructions'
+import { defaultSystemPrompt } from './system-prompt'
+
+vi.mock('@/db', () => ({ db: {} }))
 
 it('carries the target location into the brief and requests its skyline behind the billboard', () => {
   expect(toolInstructions).toContain(
@@ -11,12 +14,13 @@ it('carries the target location into the brief and requests its skyline behind t
       revision: false,
       logo: false,
       labels: [],
+      systemPrompt: defaultSystemPrompt,
     },
   )
   expect(prompt).toContain('the target location’s skyline in the background')
   expect(prompt).toContain('Alpine Dental in Denver')
   expect(prompt).toContain(
-    'If no location was provided, keep the clean blue sky without inventing a city',
+    'If no location was provided, use a clean blue sky without inventing a city',
   )
 })
 
@@ -26,15 +30,19 @@ it('preserves uploaded background overrides and does not restage unrelated revis
       revision: false,
       logo: false,
       labels: ['mountains.jpg'],
+      systemPrompt: defaultSystemPrompt,
     }),
   ).toContain('User-supplied backgrounds override the default sky/scene')
   const revision = billboardImagePrompt('Make text larger', {
     revision: true,
     logo: false,
     labels: [],
+    systemPrompt: defaultSystemPrompt,
   })
   expect(revision).toContain(
     'Preserve its copy, layout, brand identity, background',
   )
-  expect(revision).not.toContain('skyline')
+  expect(revision).toContain(
+    'preserve approved artwork on revisions rather than resetting it to the defaults',
+  )
 })

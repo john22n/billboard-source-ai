@@ -22,10 +22,6 @@ import {
   posterImagePrompt,
   toolInstructions,
 } from '@/lib/mockup/instructions'
-import {
-  defaultImageSettings,
-  type ImageSettings,
-} from '@/lib/mockup/image-settings'
 import { renderBillboard } from '@/lib/mockup/render'
 import {
   signArtifact,
@@ -60,6 +56,7 @@ const inputSchema = z.object({
   leadContext: z.string().max(8000).default(''),
 })
 type Input = z.infer<typeof inputSchema>
+type WizardSettings = Awaited<ReturnType<typeof getSystemPrompt>>
 const headers = { 'Cache-Control': 'no-store' }
 
 /** Artifacts live in the rep's browser tab; every use re-checks their receipts. */
@@ -123,7 +120,7 @@ async function renderMockup(
     advertiser: string
     prompt: string
   },
-  settings: ImageSettings,
+  settings: WizardSettings,
 ): Promise<MockupImage> {
   const { previous, attachments } = job
   const logo = previous ? null : job.logo
@@ -138,8 +135,9 @@ async function renderMockup(
         revision: !!previous,
         logo: !!logo,
         labels: attachments.map(attachmentLabel),
+        systemPrompt: settings.prompt,
       },
-      settings,
+      settings.imageSettings,
     ),
     references,
   )
@@ -157,12 +155,17 @@ async function renderPoster(
   session: MockupSession,
   bulletin: MockupImage,
   references: string[],
-  settings: ImageSettings,
+  settings: WizardSettings,
   changes: string,
   previous: MockupImage | null,
 ): Promise<MockupImage> {
   const dataUrl = await renderBillboard(
-    posterImagePrompt(changes, settings, !!previous),
+    posterImagePrompt(
+      changes,
+      settings.imageSettings,
+      !!previous,
+      settings.prompt,
+    ),
     [bulletin.dataUrl, ...(previous ? [previous.dataUrl] : []), ...references],
   )
   const id = randomUUID()
@@ -185,7 +188,7 @@ async function renderPoster(
 function wizardTools(
   session: MockupSession,
   input: Input,
-  settings: ImageSettings,
+  settings: WizardSettings,
 ) {
   const captured: {
     brand: Brand | null
@@ -331,13 +334,12 @@ export async function POST(request: Request) {
       apiKey: serverConfig.openai.requireApiKey(),
     })
     stage = 'system-prompt'
-    const { prompt, imageSettings = defaultImageSettings } =
-      await getSystemPrompt()
-    const { tools, captured } = wizardTools(session, input.data, imageSettings)
+    const settings = await getSystemPrompt()
+    const { tools, captured } = wizardTools(session, input.data, settings)
     stage = 'conversation'
     const result = streamText({
       model: provider('gpt-5.4-mini'),
-      system: `${prompt}\n\n${toolInstructions}`,
+      system: `${settings.prompt}\n\n${toolInstructions}`,
       messages: conversation(input.data),
       tools,
       stopWhen: stepCountIs(6),

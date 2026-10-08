@@ -10,6 +10,7 @@ import {
 } from 'ai'
 import { defaultSystemPrompt } from '@/lib/mockup/system-prompt'
 import { toolInstructions } from '@/lib/mockup/instructions'
+import { defaultImageSettings } from '@/lib/mockup/image-settings'
 import {
   readWizardReply,
   replyText,
@@ -133,6 +134,7 @@ beforeEach(() => {
   mocks.systemPrompt.mockResolvedValue({
     prompt: 'Custom wizard prompt',
     isDefault: false,
+    imageSettings: defaultImageSettings,
   })
 })
 
@@ -488,6 +490,10 @@ it('edits the current image for revisions and keeps its advertiser', async () =>
     expect.stringMatching(/^Edit the supplied CURRENT selected/),
     [jpeg],
   )
+  expect(mocks.render.mock.calls[0][0]).toContain('Custom wizard prompt')
+  expect(mocks.render.mock.calls[0][0]).toContain(
+    'Requested changes: Make the headline larger',
+  )
   expect(data.image).toMatchObject({
     advertiser: 'Alpine',
     dataUrl: 'data:image/jpeg;base64,/9j/AA==',
@@ -621,6 +627,7 @@ it('retries a poster-only request from the original bulletin without regeneratin
   expect(result).toMatchObject({ ok: true })
   expect(mocks.render).toHaveBeenCalledTimes(1)
   const [prompt, references] = mocks.render.mock.calls[0]
+  expect(prompt).toContain('Custom wizard prompt')
   expect(prompt).toContain('13:6')
   expect(prompt).not.toContain('24:7')
   expect(prompt).not.toContain('The second is the CURRENT POSTER')

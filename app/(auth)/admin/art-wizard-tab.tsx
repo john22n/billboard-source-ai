@@ -73,8 +73,8 @@ export default function ArtWizardTab() {
       <CardHeader>
         <h2 className="text-lg font-semibold">Creative Studio</h2>
         <CardDescription>
-          One design, two outdoor mockups. Edit the wizard and creative prompts
-          for all reps. The poster is adapted from the bulletin, preserving its
+          One design, two outdoor mockups. Both images follow the Mockup Wizard
+          system prompt. The poster adapts the bulletin’s design, preserving
           approved copy and brand assets. No format labels or presentation
           footers are added to the images.
         </CardDescription>
@@ -160,7 +160,7 @@ const actions: Record<
   },
   reset: {
     init: () => ({ method: 'DELETE' }),
-    done: 'Original prompts and face ratios restored.',
+    done: 'Original system prompt and face ratios restored.',
   },
 }
 
@@ -195,7 +195,7 @@ function statusText(input: {
   if (input.notice) return input.notice
   return input.isDefault
     ? 'Using the original prompt.'
-    : 'Using a customized prompt.'
+    : 'Using saved settings.'
 }
 
 function PromptEditor({ initial }: { initial: Saved }) {
@@ -272,13 +272,14 @@ function PromptEditor({ initial }: { initial: Saved }) {
         />
         <p id="wizard-prompt-help" className="text-sm text-muted-foreground">
           Editable · Questions, order, design rules, tone and reset behavior all
-          live here. Creative instructions and face proportions are editable
-          below. Saving affects subsequent turns for all reps, including
-          existing chats; existing images are not regenerated. Test a new mockup
-          after saving. Maximum 20,000 characters.
+          live here. This is also the creative direction for both generated
+          images; only face ratios are configured below. Saving affects
+          subsequent turns for all reps, including existing chats; existing
+          images are not regenerated. Test a new mockup after saving. Maximum
+          20,000 characters.
         </p>
       </div>
-      <CreativeFields
+      <RatioFields
         value={imageSettings}
         disabled={!!pending}
         onChange={(value) => {
@@ -301,7 +302,7 @@ function PromptEditor({ initial }: { initial: Saved }) {
           disabled={!!pending || (saved.isDefault && !dirty)}
           onClick={() => void submit('reset')}
         >
-          {pending === 'reset' ? 'Restoring…' : 'Reset all prompts and ratios'}
+          {pending === 'reset' ? 'Restoring…' : 'Reset prompt and ratios'}
         </Button>
         <p role="status" className="text-sm text-muted-foreground">
           {status}
@@ -311,30 +312,7 @@ function PromptEditor({ initial }: { initial: Saved }) {
   )
 }
 
-const creativePrompts = [
-  [
-    'sharedPrompt',
-    'Shared design instructions',
-    'Brand fidelity, typography, copy and visual style for both formats.',
-  ],
-  [
-    'bulletinPrompt',
-    'Bulletin generation prompt',
-    'Composition and outdoor setting for the first image.',
-  ],
-  [
-    'revisionPrompt',
-    'Bulletin revision prompt',
-    'What to preserve when a rep revises the existing design.',
-  ],
-  [
-    'posterPrompt',
-    'Poster adaptation prompt',
-    'How to rearrange the bulletin into a poster without changing the design or approved copy.',
-  ],
-] as const
-
-function CreativeFields({
+function RatioFields({
   value,
   disabled,
   onChange,
@@ -347,9 +325,11 @@ function CreativeFields({
     <fieldset disabled={disabled} className="space-y-5 border-t pt-6">
       <legend className="font-semibold">Image generation settings</legend>
       <p className="text-sm text-muted-foreground">
-        Ratios describe the billboard face, not the full image including sky and
-        supports. AI follows these proportions approximately; these are concept
-        mockups, not dimension-certified print files.
+        Creative direction comes from the system prompt above. Only width:height
+        ratios change here. Ratios describe the billboard face, not the full
+        image including sky and supports. AI follows these proportions
+        approximately; these are concept mockups, not dimension-certified print
+        files.
       </p>
       <div className="grid gap-4 sm:grid-cols-2">
         {(['bulletin', 'poster'] as const).map((format) => (
@@ -387,25 +367,6 @@ function CreativeFields({
           </fieldset>
         ))}
       </div>
-      {creativePrompts.map(([key, label, help]) => (
-        <div key={key} className="space-y-2">
-          <Label htmlFor={key}>{label}</Label>
-          <Textarea
-            id={key}
-            value={value[key]}
-            maxLength={8000}
-            required
-            className="min-h-32 font-mono text-sm"
-            aria-describedby={`${key}-help`}
-            onChange={(event) =>
-              onChange({ ...value, [key]: event.target.value })
-            }
-          />
-          <p id={`${key}-help`} className="text-xs text-muted-foreground">
-            {help} Maximum 8,000 characters.
-          </p>
-        </div>
-      ))}
     </fieldset>
   )
 }

@@ -11,7 +11,7 @@ test.beforeEach(async ({ context }) => {
   await context.addCookies([{ name: 'auth_token', value: token, url: baseUrl }])
 })
 
-test('admin saves wizard and image prompts with face ratios, then resets everything in one click', async ({
+test('admin changes face ratios without rewriting the system prompt, then saves and resets settings', async ({
   page,
   context,
 }, testInfo) => {
@@ -37,25 +37,11 @@ test('admin saves wizard and image prompts with face ratios, then resets everyth
   const editor = page.getByRole('textbox', {
     name: 'Mockup Wizard system prompt',
   })
-  const prompts = {
-    sharedPrompt: page.getByRole('textbox', {
-      name: 'Shared design instructions',
-    }),
-    bulletinPrompt: page.getByRole('textbox', {
-      name: 'Bulletin generation prompt',
-    }),
-    revisionPrompt: page.getByRole('textbox', {
-      name: 'Bulletin revision prompt',
-    }),
-    posterPrompt: page.getByRole('textbox', {
-      name: 'Poster adaptation prompt',
-    }),
-  }
   const ratio = (format: 'bulletin' | 'poster', axis: 'width' | 'height') =>
     page.getByRole('spinbutton', { name: `${format} ${axis}` })
   const save = page.getByRole('button', { name: 'Save settings', exact: true })
   const reset = page.getByRole('button', {
-    name: 'Reset all prompts and ratios',
+    name: 'Reset prompt and ratios',
     exact: true,
   })
 
@@ -68,12 +54,12 @@ test('admin saves wizard and image prompts with face ratios, then resets everyth
   ).json()
   expect(original.isDefault).toBe(true)
   const defaults = original.imageSettings
-  expect(defaults.bulletin).toEqual({ width: 24, height: 7 })
-  expect(defaults.poster).toEqual({ width: 13, height: 6 })
-  await expect(page.getByRole('textbox')).toHaveCount(5)
+  expect(defaults).toEqual({
+    bulletin: { width: 24, height: 7 },
+    poster: { width: 13, height: 6 },
+  })
+  await expect(page.getByRole('textbox')).toHaveCount(1)
   await expect(page.getByRole('spinbutton')).toHaveCount(4)
-  for (const [key, field] of Object.entries(prompts))
-    await expect(field).toHaveValue(defaults[key])
   await expect(ratio('bulletin', 'width')).toHaveValue('24')
   await expect(ratio('bulletin', 'height')).toHaveValue('7')
   await expect(ratio('poster', 'width')).toHaveValue('13')
@@ -88,21 +74,29 @@ test('admin saves wizard and image prompts with face ratios, then resets everyth
   const custom =
     'You are the Billboard Source Mockup Wizard. Ask only three questions, then generate the billboard.'
   const customSettings = {
-    sharedPrompt: 'E2E shared: bold sans-serif type, exact approved copy.',
-    bulletinPrompt: 'E2E bulletin: front-on highway bulletin at dusk.',
-    revisionPrompt: 'E2E revision: keep everything except requested edits.',
-    posterPrompt: 'E2E poster: reflow the bulletin into a taller face.',
     bulletin: { width: 48, height: 14 },
     poster: { width: 12, height: 5 },
   }
-  await editor.fill(custom)
-  for (const [key, field] of Object.entries(prompts))
-    await field.fill(customSettings[key as keyof typeof prompts])
   await ratio('bulletin', 'width').fill('48')
   await ratio('bulletin', 'height').fill('14')
   await ratio('poster', 'width').fill('12')
   await ratio('poster', 'height').fill('5')
   await expect(page.getByText('Unsaved changes')).toBeVisible()
+  await save.click()
+  await expect(
+    page.getByText(
+      'Settings saved. Subsequent wizard turns will use these instructions.',
+    ),
+  ).toBeVisible()
+  await expect(save).toBeDisabled()
+  const ratioOnly = await (
+    await context.request.get('/api/admin/art-wizard')
+  ).json()
+  expect(ratioOnly.prompt).toBe(original.prompt)
+  expect(ratioOnly.imageSettings).toEqual(customSettings)
+  await expect(editor).toHaveValue(original.prompt)
+
+  await editor.fill(custom)
   await save.click()
   await expect(
     page.getByText(
@@ -144,13 +138,11 @@ test('admin saves wizard and image prompts with face ratios, then resets everyth
   await page.reload()
   await page.getByRole('tab', { name: 'Creative Studio' }).click()
   await expect(editor).toHaveValue(custom)
-  for (const [key, field] of Object.entries(prompts))
-    await expect(field).toHaveValue(customSettings[key as keyof typeof prompts])
   await expect(ratio('bulletin', 'width')).toHaveValue('48')
   await expect(ratio('bulletin', 'height')).toHaveValue('14')
   await expect(ratio('poster', 'width')).toHaveValue('12')
   await expect(ratio('poster', 'height')).toHaveValue('5')
-  await expect(page.getByText('Using a customized prompt.')).toBeVisible()
+  await expect(page.getByText('Using saved settings.')).toBeVisible()
 
   // A non-landscape ratio is rejected in the UI and nothing is persisted.
   await ratio('poster', 'width').fill('5')
@@ -176,14 +168,12 @@ test('admin saves wizard and image prompts with face ratios, then resets everyth
 
   await reset.click()
   await expect(
-    page.getByText('Original prompts and face ratios restored.'),
+    page.getByText('Original system prompt and face ratios restored.'),
   ).toBeVisible()
   await expect(
     page.getByRole('alert').filter({ hasText: 'Use a landscape face ratio' }),
   ).toHaveCount(0)
   await expect(editor).toHaveValue(original.prompt)
-  for (const [key, field] of Object.entries(prompts))
-    await expect(field).toHaveValue(defaults[key])
   await expect(ratio('bulletin', 'width')).toHaveValue('24')
   await expect(ratio('bulletin', 'height')).toHaveValue('7')
   await expect(ratio('poster', 'width')).toHaveValue('13')
@@ -200,7 +190,7 @@ test('admin saves wizard and image prompts with face ratios, then resets everyth
   await page.getByRole('tab', { name: 'Creative Studio' }).click()
   await expect(page.getByText('Using the original prompt.')).toBeVisible()
   await expect(ratio('bulletin', 'width')).toHaveValue('24')
-  await expect(prompts.posterPrompt).toHaveValue(defaults.posterPrompt)
+  await expect(editor).toHaveValue(original.prompt)
   await page
     .getByRole('group', { name: 'Image generation settings', exact: true })
     .screenshot({

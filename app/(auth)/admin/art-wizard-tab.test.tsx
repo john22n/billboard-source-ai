@@ -52,7 +52,7 @@ async function submit() {
   })
 }
 
-it('shows protected frames as read-only content outside the editable prompts', async () => {
+it('keeps one system prompt editor with ratio-only image settings and read-only protected frames', async () => {
   fetchMock.mockResolvedValueOnce(
     Response.json({
       prompt: 'Original prompt',
@@ -69,11 +69,12 @@ it('shows protected frames as read-only content outside the editable prompts', a
   await act(async () => root.render(<ArtWizardTab />))
   expect(container.textContent).toContain('Tool instructions')
   expect(container.textContent).toContain('Always call generate_billboard.')
-  expect(container.querySelectorAll('textarea')).toHaveLength(5)
+  expect(container.querySelectorAll('textarea')).toHaveLength(1)
+  expect(container.querySelectorAll('input[type="number"]')).toHaveLength(4)
   expect(container.querySelector('textarea')?.value).toBe('Original prompt')
   expect(container.textContent).toContain('Read-only')
   expect(container.textContent).toContain('Using the original prompt.')
-  expect(button('Reset all prompts and ratios').disabled).toBe(true)
+  expect(button('Reset prompt and ratios').disabled).toBe(true)
 })
 
 it('loads the saved prompt, rejects blank edits, and reports a successful save', async () => {
@@ -83,7 +84,7 @@ it('loads the saved prompt, rejects blank edits, and reports a successful save',
   await act(async () => root.render(<ArtWizardTab />))
   const save = button('Save settings')
   expect(container.querySelector('textarea')?.value).toBe('Original prompt')
-  expect(container.textContent).toContain('Using a customized prompt.')
+  expect(container.textContent).toContain('Using saved settings.')
   expect(save.disabled).toBe(true)
   await edit(' \n ')
   expect(save.disabled).toBe(true)
@@ -122,15 +123,15 @@ it('resets to the original prompt with one click and replaces the editor text', 
       imageSettings: defaultImageSettings,
     }),
   )
-  await act(async () => button('Reset all prompts and ratios').click())
+  await act(async () => button('Reset prompt and ratios').click())
   expect(fetchMock).toHaveBeenLastCalledWith('/api/admin/art-wizard', {
     method: 'DELETE',
   })
   expect(input.value).toBe('You are the Billboard Source Mockup Wizard.')
   expect(container.textContent).toContain(
-    'Original prompts and face ratios restored',
+    'Original system prompt and face ratios restored',
   )
-  expect(button('Reset all prompts and ratios').disabled).toBe(true)
+  expect(button('Reset prompt and ratios').disabled).toBe(true)
   expect(button('Save settings').disabled).toBe(true)
 })
 
@@ -211,7 +212,7 @@ it('disables the editor and duplicate submissions while saving', async () => {
   const save = button('Saving…')
   expect(save.disabled).toBe(true)
   expect(input.disabled).toBe(true)
-  expect(button('Reset all prompts and ratios').disabled).toBe(true)
+  expect(button('Reset prompt and ratios').disabled).toBe(true)
   await submit()
   expect(fetchMock).toHaveBeenCalledTimes(2)
   await act(async () =>

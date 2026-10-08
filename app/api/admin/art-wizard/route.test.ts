@@ -87,12 +87,10 @@ it('resets to the original prompt in one request', async () => {
   })
 })
 
-it('saves creative templates and validated face ratios together with the wizard prompt', async () => {
+it('saves only face ratios as image settings alongside the wizard system prompt', async () => {
   const imageSettings = {
-    ...defaultImageSettings,
-    sharedPrompt: 'Use the original portrait photographs.',
     bulletin: { width: 7, height: 2 },
-    posterPrompt: 'Preserve all approved copy and reflow the heading.',
+    poster: { width: 13, height: 6 },
   }
   const response = await PUT(
     request({ prompt: 'Ask one question.', imageSettings }),
@@ -141,6 +139,19 @@ it('rejects malformed JSON and attempts to change protected instructions', async
   expect(malformed.status).toBe(400)
   expect(
     (await PUT(request({ prompt: 'Valid style', instructions: [] }))).status,
+  ).toBe(400)
+  expect(
+    (
+      await PUT(
+        request({
+          prompt: 'Valid style',
+          imageSettings: {
+            ...defaultImageSettings,
+            sharedPrompt: 'Separate creative direction',
+          },
+        }),
+      )
+    ).status,
   ).toBe(400)
   expect(mocks.save).not.toHaveBeenCalled()
 })

@@ -36,7 +36,7 @@ const instructions = [
   {
     title: 'Output requirements',
     context:
-      'Appended to the editable creative instructions, together with the configured face ratio. Labels and presentation footers are never added by the application.',
+      'Applied after the Mockup Wizard system prompt and creative brief, together with the configured face ratio. Labels and presentation footers are never added by the application.',
     text: outputInstructions,
   },
   {
@@ -78,7 +78,7 @@ export async function PUT(request: Request) {
     return NextResponse.json(
       {
         error:
-          'Enter valid prompts and landscape face ratios. Wizard prompt: up to 20,000 characters; creative prompts: up to 8,000 each. Ratio values must be whole numbers from 1 to 100, wider than 1:1 and no wider than 6:1.',
+          'Enter a valid system prompt and landscape face ratios. System prompt: up to 20,000 characters. Ratio values must be whole numbers from 1 to 100, wider than 1:1 and no wider than 6:1.',
       },
       { status: 400, headers },
     )
