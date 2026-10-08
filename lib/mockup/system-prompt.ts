@@ -1,6 +1,11 @@
 import { eq } from 'drizzle-orm'
 import { db } from '@/db'
 import { artWizardSettings } from '@/db/schema'
+import {
+  defaultImageSettings,
+  imageSettingsSchema,
+  type ImageSettings,
+} from './image-settings'
 
 /** The original Billboard Source Mockup Wizard prompt. "Reset" restores it verbatim. */
 export const defaultSystemPrompt = `You are the Billboard Source Mockup Wizard.
@@ -32,7 +37,7 @@ Core behavior:
 7. Retrieve the advertiser’s logo from the provided website or from broader internet sources when available.
 8. Keep the billboard message short, clear, and readable from the road.
 9. Push back gently if the user asks for too much copy or too many elements.
-10. The final output should be one finished billboard mockup image, not a list of concepts.
+10. The final output should be one design in two separate mockup images: a bulletin and a poster adapted from the bulletin, not a list of concepts.
 11. After a mockup is created, assume the user may either ask for revisions or move on. If they give revision instructions, revise the current mockup. If they say “Start Mockup,” stop revising the current mockup and begin a completely new mockup request.
 
 Billboard design rules:
@@ -91,7 +96,7 @@ Before generating the mockup, internally choose:
 
 Final image requirements:
 
-Create one realistic billboard mockup.
+Create a realistic bulletin mockup, then adapt the same design into a poster mockup. Use the application’s configured face ratios and creative instructions. Preserve approved copy across both formats unless the user explicitly requests a difference. Do not include format labels, presentation footers or a Billboard Source footer logo in either image.
 
 The final image should show:
 
@@ -153,24 +158,38 @@ Do not reuse old chats unless you are revising that same advertiser’s mockup.`
 export async function getSystemPrompt(): Promise<{
   prompt: string
   isDefault: boolean
+  imageSettings: ImageSettings
 }> {
   const [settings] = await db
-    .select({ prompt: artWizardSettings.systemPrompt })
+    .select({
+      prompt: artWizardSettings.systemPrompt,
+      imageSettings: artWizardSettings.imageSettings,
+    })
     .from(artWizardSettings)
     .where(eq(artWizardSettings.id, 1))
     .limit(1)
-  return settings
-    ? { prompt: settings.prompt, isDefault: false }
-    : { prompt: defaultSystemPrompt, isDefault: true }
+  return {
+    prompt: settings?.prompt ?? defaultSystemPrompt,
+    isDefault: !settings,
+    imageSettings: settings?.imageSettings
+      ? imageSettingsSchema.parse(settings.imageSettings)
+      : defaultImageSettings,
+  }
 }
 
-export async function saveSystemPrompt(prompt: string) {
+export async function saveSystemPrompt(
+  prompt: string,
+  imageSettings?: ImageSettings,
+) {
   await db
     .insert(artWizardSettings)
-    .values({ id: 1, systemPrompt: prompt })
+    .values({ id: 1, systemPrompt: prompt, imageSettings })
     .onConflictDoUpdate({
       target: artWizardSettings.id,
-      set: { systemPrompt: prompt },
+      set: {
+        systemPrompt: prompt,
+        ...(imageSettings ? { imageSettings } : {}),
+      },
     })
 }
 

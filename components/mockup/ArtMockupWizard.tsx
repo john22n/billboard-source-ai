@@ -98,7 +98,35 @@ function MockupConversation() {
               />
             )}
           </div>
-          {state.image && <SelectedMockup image={state.image} />}
+          {state.image && (
+            <div className="space-y-6">
+              <SelectedMockup image={state.image} format="Bulletin" />
+              {state.poster ? (
+                <SelectedMockup image={state.poster} format="Poster" />
+              ) : (
+                <div className="space-y-3 rounded-lg border border-dashed p-4">
+                  <h3 className="font-medium">Poster not generated</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Keep the bulletin and generate its matching poster. This
+                    does not create a new design.
+                  </p>
+                  <Button
+                    variant="outline"
+                    disabled={isPending}
+                    onClick={() =>
+                      void sendMessage(
+                        'Generate only the missing poster from the current bulletin. Preserve the bulletin and all approved copy.',
+                      )
+                    }
+                  >
+                    Generate poster
+                  </Button>
+                </div>
+              )}
+              <AttachMockup />
+              <AttachMockup format="poster" />
+            </div>
+          )}
           <MockupProgress />
           {error && (
             <p
@@ -123,14 +151,17 @@ function MockupConversation() {
 
 function SelectedMockup({
   image,
+  format,
 }: {
   image: NonNullable<MockupState['image']>
+  format: 'Bulletin' | 'Poster'
 }) {
   return (
     <figure className="space-y-3">
+      <h3 className="font-medium">{format}</h3>
       <Image
         src={image.dataUrl}
-        alt={`Selected outdoor billboard concept for ${image.advertiser}`}
+        alt={`Selected outdoor ${format === 'Bulletin' ? 'billboard' : 'poster'} concept for ${image.advertiser}`}
         width={1536}
         height={1024}
         unoptimized
@@ -143,13 +174,14 @@ function SelectedMockup({
         <Button asChild variant="outline">
           <a
             href={image.dataUrl}
-            download={`billboard-concept-${image.id}.jpg`}
+            download={`${format.toLowerCase()}-concept-${image.id}.jpg`}
           >
             <Download data-icon="inline-start" className="size-4" />
-            Download selected mockup
+            {format === 'Bulletin'
+              ? 'Download selected mockup'
+              : 'Download poster'}
           </a>
         </Button>
-        <AttachMockup />
       </div>
     </figure>
   )
@@ -162,7 +194,7 @@ function MockupProgress() {
     <p role="status" className="animate-pulse text-sm text-muted-foreground">
       {preparingFiles
         ? 'Preparing file previews…'
-        : 'The wizard is working. Rendering a billboard can take a couple of minutes; your current image stays selected.'}
+        : 'The wizard is working. Creating a bulletin and adapting its poster can take several minutes; your current images stay selected.'}
     </p>
   )
 }
@@ -200,8 +232,9 @@ function MockupWelcome() {
       </h3>
       <p className="text-base text-muted-foreground">
         Enter “Start” to begin. The wizard will guide you through a series of
-        questions, one at a time, to create your billboard mockup. Your current
-        lead form is included as context. Attach a logo or background any time.
+        questions, one at a time, to create a bulletin and matching poster. Your
+        current lead form is included as context. Attach a logo or background
+        any time.
       </p>
     </div>
   )
@@ -368,6 +401,7 @@ async function sendMessage(text: string) {
       messages,
       attachments: state.attachments,
       image: state.image,
+      poster: state.poster,
       brand: state.brand,
       leadContext: leadFormContext({
         ...useFormStore.getState().getFormData(),
@@ -388,6 +422,8 @@ async function sendMessage(text: string) {
       { role: 'assistant' as const, text: outcome.reply },
     ].slice(-MAX_MESSAGES),
     image: outcome.image ?? state.image,
+    // A new bulletin invalidates the previous poster; never show a stale pair.
+    poster: outcome.image ? outcome.poster : state.poster,
     brand: outcome.brand ?? state.brand,
   })
 }
@@ -399,6 +435,7 @@ type ReplyOutcome =
       kind: 'reply'
       reply: string
       image: MockupState['image'] | null
+      poster: MockupState['poster']
       brand: MockupState['brand'] | null
     }
 
@@ -407,7 +444,10 @@ type ReplyOutcome =
  * reply text as it grows. Network, server and mid-stream failures become messages.
  */
 async function requestReply(
-  body: Pick<MockupState, 'messages' | 'attachments' | 'image' | 'brand'> & {
+  body: Pick<
+    MockupState,
+    'messages' | 'attachments' | 'image' | 'poster' | 'brand'
+  > & {
     leadContext: string
   },
   onReply: (reply: string) => void,
@@ -440,13 +480,14 @@ async function streamedReply(
   const message = await readWizardReply(body, (update) =>
     onReply(replyText(update)),
   )
-  const image = message?.metadata?.image ?? null
+  const { image = null, poster = null, brand = null } = message?.metadata ?? {}
   const reply = replyText(message).trim() || (image ? MOCKUP_READY : '')
   if (!reply) return { kind: 'error', message: WIZARD_ERROR }
   return {
     kind: 'reply',
     reply,
     image,
-    brand: message?.metadata?.brand ?? null,
+    poster,
+    brand,
   }
 }

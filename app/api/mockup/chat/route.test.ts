@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   review: vi.fn(),
   rateLimit: vi.fn(),
   session: vi.fn(),
+  systemPrompt: vi.fn(),
 }))
 vi.mock('@/lib/auth', () => ({ getSession: mocks.session }))
 vi.mock('@/lib/config', () => ({
@@ -37,10 +38,7 @@ vi.mock('@/lib/mockup/render', () => ({ renderBillboard: mocks.render }))
 vi.mock('@/lib/mockup/website', () => ({ reviewWebsite: mocks.review }))
 vi.mock('@/lib/mockup/system-prompt', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/mockup/system-prompt')>()),
-  getSystemPrompt: async () => ({
-    prompt: 'Custom wizard prompt',
-    isDefault: false,
-  }),
+  getSystemPrompt: mocks.systemPrompt,
 }))
 vi.mock('@/db', () => ({ db: {} }))
 vi.mock('ai', async (importOriginal) => ({
@@ -132,7 +130,55 @@ beforeEach(() => {
   mocks.session.mockResolvedValue(session)
   mocks.rateLimit.mockResolvedValue({ allowed: true })
   mocks.render.mockResolvedValue(jpeg)
+  mocks.systemPrompt.mockResolvedValue({
+    prompt: 'Custom wizard prompt',
+    isDefault: false,
+  })
 })
+
+const bulletinId = '11111111-1111-4111-8111-111111111111'
+const posterId = '33333333-3333-4333-8333-333333333333'
+const posterData = 'data:image/jpeg;base64,/9j/AQ=='
+const noLabels =
+  'Do not add format labels such as "Bulletin" or "Poster", presentation footers, watermarks, or a Billboard Source footer logo.'
+const signedBulletin = async () => ({
+  id: bulletinId,
+  advertiser: 'Alpine',
+  dataUrl: jpeg,
+  receipt: await receipt('image', jpeg, 'Alpine', bulletinId),
+})
+const signedPoster = async (sourceId = bulletinId) => ({
+  id: posterId,
+  advertiser: 'Alpine',
+  sourceId,
+  dataUrl: posterData,
+  receipt: await receipt(
+    'image',
+    posterData,
+    'Alpine',
+    `${posterId}:${sourceId}`,
+  ),
+})
+/** Runs one generate_billboard call and returns its tool result plus the finish metadata. */
+async function generate(args: Record<string, unknown>, body: object = {}) {
+  let result: unknown
+  mocks.streamText.mockImplementationOnce(
+    streams(async ({ tools }) => {
+      result = await tools.generate_billboard.execute({
+        advertiser: 'Alpine',
+        prompt: 'Headline "Smile Bigger"',
+        ...args,
+      })
+      return 'Done.'
+    }),
+  )
+  const response = await POST(
+    request({ messages: [{ role: 'user', text: 'Generate' }], ...body }),
+  )
+  expect(response.status).toBe(200)
+  const message = await readWizardReply(response.body!)
+  return { result, metadata: message?.metadata }
+}
 
 it('requires a signed-in rep, a user message last, and respects the rate limit', async () => {
   mocks.session.mockResolvedValueOnce(null)
@@ -503,4 +549,144 @@ it('returns a retryable error when the wizard cannot be prepared', async () => {
   expect((await response.json()).error).toContain(
     'selected image are unchanged',
   )
+})
+
+it('applies custom image settings to both formats and keeps the no-labels rule', async () => {
+  mocks.systemPrompt.mockResolvedValue({
+    prompt: 'Custom wizard prompt',
+    isDefault: false,
+    imageSettings: {
+      sharedPrompt: 'CUSTOM SHARED',
+      bulletinPrompt: 'CUSTOM BULLETIN',
+      revisionPrompt: 'CUSTOM REVISION',
+      posterPrompt: 'CUSTOM POSTER',
+      bulletin: { width: 5, height: 2 },
+      poster: { width: 3, height: 2 },
+    },
+  })
+  mocks.render.mockResolvedValueOnce(jpeg).mockResolvedValueOnce(posterData)
+  const { result } = await generate({ revision: false })
+  expect(result).toMatchObject({ ok: true })
+  expect(mocks.render).toHaveBeenCalledTimes(2)
+  const [bulletinPrompt, posterPrompt] = mocks.render.mock.calls.map(
+    ([prompt]) => prompt as string,
+  )
+  expect(bulletinPrompt).toContain('CUSTOM SHARED\nCUSTOM BULLETIN')
+  expect(bulletinPrompt).toContain('ratio of 5:2')
+  expect(bulletinPrompt).not.toContain('24:7')
+  expect(posterPrompt).toContain('CUSTOM SHARED\nCUSTOM POSTER')
+  expect(posterPrompt).toContain('ratio of 3:2')
+  expect(posterPrompt).not.toContain('13:6')
+  for (const prompt of [bulletinPrompt, posterPrompt]) {
+    expect(prompt).toContain(noLabels)
+    expect(prompt).not.toMatch(/(?<!not )(add|include) (a )?(format )?label/i)
+  }
+})
+
+it('keeps the new bulletin when only the poster render fails', async () => {
+  mocks.render
+    .mockResolvedValueOnce(jpeg)
+    .mockRejectedValueOnce(new Error('poster down'))
+  const { result, metadata } = await generate({ revision: false })
+  expect(result).toMatchObject({ ok: false, bulletinReady: true })
+  expect((result as { error: string }).error).toContain('posterOnly=true')
+  expect(metadata?.image).toMatchObject({ advertiser: 'Alpine', dataUrl: jpeg })
+  expect(metadata?.image?.id).toMatch(/^[0-9a-f-]{36}$/)
+  expect(metadata?.poster).toBeNull()
+  // The saved bulletin's receipt verifies for the poster-only retry.
+  mocks.render.mockResolvedValueOnce(posterData)
+  const retry = await generate(
+    { revision: false, posterOnly: true },
+    { image: metadata?.image },
+  )
+  expect(retry.result).toMatchObject({ ok: true })
+})
+
+it('retries a poster-only request from the original bulletin without regenerating it', async () => {
+  const image = await signedBulletin()
+  const brand = {
+    website: 'alpine.example',
+    logo: png,
+    receipt: await receipt('logo', png, '', 'alpine.example'),
+  }
+  mocks.render.mockResolvedValueOnce(posterData)
+  const { result, metadata } = await generate(
+    { revision: false, posterOnly: true },
+    { image, brand },
+  )
+  expect(result).toMatchObject({ ok: true })
+  expect(mocks.render).toHaveBeenCalledTimes(1)
+  const [prompt, references] = mocks.render.mock.calls[0]
+  expect(prompt).toContain('13:6')
+  expect(prompt).not.toContain('24:7')
+  expect(prompt).not.toContain('The second is the CURRENT POSTER')
+  expect(references).toEqual([jpeg, png])
+  expect(metadata?.image).toEqual(image)
+  expect(metadata?.poster).toMatchObject({
+    advertiser: 'Alpine',
+    sourceId: bulletinId,
+    dataUrl: posterData,
+    receipt: expect.any(String),
+  })
+})
+
+it('edits only the poster from the previous poster with poster-specific changes', async () => {
+  const image = await signedBulletin()
+  const poster = await signedPoster()
+  const edited = 'data:image/jpeg;base64,/9j/Ag=='
+  mocks.render.mockResolvedValueOnce(edited)
+  const { result, metadata } = await generate(
+    {
+      revision: false,
+      posterOnly: true,
+      posterChanges: 'Shorten the headline to "Smile"',
+    },
+    { image, poster },
+  )
+  expect(result).toMatchObject({ ok: true })
+  expect(mocks.render).toHaveBeenCalledTimes(1)
+  const [prompt, references] = mocks.render.mock.calls[0]
+  expect(prompt).toContain('The second is the CURRENT POSTER')
+  expect(prompt).toContain(
+    'Explicit poster-specific changes: Shorten the headline to "Smile"',
+  )
+  expect(prompt).toContain(noLabels)
+  expect(references).toEqual([jpeg, posterData])
+  expect(metadata?.image).toEqual(image)
+  expect(metadata?.poster).toMatchObject({
+    sourceId: bulletinId,
+    dataUrl: edited,
+  })
+  expect(metadata?.poster?.id).not.toBe(posterId)
+})
+
+it('rejects a poster whose sourceId is tampered or belongs to another bulletin', async () => {
+  const image = await signedBulletin()
+  const other = '44444444-4444-4444-8444-444444444444'
+  const tampered = { ...(await signedPoster(other)), sourceId: bulletinId }
+  const foreign = await signedPoster(other)
+  const missing = { ...(await signedPoster()), sourceId: undefined }
+  for (const poster of [tampered, foreign, missing]) {
+    const response = await POST(
+      request({
+        messages: [{ role: 'user', text: 'Retry the poster' }],
+        image,
+        poster,
+      }),
+    )
+    expect(response.status).toBe(400)
+  }
+  // A valid poster without its bulletin is rejected too.
+  expect(
+    (
+      await POST(
+        request({
+          messages: [{ role: 'user', text: 'Retry the poster' }],
+          poster: await signedPoster(),
+        }),
+      )
+    ).status,
+  ).toBe(400)
+  expect(mocks.streamText).not.toHaveBeenCalled()
+  expect(mocks.render).not.toHaveBeenCalled()
 })

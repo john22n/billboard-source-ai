@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { randomBytes } from 'node:crypto'
+import sharp from 'sharp'
 import { renderBillboard } from './render'
 
 const jpeg = 'data:image/jpeg;base64,/9j/2Q=='
@@ -67,4 +69,25 @@ it('rejects image requests before fetching when the OpenAI key is missing', asyn
     'OPENAI_API_KEY',
   )
   expect(fetcher).not.toHaveBeenCalled()
+})
+
+it('compresses large outputs so two images plus references fit in a Vercel request without stretching', async () => {
+  const bytes = await sharp(randomBytes(1536 * 1024 * 3), {
+    raw: { width: 1536, height: 1024, channels: 3 },
+  })
+    .jpeg({ quality: 100 })
+    .toBuffer()
+  expect(bytes.toString('base64').length).toBeGreaterThan(1_500_000)
+  fetcher.mockResolvedValueOnce(
+    Response.json({ data: [{ b64_json: bytes.toString('base64') }] }),
+  )
+  const result = await renderBillboard('A photographic mockup', [])
+  expect(result.length).toBeLessThanOrEqual(1_500_000)
+  expect(
+    await sharp(Buffer.from(result.split(',')[1], 'base64')).metadata(),
+  ).toMatchObject({
+    width: 1536,
+    height: 1024,
+    format: 'jpeg',
+  })
 })

@@ -13,6 +13,7 @@ import type { Brand, MockupImage } from './state'
  */
 export type WizardReply = UIMessage<{
   image: MockupImage | null
+  poster?: MockupImage | null
   brand: Brand | null
 }>
 

@@ -9,10 +9,20 @@ import {
   CardHeader,
 } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
+import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  defaultImageSettings,
+  imageSettingsSchema,
+  type ImageSettings,
+} from '@/lib/mockup/image-settings'
 
 type Instruction = { title: string; context: string; text: string }
-type Saved = { prompt: string; isDefault: boolean }
+type Saved = {
+  prompt: string
+  isDefault: boolean
+  imageSettings: ImageSettings
+}
 
 function promptLoadError(status: number, apiError?: string) {
   if (status === 401) return 'Your session has expired. Sign in and retry.'
@@ -38,7 +48,11 @@ export default function ArtWizardTab() {
         if (!response.ok)
           throw new Error(promptLoadError(response.status, data?.error))
         if (!controller.signal.aborted) {
-          setSaved({ prompt: data.prompt, isDefault: !!data.isDefault })
+          setSaved({
+            prompt: data.prompt,
+            isDefault: !!data.isDefault,
+            imageSettings: data.imageSettings ?? defaultImageSettings,
+          })
           setInstructions(data.instructions ?? [])
         }
       } catch (cause) {
@@ -59,10 +73,10 @@ export default function ArtWizardTab() {
       <CardHeader>
         <h2 className="text-lg font-semibold">Creative Studio</h2>
         <CardDescription>
-          The Mockup Wizard runs on one system prompt, exactly like a ChatGPT
-          project. Edit it here for all reps, or reset to the original prompt in
-          one click. The application appends the protected tool and image frames
-          shown below.
+          One design, two outdoor mockups. Edit the wizard and creative prompts
+          for all reps. The poster is adapted from the bulletin, preserving its
+          approved copy and brand assets. No format labels or presentation
+          footers are added to the images.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-8">
@@ -100,9 +114,9 @@ export default function ArtWizardTab() {
               <p className="text-sm text-muted-foreground">
                 Read-only · These frames share their source with the live
                 workflow. They connect the wizard to website review and image
-                rendering and keep every mockup on a realistic billboard.
-                Changing them requires a code update and regression tests.
-                Expand a section to read its complete text.
+                rendering, reference handling and output requirements. Changing
+                them requires a code update and regression tests. Expand a
+                section to read its complete text.
               </p>
             </div>
             <div className="divide-y rounded-lg border">
@@ -131,31 +145,42 @@ type Action = 'save' | 'reset'
 
 const actions: Record<
   Action,
-  { init: (prompt: string) => RequestInit; done: string }
+  {
+    init: (prompt: string, imageSettings: ImageSettings) => RequestInit
+    done: string
+  }
 > = {
   save: {
-    init: (prompt) => ({
+    init: (prompt, imageSettings) => ({
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({ prompt, imageSettings }),
     }),
-    done: 'Prompt saved. New wizard conversations will use these instructions.',
+    done: 'Settings saved. Subsequent wizard turns will use these instructions.',
   },
   reset: {
     init: () => ({ method: 'DELETE' }),
-    done: 'Original prompt restored. New wizard conversations will use it.',
+    done: 'Original prompts and face ratios restored.',
   },
 }
 
 /** Saves or resets the prompt; the server always replies with the prompt now in effect. */
-async function submitPrompt(action: Action, prompt: string): Promise<Saved> {
+async function submitPrompt(
+  action: Action,
+  prompt: string,
+  imageSettings: ImageSettings,
+): Promise<Saved> {
   const response = await fetch(
     '/api/admin/art-wizard',
-    actions[action].init(prompt),
+    actions[action].init(prompt, imageSettings),
   )
   const data = await response.json()
   if (!response.ok) throw new Error(data.error || 'Could not save the prompt.')
-  return { prompt: data.prompt, isDefault: !!data.isDefault }
+  return {
+    prompt: data.prompt,
+    isDefault: !!data.isDefault,
+    imageSettings: data.imageSettings,
+  }
 }
 
 function statusText(input: {
@@ -175,6 +200,7 @@ function statusText(input: {
 
 function PromptEditor({ initial }: { initial: Saved }) {
   const [prompt, setPrompt] = useState(initial.prompt)
+  const [imageSettings, setImageSettings] = useState(initial.imageSettings)
   const [saved, setSaved] = useState(initial)
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState<Action | null>(null)
@@ -185,8 +211,16 @@ function PromptEditor({ initial }: { initial: Saved }) {
     setError(null)
     setNotice('')
     try {
-      const next = await submitPrompt(action, prompt.trim())
+      const parsed = imageSettingsSchema.safeParse(imageSettings)
+      if (action === 'save' && !parsed.success)
+        throw new Error(parsed.error.issues[0].message)
+      const next = await submitPrompt(
+        action,
+        prompt.trim(),
+        parsed.success ? parsed.data : defaultImageSettings,
+      )
       setPrompt(next.prompt)
+      setImageSettings(next.imageSettings)
       setSaved(next)
       setNotice(actions[action].done)
     } catch (cause) {
@@ -200,7 +234,9 @@ function PromptEditor({ initial }: { initial: Saved }) {
     }
   }
 
-  const dirty = prompt.trim() !== saved.prompt
+  const dirty =
+    prompt.trim() !== saved.prompt ||
+    JSON.stringify(imageSettings) !== JSON.stringify(saved.imageSettings)
   const status = statusText({
     pending,
     dirty,
@@ -236,12 +272,20 @@ function PromptEditor({ initial }: { initial: Saved }) {
         />
         <p id="wizard-prompt-help" className="text-sm text-muted-foreground">
           Editable · Questions, order, design rules, tone and reset behavior all
-          live here. The wizard asks these questions itself, reviews the website
-          with the application’s tool, and renders the image through the
-          protected frames below. Saving affects new conversations for all reps;
-          test a mockup after saving. Maximum 20,000 characters.
+          live here. Creative instructions and face proportions are editable
+          below. Saving affects subsequent turns for all reps, including
+          existing chats; existing images are not regenerated. Test a new mockup
+          after saving. Maximum 20,000 characters.
         </p>
       </div>
+      <CreativeFields
+        value={imageSettings}
+        disabled={!!pending}
+        onChange={(value) => {
+          setImageSettings(value)
+          setNotice('')
+        }}
+      />
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}
@@ -249,7 +293,7 @@ function PromptEditor({ initial }: { initial: Saved }) {
       )}
       <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" disabled={!!pending || !prompt.trim() || !dirty}>
-          {pending === 'save' ? 'Saving…' : 'Save prompt'}
+          {pending === 'save' ? 'Saving…' : 'Save settings'}
         </Button>
         <Button
           type="button"
@@ -257,12 +301,111 @@ function PromptEditor({ initial }: { initial: Saved }) {
           disabled={!!pending || (saved.isDefault && !dirty)}
           onClick={() => void submit('reset')}
         >
-          {pending === 'reset' ? 'Restoring…' : 'Reset to original prompt'}
+          {pending === 'reset' ? 'Restoring…' : 'Reset all prompts and ratios'}
         </Button>
         <p role="status" className="text-sm text-muted-foreground">
           {status}
         </p>
       </div>
     </form>
+  )
+}
+
+const creativePrompts = [
+  [
+    'sharedPrompt',
+    'Shared design instructions',
+    'Brand fidelity, typography, copy and visual style for both formats.',
+  ],
+  [
+    'bulletinPrompt',
+    'Bulletin generation prompt',
+    'Composition and outdoor setting for the first image.',
+  ],
+  [
+    'revisionPrompt',
+    'Bulletin revision prompt',
+    'What to preserve when a rep revises the existing design.',
+  ],
+  [
+    'posterPrompt',
+    'Poster adaptation prompt',
+    'How to rearrange the bulletin into a poster without changing the design or approved copy.',
+  ],
+] as const
+
+function CreativeFields({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: ImageSettings
+  disabled: boolean
+  onChange: (value: ImageSettings) => void
+}) {
+  return (
+    <fieldset disabled={disabled} className="space-y-5 border-t pt-6">
+      <legend className="font-semibold">Image generation settings</legend>
+      <p className="text-sm text-muted-foreground">
+        Ratios describe the billboard face, not the full image including sky and
+        supports. AI follows these proportions approximately; these are concept
+        mockups, not dimension-certified print files.
+      </p>
+      <div className="grid gap-4 sm:grid-cols-2">
+        {(['bulletin', 'poster'] as const).map((format) => (
+          <fieldset key={format} className="space-y-2 rounded-md border p-3">
+            <legend className="px-1 text-sm font-medium capitalize">
+              {format} face ratio
+            </legend>
+            <div className="grid grid-cols-2 gap-3">
+              {(['width', 'height'] as const).map((axis) => (
+                <div key={axis} className="space-y-1">
+                  <Label htmlFor={`${format}-${axis}`} className="capitalize">
+                    {format} {axis}
+                  </Label>
+                  <Input
+                    id={`${format}-${axis}`}
+                    type="number"
+                    min={1}
+                    max={100}
+                    step={1}
+                    required
+                    value={value[format][axis] || ''}
+                    onChange={(event) =>
+                      onChange({
+                        ...value,
+                        [format]: {
+                          ...value[format],
+                          [axis]: Number(event.target.value),
+                        },
+                      })
+                    }
+                  />
+                </div>
+              ))}
+            </div>
+          </fieldset>
+        ))}
+      </div>
+      {creativePrompts.map(([key, label, help]) => (
+        <div key={key} className="space-y-2">
+          <Label htmlFor={key}>{label}</Label>
+          <Textarea
+            id={key}
+            value={value[key]}
+            maxLength={8000}
+            required
+            className="min-h-32 font-mono text-sm"
+            aria-describedby={`${key}-help`}
+            onChange={(event) =>
+              onChange({ ...value, [key]: event.target.value })
+            }
+          />
+          <p id={`${key}-help`} className="text-xs text-muted-foreground">
+            {help} Maximum 8,000 characters.
+          </p>
+        </div>
+      ))}
+    </fieldset>
   )
 }

@@ -291,6 +291,7 @@ it('sends Start on the rep’s behalf once, even with two Studio views mounted',
     ],
     attachments: [],
     image: null,
+    poster: null,
     brand: null,
     leadContext: 'Advertiser: Alpine',
   })
@@ -325,6 +326,7 @@ it('sends the conversation, blocks duplicates while pending, and appends the rep
     ],
     attachments: [],
     image: null,
+    poster: null,
     brand: null,
     leadContext: '',
   })
@@ -468,6 +470,44 @@ it('supplies the ready message when the wizard renders an image without words', 
   )
 })
 
+it('previews and downloads both formats, then clears a stale poster when a new bulletin has no poster', async () => {
+  const poster = {
+    ...image,
+    id: '22222222-2222-4222-8222-222222222222',
+    sourceId: image.id,
+    dataUrl: 'data:image/jpeg;base64,/9j/AA==',
+  }
+  vi.mocked(fetch).mockResolvedValueOnce(
+    streamed('Both are ready.', { image, poster, brand: null }),
+  )
+  await act(async () => root.render(<ArtMockupWizard />))
+  await send('Generate both formats')
+  await vi.waitFor(() =>
+    expect(useMockupStore.getState().state.poster).toEqual(poster),
+  )
+  const downloads = Array.from(container.querySelectorAll('a[download]'))
+  expect(downloads.map((link) => link.getAttribute('href'))).toEqual([
+    image.dataUrl,
+    poster.dataUrl,
+  ])
+  const revision = { ...image, id: '33333333-3333-4333-8333-333333333333' }
+  vi.mocked(fetch).mockResolvedValueOnce(
+    streamed('The poster failed.', {
+      image: revision,
+      poster: null,
+      brand: null,
+    }),
+  )
+  await send('Make the headline larger')
+  await vi.waitFor(() =>
+    expect(useMockupStore.getState().state.image?.id).toBe(revision.id),
+  )
+  expect(body(1).poster).toEqual(poster)
+  expect(useMockupStore.getState().state.poster).toBeNull()
+  expect(container.querySelectorAll('a[download]')).toHaveLength(1)
+  expect(button('Generate poster')).toBeTruthy()
+})
+
 it('treats a streamed error as a failed turn and restores the draft', async () => {
   useMockupStore.getState().update({ image })
   const stream = openStream()
@@ -529,7 +569,7 @@ it('replaces the selected image only when the wizard returns a new one', async (
   await send('Bigger text')
   expect(useMockupStore.getState().state.image).toEqual(revised)
   expect(container.querySelector('a[download]')?.getAttribute('download')).toBe(
-    `billboard-concept-${revised.id}.jpg`,
+    `bulletin-concept-${revised.id}.jpg`,
   )
 })
 
@@ -668,6 +708,45 @@ it('retries the original submitted image after a revision and refresh without re
   expect(useMockupStore.getState().state.attachmentFailed).toBe(false)
   expect(useMockupStore.getState().state.image).toEqual(revised)
   expect(useMockupStore.getState().state.lastLead?.image).toBeUndefined()
+})
+
+it('retries each submitted format independently and closes the successful retry dialog', async () => {
+  const poster = {
+    ...image,
+    id: '22345678-1234-4123-8123-123456789abc',
+    sourceId: image.id,
+    dataUrl: 'data:image/jpeg;base64,cG9zdGVy',
+    receipt: 'poster-receipt',
+  }
+  useMockupStore.getState().update({ image, poster })
+  useMockupStore
+    .getState()
+    .recordSubmittedLead(42, 'Alpine', true, 'bulletin-upload-receipt', image, {
+      image: poster,
+      failed: true,
+      receipt: 'poster-upload-receipt',
+    })
+  await act(async () => root.render(<ArtMockupWizard />))
+  await act(async () => button('Retry image attachment').click())
+  vi.mocked(fetch).mockResolvedValueOnce(Response.json({ success: true }))
+  await act(async () => button('Confirm & attach image').click())
+  expect(body()).toMatchObject({ image, receipt: 'bulletin-upload-receipt' })
+  expect(document.querySelector('[role="dialog"]')).toBeNull()
+  expect(useMockupStore.getState().state.attachmentFailed).toBe(true)
+  expect(useMockupStore.getState().state.lastLead?.image).toBeUndefined()
+  expect(useMockupStore.getState().state.lastLead?.poster).toEqual(poster)
+  await act(async () => button('Retry poster attachment').click())
+  vi.mocked(fetch).mockResolvedValueOnce(Response.json({ success: true }))
+  await act(async () => button('Confirm & attach poster').click())
+  expect(body(1)).toEqual({
+    leadId: 42,
+    confirmedLeadId: 42,
+    image: poster,
+    receipt: 'poster-upload-receipt',
+  })
+  expect(useMockupStore.getState().state.attachmentFailed).toBe(false)
+  expect(useMockupStore.getState().state.image).toEqual(image)
+  expect(useMockupStore.getState().state.poster).toEqual(poster)
 })
 
 it('does not pair an older saved receipt with the currently selected image when the original is missing', async () => {

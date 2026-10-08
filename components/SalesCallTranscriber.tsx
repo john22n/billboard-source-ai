@@ -65,6 +65,7 @@ function buildNutshellPayload(
 ) {
   return {
     mockupImage: useMockupStore.getState().state.image || undefined,
+    mockupPoster: useMockupStore.getState().state.poster || undefined,
     name: valueOrEmpty(formData.name),
     phone: valueOrEmpty(formData.phone),
     email: valueOrEmpty(formData.email),
@@ -107,6 +108,8 @@ type NutshellResult = {
   leadId?: number
   imageAttachmentFailed?: boolean
   imageAttachmentReceipt?: string
+  posterAttachmentFailed?: boolean
+  posterAttachmentReceipt?: string
 }
 
 type NutshellResponseActions = {
@@ -123,9 +126,10 @@ function handleNutshellResponse(
 ) {
   if (response.ok) {
     actions.updateSubmissionStatus('success')
-    const message = result.imageAttachmentFailed
-      ? 'Lead created; image could not be attached. Download it from Creative Studio. Do not resubmit the Lead Form.'
-      : 'Lead created'
+    const message =
+      result.imageAttachmentFailed || result.posterAttachmentFailed
+        ? 'Lead created; image could not be attached. Download it from Creative Studio. Do not resubmit the Lead Form.'
+        : 'Lead created'
     actions.updateSubmissionMessage(message)
     showSuccessToast(message)
     actions.clearAll()
@@ -560,6 +564,7 @@ function LeadActions({
 }: LeadActionsProps) {
   const [unqualifiedDialogOpen, setUnqualifiedDialogOpen] = useState(false)
   const image = useMockupStore((state) => state.state.image)
+  const poster = useMockupStore((state) => state.state.poster)
 
   const handleUnqualifiedDelete = () => {
     onClearAll()
@@ -570,7 +575,9 @@ function LeadActions({
     <div className="mt-auto flex flex-shrink-0 flex-col items-center gap-1 border-t border-slate-200 bg-white pt-2 sm:gap-2">
       {image && (
         <p className="px-2 text-center text-xs text-muted-foreground">
-          Nutshell will include the selected mockup for {image.advertiser}.
+          Nutshell will include{' '}
+          {poster ? 'the bulletin and poster' : 'the selected mockup'} for{' '}
+          {image.advertiser}.
         </p>
       )}
       {nutshellStatus !== 'idle' && (
@@ -1196,15 +1203,20 @@ function useNutshellSubmission(
       })
       const result: NutshellResult = await response.json()
       if (response.ok && useMockupStore.getState().epoch === mockupEpoch) {
-        useMockupStore
-          .getState()
-          .recordSubmittedLead(
-            result.leadId,
-            formData.entityName,
-            !!result.imageAttachmentFailed,
-            result.imageAttachmentReceipt,
-            payload.mockupImage,
-          )
+        useMockupStore.getState().recordSubmittedLead(
+          result.leadId,
+          formData.entityName,
+          !!result.imageAttachmentFailed,
+          result.imageAttachmentReceipt,
+          payload.mockupImage,
+          payload.mockupPoster
+            ? {
+                image: payload.mockupPoster,
+                failed: !!result.posterAttachmentFailed,
+                receipt: result.posterAttachmentReceipt,
+              }
+            : undefined,
+        )
       }
       handleNutshellResponse(response, result, {
         updateSubmissionStatus: setNutshellStatus,

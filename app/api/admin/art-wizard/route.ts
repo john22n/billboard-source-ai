@@ -8,14 +8,21 @@ import {
   saveSystemPrompt,
 } from '@/lib/mockup/system-prompt'
 import {
-  billboardImagePrompt,
+  outputInstructions,
   pdfSearchInstructions,
   referenceLabelInstructions,
   toolInstructions,
 } from '@/lib/mockup/instructions'
+import {
+  defaultImageSettings,
+  imageSettingsSchema,
+} from '@/lib/mockup/image-settings'
 
 const schema = z
-  .object({ prompt: z.string().trim().min(1).max(20_000) })
+  .object({
+    prompt: z.string().trim().min(1).max(20_000),
+    imageSettings: imageSettingsSchema.optional(),
+  })
   .strict()
 const headers = { 'Cache-Control': 'private, no-store' }
 
@@ -27,33 +34,10 @@ const instructions = [
     text: toolInstructions,
   },
   {
-    title: 'New image frame',
+    title: 'Output requirements',
     context:
-      'Image API prompt, not a chat message. The wizard writes the creative brief; the application wraps it in this fixed staging frame. The logo sentence depends on whether the website review captured a logo; the reference sentence appears only when a file is attached. Bracketed values are request-time placeholders.',
-    text: [
-      { label: 'Website logo captured', logo: true, labels: [] },
-      {
-        label: 'Uploaded reference only',
-        logo: false,
-        labels: ['[Uploaded file label]'],
-      },
-      { label: 'No logo or references', logo: false, labels: [] },
-    ]
-      .map(
-        ({ label, logo, labels }) =>
-          `${label}\n${billboardImagePrompt('[Creative brief written by the wizard]', { revision: false, logo, labels })}`,
-      )
-      .join('\n\n'),
-  },
-  {
-    title: 'Revision frame',
-    context:
-      'Image API prompt. Uses the selected image plus the wizard’s description of the requested changes. The reference sentence appears only when a file is attached.',
-    text: billboardImagePrompt('[Requested changes written by the wizard]', {
-      revision: true,
-      logo: false,
-      labels: ['[Uploaded file label]'],
-    }),
+      'Appended to the editable creative instructions, together with the configured face ratio. Labels and presentation footers are never added by the application.',
+    text: outputInstructions,
   },
   {
     title: 'PDF search',
@@ -94,16 +78,21 @@ export async function PUT(request: Request) {
     return NextResponse.json(
       {
         error:
-          'Only the system prompt can be edited. Enter between 1 and 20,000 characters.',
+          'Enter valid prompts and landscape face ratios. Wizard prompt: up to 20,000 characters; creative prompts: up to 8,000 each. Ratio values must be whole numbers from 1 to 100, wider than 1:1 and no wider than 6:1.',
       },
       { status: 400, headers },
     )
   try {
-    await saveSystemPrompt(input.data.prompt)
+    if (input.data.imageSettings)
+      await saveSystemPrompt(input.data.prompt, input.data.imageSettings)
+    else await saveSystemPrompt(input.data.prompt)
     return NextResponse.json(
       {
         prompt: input.data.prompt,
-        isDefault: input.data.prompt === defaultSystemPrompt,
+        isDefault: false,
+        ...(input.data.imageSettings
+          ? { imageSettings: input.data.imageSettings }
+          : {}),
       },
       { headers },
     )
@@ -122,7 +111,11 @@ export async function DELETE() {
   try {
     await resetSystemPrompt()
     return NextResponse.json(
-      { prompt: defaultSystemPrompt, isDefault: true },
+      {
+        prompt: defaultSystemPrompt,
+        imageSettings: defaultImageSettings,
+        isDefault: true,
+      },
       { headers },
     )
   } catch {

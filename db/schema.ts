@@ -161,6 +161,7 @@ export type AppMetrics = InferSelectModel<typeof appMetrics>
 export const artWizardSettings = pgTable('art_wizard_settings', {
   id: integer('id').primaryKey().default(1),
   systemPrompt: text('system_prompt').notNull(),
+  imageSettings: jsonb('image_settings'),
 })
 
 // Fixed-size buckets used for serverless-safe abuse controls. A key is reused

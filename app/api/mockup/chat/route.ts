@@ -19,8 +19,13 @@ import {
 } from '@/lib/mockup/attachments'
 import {
   billboardImagePrompt,
+  posterImagePrompt,
   toolInstructions,
 } from '@/lib/mockup/instructions'
+import {
+  defaultImageSettings,
+  type ImageSettings,
+} from '@/lib/mockup/image-settings'
 import { renderBillboard } from '@/lib/mockup/render'
 import {
   signArtifact,
@@ -41,7 +46,7 @@ import type { WizardReply } from '@/lib/mockup/stream'
 import { getSystemPrompt } from '@/lib/mockup/system-prompt'
 import { reviewWebsite } from '@/lib/mockup/website'
 
-export const maxDuration = 300
+export const maxDuration = 600
 const inputSchema = z.object({
   messages: z
     .array(chatMessageSchema)
@@ -50,6 +55,7 @@ const inputSchema = z.object({
     .refine((messages) => messages.at(-1)?.role === 'user'),
   attachments: attachmentsSchema,
   image: imageSchema.nullable().default(null),
+  poster: imageSchema.nullable().default(null),
   brand: brandSchema.nullable().default(null),
   leadContext: z.string().max(8000).default(''),
 })
@@ -59,14 +65,28 @@ const headers = { 'Cache-Control': 'no-store' }
 /** Artifacts live in the rep's browser tab; every use re-checks their receipts. */
 async function verifyArtifacts(session: MockupSession, input: Input) {
   if (input.image) await verifyImage(session, input.image)
-  if (input.brand?.logo)
+  if (input.image?.sourceId) throw new Error('Expected a bulletin.')
+  if (input.poster) {
+    await verifyImage(session, input.poster)
+    if (
+      !input.image ||
+      input.poster.sourceId !== input.image.id ||
+      input.poster.advertiser !== input.image.advertiser
+    )
+      throw new Error('The poster does not belong to this bulletin.')
+  }
+  await verifyBrand(session, input.brand)
+}
+
+async function verifyBrand(session: MockupSession, brand: Brand | null) {
+  if (brand?.logo)
     await verifyArtifact(
       session,
       'logo',
-      input.brand.logo,
+      brand.logo,
       '',
-      input.brand.website,
-      input.brand.receipt || '',
+      brand.website,
+      brand.receipt || '',
     )
 }
 
@@ -103,6 +123,7 @@ async function renderMockup(
     advertiser: string
     prompt: string
   },
+  settings: ImageSettings,
 ): Promise<MockupImage> {
   const { previous, attachments } = job
   const logo = previous ? null : job.logo
@@ -111,11 +132,15 @@ async function renderMockup(
     ...attachments.map((file) => file.dataUrl),
   ].filter((value): value is string => !!value)
   const dataUrl = await renderBillboard(
-    billboardImagePrompt(job.prompt, {
-      revision: !!previous,
-      logo: !!logo,
-      labels: attachments.map(attachmentLabel),
-    }),
+    billboardImagePrompt(
+      job.prompt,
+      {
+        revision: !!previous,
+        logo: !!logo,
+        labels: attachments.map(attachmentLabel),
+      },
+      settings,
+    ),
     references,
   )
   const id = randomUUID()
@@ -128,12 +153,50 @@ async function renderMockup(
   }
 }
 
+async function renderPoster(
+  session: MockupSession,
+  bulletin: MockupImage,
+  references: string[],
+  settings: ImageSettings,
+  changes: string,
+  previous: MockupImage | null,
+): Promise<MockupImage> {
+  const dataUrl = await renderBillboard(
+    posterImagePrompt(changes, settings, !!previous),
+    [bulletin.dataUrl, ...(previous ? [previous.dataUrl] : []), ...references],
+  )
+  const id = randomUUID()
+  return {
+    id,
+    advertiser: bulletin.advertiser,
+    sourceId: bulletin.id,
+    dataUrl,
+    receipt: await signArtifact(
+      session,
+      'image',
+      dataUrl,
+      bulletin.advertiser,
+      `${id}:${bulletin.id}`,
+    ),
+  }
+}
+
 /** Tools capture the logo and image out of band; the model only sees whether they exist. */
-function wizardTools(session: MockupSession, input: Input) {
-  const captured: { brand: Brand | null; image: MockupImage | null } = {
+function wizardTools(
+  session: MockupSession,
+  input: Input,
+  settings: ImageSettings,
+) {
+  const captured: {
+    brand: Brand | null
+    image: MockupImage | null
+    poster: MockupImage | null
+  } = {
     brand: input.brand,
     image: null,
+    poster: null,
   }
+  let rendered = false
   const tools = {
     review_website: tool({
       description:
@@ -160,7 +223,7 @@ function wizardTools(session: MockupSession, input: Input) {
     }),
     generate_billboard: tool({
       description:
-        'Render the billboard mockup image and show it to the user. Use revision=true to edit the current mockup.',
+        'Render a bulletin and adapt the same design into a poster. Use revision=true to revise, or posterOnly=true to retry or change only the poster.',
       inputSchema: z.object({
         advertiser: z.string().min(1).max(2000),
         prompt: z
@@ -171,26 +234,63 @@ function wizardTools(session: MockupSession, input: Input) {
             'Complete creative brief with exact quoted copy, colors, tone and layout; for revisions, only the changes.',
           ),
         revision: z.boolean(),
+        posterOnly: z.boolean().default(false),
+        posterChanges: z.string().max(8000).default(''),
       }),
-      execute: async ({ advertiser, prompt, revision }) => {
+      execute: async ({
+        advertiser,
+        prompt,
+        revision,
+        posterOnly = false,
+        posterChanges = '',
+      }) => {
+        if (rendered)
+          return {
+            ok: false,
+            error: 'Only one generation request is allowed per turn.',
+          }
+        rendered = true
         try {
-          captured.image = await renderMockup(session, {
-            previous: revision ? input.image : null,
-            logo: captured.brand?.logo ?? null,
-            attachments: input.attachments,
-            advertiser,
-            prompt,
-          })
+          const logo = captured.brand && captured.brand.logo
+          captured.image = posterOnly
+            ? input.image
+            : await renderMockup(
+                session,
+                {
+                  previous: revision ? input.image : null,
+                  logo,
+                  attachments: input.attachments,
+                  advertiser,
+                  prompt,
+                },
+                settings,
+              )
+          if (!captured.image) throw new Error('A bulletin is required first.')
+          captured.poster = posterOnly ? input.poster : null
+          const references = [
+            logo,
+            ...input.attachments.map((file) => file.dataUrl),
+          ].filter((value): value is string => !!value)
+          captured.poster = await renderPoster(
+            session,
+            captured.image,
+            references,
+            settings,
+            posterChanges,
+            captured.poster,
+          )
           return {
             ok: true,
-            note: 'The mockup is now displayed to the user below your reply.',
+            note: 'Both the bulletin and poster are displayed below your reply.',
           }
         } catch (error) {
           logFailure('image-rendering', error)
           return {
             ok: false,
-            error:
-              'The image could not be generated. The user’s current mockup is unchanged.',
+            bulletinReady: !!captured.image,
+            error: captured.image
+              ? 'The bulletin is saved, but the poster failed. Retry with posterOnly=true; do not regenerate the bulletin. Any previous poster is unchanged only when this was a poster-only request.'
+              : 'The image could not be generated. The user’s current mockup is unchanged.',
           }
         }
       },
@@ -231,8 +331,9 @@ export async function POST(request: Request) {
       apiKey: serverConfig.openai.requireApiKey(),
     })
     stage = 'system-prompt'
-    const { prompt } = await getSystemPrompt()
-    const { tools, captured } = wizardTools(session, input.data)
+    const { prompt, imageSettings = defaultImageSettings } =
+      await getSystemPrompt()
+    const { tools, captured } = wizardTools(session, input.data, imageSettings)
     stage = 'conversation'
     const result = streamText({
       model: provider('gpt-5.4-mini'),
@@ -241,7 +342,7 @@ export async function POST(request: Request) {
       tools,
       stopWhen: stepCountIs(6),
       maxRetries: 0,
-      abortSignal: AbortSignal.timeout(280_000),
+      abortSignal: AbortSignal.timeout(560_000),
     })
     // Text streams as it is written; the captured image and brand are attached
     // to the final chunk so the client commits them together with the reply.
@@ -249,7 +350,11 @@ export async function POST(request: Request) {
       headers,
       messageMetadata: ({ part }) =>
         part.type === 'finish'
-          ? { image: captured.image, brand: captured.brand }
+          ? {
+              image: captured.image,
+              poster: captured.poster,
+              brand: captured.brand,
+            }
           : undefined,
       onError: (error) => {
         logFailure('conversation', error)

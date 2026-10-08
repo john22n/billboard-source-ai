@@ -1,4 +1,5 @@
 import { beforeEach, expect, it, vi } from 'vitest'
+import { defaultImageSettings } from '@/lib/mockup/image-settings'
 
 const mocks = vi.hoisted(() => ({
   session: vi.fn(),
@@ -54,8 +55,7 @@ it('loads the current prompt with the protected frames and saves validated instr
     data.instructions.map((item: { title: string }) => item.title),
   ).toEqual([
     'Tool instructions',
-    'New image frame',
-    'Revision frame',
+    'Output requirements',
     'PDF search',
     'Attachment handling',
   ])
@@ -83,7 +83,44 @@ it('resets to the original prompt in one request', async () => {
   expect(await response.json()).toEqual({
     prompt: 'You are the Billboard Source Mockup Wizard.',
     isDefault: true,
+    imageSettings: defaultImageSettings,
   })
+})
+
+it('saves creative templates and validated face ratios together with the wizard prompt', async () => {
+  const imageSettings = {
+    ...defaultImageSettings,
+    sharedPrompt: 'Use the original portrait photographs.',
+    bulletin: { width: 7, height: 2 },
+    posterPrompt: 'Preserve all approved copy and reflow the heading.',
+  }
+  const response = await PUT(
+    request({ prompt: 'Ask one question.', imageSettings }),
+  )
+  expect(response.status).toBe(200)
+  expect(mocks.save).toHaveBeenCalledExactlyOnceWith(
+    'Ask one question.',
+    imageSettings,
+  )
+  expect(await response.json()).toMatchObject({
+    imageSettings,
+    isDefault: false,
+  })
+})
+
+it.each([
+  { width: 24, height: 0 },
+  { width: 6, height: 13 },
+  { width: 24.5, height: 7 },
+])('rejects invalid face dimensions without saving: %j', async (bulletin) => {
+  const response = await PUT(
+    request({
+      prompt: 'Keep the copy.',
+      imageSettings: { ...defaultImageSettings, bulletin },
+    }),
+  )
+  expect(response.status).toBe(400)
+  expect(mocks.save).not.toHaveBeenCalled()
 })
 
 it.each(['', '  \n ', 'x'.repeat(20001), 123, null])(

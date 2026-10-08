@@ -27,6 +27,7 @@ type Store = {
     attachmentFailed: boolean,
     receipt?: string,
     image?: MockupImage,
+    poster?: { image: MockupImage; failed: boolean; receipt?: string },
   ) => void
   start: () => void
   clear: () => void
@@ -92,8 +93,20 @@ export const useMockupStore = create<Store>((set, get) => ({
       })
     }
   },
-  recordSubmittedLead(id, advertiser, attachmentFailed, receipt, image) {
+  recordSubmittedLead(
+    id,
+    advertiser,
+    attachmentFailed,
+    receipt,
+    image,
+    poster,
+  ) {
     if (!id) return
+    const {
+      image: posterImage,
+      failed: posterFailed = false,
+      receipt: posterReceipt,
+    } = poster ?? {}
     get().update({
       lastLead: {
         id: Number(id),
@@ -101,8 +114,10 @@ export const useMockupStore = create<Store>((set, get) => ({
         advertiser: advertiser || '',
         receipt,
         image: attachmentFailed ? image : undefined,
+        poster: posterFailed ? posterImage : undefined,
+        posterReceipt,
       },
-      attachmentFailed,
+      attachmentFailed: attachmentFailed || posterFailed,
     })
   },
   /** "Start" always discards the previous advertiser, image and references. */

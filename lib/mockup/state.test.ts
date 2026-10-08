@@ -33,6 +33,7 @@ describe('mockup wizard state', () => {
       attachments: [],
       brand: null,
       image: null,
+      poster: null,
       lastLead: null,
       attachmentFailed: false,
     })

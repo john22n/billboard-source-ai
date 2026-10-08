@@ -1,4 +1,5 @@
 import OpenAI, { toFile } from 'openai'
+import sharp from 'sharp'
 import { serverConfig } from '@/lib/config'
 
 /**
@@ -34,8 +35,18 @@ export async function renderBillboard(prompt: string, references: string[]) {
         ),
       })
     : await client.images.generate(options)
-  const encoded = result.data?.[0]?.b64_json
-  if (!encoded || encoded.length > 2_750_000)
-    throw new Error('No usable image returned')
+  let encoded = result.data?.[0]?.b64_json
+  if (!encoded) throw new Error('No usable image returned')
+  // Two images, logo, upload and conversation must fit below Vercel's 4.5 MB
+  // request limit on subsequent turns. Recompress pixels, never stretch faces.
+  const bytes = Buffer.from(encoded, 'base64')
+  for (const quality of [75, 60, 45]) {
+    if (encoded.length <= 1_499_976) break
+    encoded = (await sharp(bytes).jpeg({ quality }).toBuffer()).toString(
+      'base64',
+    )
+  }
+  if (encoded.length > 1_499_976)
+    throw new Error('Image exceeds the transfer budget')
   return `data:image/jpeg;base64,${encoded}`
 }

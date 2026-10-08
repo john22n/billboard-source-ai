@@ -21,6 +21,8 @@ export const imageSchema = z.object({
   advertiser: z.string().max(2000),
   dataUrl: z.string().max(2_800_000).startsWith('data:image/jpeg;base64,'),
   receipt: z.string().max(6000),
+  /** A poster is bound to the bulletin it was adapted from. */
+  sourceId: z.string().uuid().optional(),
 })
 export type MockupImage = z.infer<typeof imageSchema>
 export type LeadTarget = {
@@ -39,8 +41,15 @@ export type MockupState = {
   attachments: CreativeAttachment[]
   brand: Brand | null
   image: MockupImage | null
+  poster: MockupImage | null
   /** The receipt-bound original, independent of later design revisions. */
-  lastLead: (LeadTarget & { image?: MockupImage }) | null
+  lastLead:
+    | (LeadTarget & {
+        image?: MockupImage
+        poster?: MockupImage
+        posterReceipt?: string
+      })
+    | null
   attachmentFailed: boolean
 }
 
@@ -50,6 +59,7 @@ export function restart(): MockupState {
     attachments: [],
     brand: null,
     image: null,
+    poster: null,
     lastLead: null,
     attachmentFailed: false,
   }

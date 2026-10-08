@@ -71,6 +71,13 @@
       "when": 1790454043000,
       "tag": "0009_remove_mockup_quotas",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791489600000,
+      "tag": "0010_art_wizard_image_settings",
+      "breakpoints": true
     }
   ]
 }

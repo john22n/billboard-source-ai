@@ -3,6 +3,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import ArtWizardTab from './art-wizard-tab'
+import { defaultImageSettings } from '@/lib/mockup/image-settings'
 
 let root: Root
 let container: HTMLDivElement
@@ -51,7 +52,7 @@ async function submit() {
   })
 }
 
-it('shows protected frames as read-only content outside the single editable prompt', async () => {
+it('shows protected frames as read-only content outside the editable prompts', async () => {
   fetchMock.mockResolvedValueOnce(
     Response.json({
       prompt: 'Original prompt',
@@ -68,11 +69,11 @@ it('shows protected frames as read-only content outside the single editable prom
   await act(async () => root.render(<ArtWizardTab />))
   expect(container.textContent).toContain('Tool instructions')
   expect(container.textContent).toContain('Always call generate_billboard.')
-  expect(container.querySelectorAll('textarea')).toHaveLength(1)
+  expect(container.querySelectorAll('textarea')).toHaveLength(5)
   expect(container.querySelector('textarea')?.value).toBe('Original prompt')
   expect(container.textContent).toContain('Read-only')
   expect(container.textContent).toContain('Using the original prompt.')
-  expect(button('Reset to original prompt').disabled).toBe(true)
+  expect(button('Reset all prompts and ratios').disabled).toBe(true)
 })
 
 it('loads the saved prompt, rejects blank edits, and reports a successful save', async () => {
@@ -80,7 +81,7 @@ it('loads the saved prompt, rejects blank edits, and reports a successful save',
     Response.json({ prompt: 'Original prompt', isDefault: false }),
   )
   await act(async () => root.render(<ArtWizardTab />))
-  const save = button('Save prompt')
+  const save = button('Save settings')
   expect(container.querySelector('textarea')?.value).toBe('Original prompt')
   expect(container.textContent).toContain('Using a customized prompt.')
   expect(save.disabled).toBe(true)
@@ -89,15 +90,22 @@ it('loads the saved prompt, rejects blank edits, and reports a successful save',
   await edit('Ask three questions.')
   expect(save.disabled).toBe(false)
   fetchMock.mockResolvedValueOnce(
-    Response.json({ prompt: 'Ask three questions.', isDefault: false }),
+    Response.json({
+      prompt: 'Ask three questions.',
+      isDefault: false,
+      imageSettings: defaultImageSettings,
+    }),
   )
   await submit()
   expect(fetchMock).toHaveBeenLastCalledWith('/api/admin/art-wizard', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt: 'Ask three questions.' }),
+    body: JSON.stringify({
+      prompt: 'Ask three questions.',
+      imageSettings: defaultImageSettings,
+    }),
   })
-  expect(container.textContent).toContain('Prompt saved')
+  expect(container.textContent).toContain('Settings saved')
   expect(save.disabled).toBe(true)
 })
 
@@ -111,16 +119,19 @@ it('resets to the original prompt with one click and replaces the editor text', 
     Response.json({
       prompt: 'You are the Billboard Source Mockup Wizard.',
       isDefault: true,
+      imageSettings: defaultImageSettings,
     }),
   )
-  await act(async () => button('Reset to original prompt').click())
+  await act(async () => button('Reset all prompts and ratios').click())
   expect(fetchMock).toHaveBeenLastCalledWith('/api/admin/art-wizard', {
     method: 'DELETE',
   })
   expect(input.value).toBe('You are the Billboard Source Mockup Wizard.')
-  expect(container.textContent).toContain('Original prompt restored')
-  expect(button('Reset to original prompt').disabled).toBe(true)
-  expect(button('Save prompt').disabled).toBe(true)
+  expect(container.textContent).toContain(
+    'Original prompts and face ratios restored',
+  )
+  expect(button('Reset all prompts and ratios').disabled).toBe(true)
+  expect(button('Save settings').disabled).toBe(true)
 })
 
 it('keeps unsaved edits after a failed save and allows retrying', async () => {
@@ -135,12 +146,15 @@ it('keeps unsaved edits after a failed save and allows retrying', async () => {
     'Could not save.',
   )
   expect(input.value).toBe('My unsaved prompt')
-  expect(button('Save prompt').disabled).toBe(false)
+  expect(button('Save settings').disabled).toBe(false)
   fetchMock.mockResolvedValueOnce(
-    Response.json({ prompt: 'My unsaved prompt' }),
+    Response.json({
+      prompt: 'My unsaved prompt',
+      imageSettings: defaultImageSettings,
+    }),
   )
   await submit()
-  expect(container.textContent).toContain('Prompt saved')
+  expect(container.textContent).toContain('Settings saved')
 })
 
 it('shows the API storage error instead of blaming admin access', async () => {
@@ -197,12 +211,17 @@ it('disables the editor and duplicate submissions while saving', async () => {
   const save = button('Saving…')
   expect(save.disabled).toBe(true)
   expect(input.disabled).toBe(true)
-  expect(button('Reset to original prompt').disabled).toBe(true)
+  expect(button('Reset all prompts and ratios').disabled).toBe(true)
   await submit()
   expect(fetchMock).toHaveBeenCalledTimes(2)
   await act(async () =>
-    finish(Response.json({ prompt: 'Updated instructions' })),
+    finish(
+      Response.json({
+        prompt: 'Updated instructions',
+        imageSettings: defaultImageSettings,
+      }),
+    ),
   )
   expect(input.disabled).toBe(false)
-  expect(container.textContent).toContain('Prompt saved')
+  expect(container.textContent).toContain('Settings saved')
 })

@@ -28,6 +28,7 @@ interface ContactInfo {
 
 interface NutshellLeadRequest {
   mockupImage?: MockupImage
+  mockupPoster?: MockupImage
   // Primary contact info (for backwards compatibility)
   name: string
   position: string
@@ -483,6 +484,7 @@ async function createLeadAndPersist(options: {
   contactIds: number[]
   accountId: number | null
   mockupImage?: MockupImage
+  mockupPoster?: MockupImage
 }) {
   const {
     lead,
@@ -539,34 +541,103 @@ async function createLeadAndPersist(options: {
       console.error('Failed to save lead to local DB:', dbError)
     }
   }
-  let imageAttachmentFailed = false
-  let imageAttachmentReceipt: string | undefined
-  if (leadId && options.mockupImage) {
-    try {
-      imageAttachmentReceipt = await signArtifact(
-        session,
-        'attachment',
-        options.mockupImage.dataUrl,
-        options.mockupImage.advertiser,
-        `${Number(leadId)}:${options.mockupImage.id}`,
-      )
-      await attachMockup(Number(leadId), options.mockupImage, credentials)
-    } catch {
-      // Lead creation succeeded. Retry only the image against this exact lead.
-      imageAttachmentFailed = true
-    }
-  }
+  // Sequential uploads preserve Nutshell's revision and existing file list.
+  // Each failure is isolated: a failed bulletin must not prevent a poster upload.
+  const bulletin = await attachLeadImage(
+    leadId,
+    options.mockupImage,
+    session,
+    credentials,
+  )
+  const poster = await attachLeadImage(
+    leadId,
+    options.mockupPoster,
+    session,
+    credentials,
+  )
   return NextResponse.json({
     success: true,
     leadId,
     contactIds,
     accountId,
-    imageAttachmentFailed,
-    imageAttachmentReceipt,
-    message: imageAttachmentFailed
-      ? 'Lead created; image could not be attached'
-      : 'Lead created successfully in Nutshell',
+    imageAttachmentFailed: bulletin.failed,
+    imageAttachmentReceipt: bulletin.receipt,
+    posterAttachmentFailed: poster.failed,
+    posterAttachmentReceipt: poster.receipt,
+    message:
+      bulletin.failed || poster.failed
+        ? 'Lead created; image could not be attached'
+        : 'Lead created successfully in Nutshell',
   })
+}
+
+async function attachLeadImage(
+  leadId: number | undefined,
+  image: MockupImage | undefined,
+  session: MockupSession,
+  credentials: string,
+) {
+  let receipt: string | undefined
+  if (!leadId || !image) return { failed: false, receipt }
+  try {
+    receipt = await signArtifact(
+      session,
+      'attachment',
+      image.dataUrl,
+      image.advertiser,
+      `${Number(leadId)}:${image.id}`,
+    )
+    await attachMockup(Number(leadId), image, credentials)
+    return { failed: false, receipt }
+  } catch {
+    // Never retry lead creation after an attachment failure.
+    return { failed: true, receipt }
+  }
+}
+
+function mockupPairError(data: NutshellLeadRequest) {
+  if (
+    data.mockupPoster &&
+    (!data.mockupImage || data.mockupPoster.sourceId !== data.mockupImage.id)
+  )
+    return NextResponse.json(
+      { error: 'The poster must belong to the selected bulletin.' },
+      { status: 400 },
+    )
+  if (data.mockupImage?.sourceId)
+    return NextResponse.json(
+      { error: 'Select the bulletin as the primary mockup.' },
+      { status: 400 },
+    )
+  return null
+}
+
+async function submittedImageError(
+  session: MockupSession,
+  advertiser: string,
+  selected: MockupImage,
+) {
+  const image = imageSchema.safeParse(selected)
+  if (!image.success || !sameAdvertiser(advertiser, image.data.advertiser))
+    return NextResponse.json(
+      {
+        error:
+          'The selected mockup belongs to a different advertiser. Restart the Art Mockup Wizard before submitting.',
+      },
+      { status: 400 },
+    )
+  try {
+    await verifyImage(session, image.data)
+    return null
+  } catch {
+    return NextResponse.json(
+      {
+        error:
+          'This mockup is no longer valid for this session. Download it, then restart the wizard.',
+      },
+      { status: 400 },
+    )
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -576,32 +647,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     const userEmail = session.email
     const data: NutshellLeadRequest = await req.json()
-    const invalid = validationError(data)
+    const invalid = validationError(data) || mockupPairError(data)
     if (invalid) return invalid
-    if (data.mockupImage) {
-      const image = imageSchema.safeParse(data.mockupImage)
-      if (
-        !image.success ||
-        !sameAdvertiser(data.entityName, image.data.advertiser)
+    for (const selected of [data.mockupImage, data.mockupPoster]) {
+      if (!selected) continue
+      const invalidImage = await submittedImageError(
+        session,
+        data.entityName,
+        selected,
       )
-        return NextResponse.json(
-          {
-            error:
-              'The selected mockup belongs to a different advertiser. Restart the Art Mockup Wizard before submitting.',
-          },
-          { status: 400 },
-        )
-      try {
-        await verifyImage(session, image.data)
-      } catch {
-        return NextResponse.json(
-          {
-            error:
-              'This mockup is no longer valid for this session. Download it, then restart the wizard.',
-          },
-          { status: 400 },
-        )
-      }
+      if (invalidImage) return invalidImage
     }
 
     console.log('Nutshell form submitted:', {
@@ -609,6 +664,7 @@ export async function POST(req: NextRequest) {
       formData: {
         ...data,
         mockupImage: data.mockupImage ? '[selected mockup]' : undefined,
+        mockupPoster: data.mockupPoster ? '[selected poster]' : undefined,
       },
     })
     let apiKey: string
@@ -649,6 +705,7 @@ export async function POST(req: NextRequest) {
       contactIds,
       accountId,
       mockupImage: data.mockupImage,
+      mockupPoster: data.mockupPoster,
     })
   } catch (error) {
     console.error('Error creating Nutshell lead:', error)

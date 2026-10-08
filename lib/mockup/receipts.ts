@@ -57,7 +57,7 @@ export async function verifyImage(session: MockupSession, image: MockupImage) {
     'image',
     image.dataUrl,
     image.advertiser,
-    image.id,
+    image.sourceId ? `${image.id}:${image.sourceId}` : image.id,
     image.receipt,
   )
 }

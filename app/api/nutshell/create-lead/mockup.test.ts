@@ -192,3 +192,104 @@ it('reports successful lead creation when the native image upload succeeds', asy
   expect(methods.filter((method) => method === 'newLead')).toHaveLength(1)
   expect(methods.filter((method) => method === 'editLead')).toHaveLength(1)
 })
+
+it.each(['bulletin', 'poster'])(
+  'retains both file reservations when the %s upload fails and retries only that file',
+  async (failedFormat) => {
+    const poster = {
+      ...image,
+      id: '22222222-2222-4222-8222-222222222222',
+      sourceId: image.id,
+    }
+    poster.receipt = await signArtifact(
+      { userId: 'rep', sessionStartedAt: 123 },
+      'image',
+      poster.dataUrl,
+      poster.advertiser,
+      `${poster.id}:${image.id}`,
+    )
+    type FileRecord = { name: string; uri?: string; size?: number }
+    let files: FileRecord[] = [{ name: 'existing-contract.pdf', size: 20 }]
+    const uploaded: string[] = []
+    const methods: string[] = []
+    const selected = failedFormat === 'poster' ? poster : image
+    let fail = true
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url, init) => {
+        if (String(url).includes('/file/api/')) {
+          const file = (init.body as FormData).get('file') as File
+          uploaded.push(file.name)
+          const shouldFail = file.name.includes(selected.id) && fail
+          if (!shouldFail)
+            files.find((item) => item.name === file.name)!.size = file.size
+          return new Response('', { status: shouldFail ? 503 : 200 })
+        }
+        const { method, params } = JSON.parse(init.body)
+        methods.push(method)
+        if (method === 'editLead')
+          files = params.lead.file.map((file: FileRecord, index: number) => ({
+            ...file,
+            uri: file.uri ?? `https://app.nutshell.com/file/api/${index + 1}`,
+          }))
+        if (method === 'getLead' || method === 'editLead')
+          return Response.json({
+            result: {
+              id: 42,
+              rev: String(files.length),
+              primaryAccountName: 'Alpine Dental',
+              file: files,
+            },
+          })
+        const results: Record<string, unknown> = {
+          findUsers: [{ id: 1, emails: ['rep@example.test'] }],
+          searchUniversal: { accounts: [{ id: 2, name: 'Alpine Dental' }] },
+          newContact: { id: 3 },
+          newSource: { id: 3 },
+          newLead: { id: 42 },
+        }
+        return Response.json({ result: results[method] ?? [] })
+      }),
+    )
+    const response = await create(
+      new NextRequest('http://localhost/api/nutshell/create-lead', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: 'Rep',
+          entityName: 'Alpine Dental',
+          phone: '3035550100',
+          email: 'client@example.test',
+          mockupImage: image,
+          mockupPoster: poster,
+        }),
+      }),
+    )
+    expect(response.status).toBe(200)
+    const result = await response.json()
+    expect(uploaded).toHaveLength(2)
+    expect(result.imageAttachmentFailed).toBe(failedFormat === 'bulletin')
+    expect(result.posterAttachmentFailed).toBe(failedFormat === 'poster')
+    expect(files).toHaveLength(3)
+    expect(files[0]).toMatchObject({ name: 'existing-contract.pdf', size: 20 })
+    fail = false
+    const retried = await retry(
+      new Request('http://localhost/api/mockup/leads', {
+        method: 'POST',
+        body: JSON.stringify({
+          leadId: 42,
+          confirmedLeadId: 42,
+          image: selected,
+          receipt:
+            failedFormat === 'poster'
+              ? result.posterAttachmentReceipt
+              : result.imageAttachmentReceipt,
+        }),
+      }),
+    )
+    expect(retried.status).toBe(200)
+    expect(uploaded).toHaveLength(3)
+    expect(uploaded[2]).toContain(selected.id)
+    expect(methods.filter((method) => method === 'newLead')).toHaveLength(1)
+    expect(methods.filter((method) => method === 'editLead')).toHaveLength(2)
+  },
+)

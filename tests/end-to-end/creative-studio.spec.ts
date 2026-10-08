@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { SignJWT } from 'jose'
+import sharp from 'sharp'
 import { expect, test, type Locator } from 'playwright/test'
 import { baseUrl, jwtSecret, userId } from './environment'
 
@@ -48,6 +49,7 @@ const postSubmissionImage = {
 function wizardStream(turn: {
   reply: string
   image?: unknown
+  poster?: unknown
   brand?: unknown
   error?: string
 }) {
@@ -76,6 +78,7 @@ function wizardStream(turn: {
         type: 'finish',
         messageMetadata: {
           image: turn.image ?? null,
+          poster: turn.poster ?? null,
           brand: turn.brand ?? null,
         },
       },
@@ -671,7 +674,7 @@ for (const placement of ['Form views', 'Lead tools']) {
     await download.click()
     const downloaded = await downloadEvent
     expect(downloaded.suggestedFilename()).toBe(
-      `billboard-concept-${image.id}.jpg`,
+      `bulletin-concept-${image.id}.jpg`,
     )
     expect(await downloaded.failure()).toBeNull()
 
@@ -689,7 +692,7 @@ for (const placement of ['Form views', 'Lead tools']) {
     await expect(revision).toHaveValue('Make the headline larger')
     await expect(download).toHaveAttribute(
       'download',
-      `billboard-concept-${image.id}.jpg`,
+      `bulletin-concept-${image.id}.jpg`,
     )
     if (placement === 'Lead tools') {
       const views = page.getByRole('tablist', { name: 'Form views' })
@@ -709,7 +712,7 @@ for (const placement of ['Form views', 'Lead tools']) {
     await studio.getByRole('button', { name: 'Send message' }).click()
     await expect(download).toHaveAttribute(
       'download',
-      'billboard-concept-22222222-2222-4222-8222-222222222222.jpg',
+      'bulletin-concept-22222222-2222-4222-8222-222222222222.jpg',
     )
     await expect(studio.getByRole('alert')).toHaveCount(0)
     await expect(selected).toHaveAttribute('src', revisedImage.dataUrl)
@@ -832,7 +835,7 @@ for (const placement of ['Form views', 'Lead tools']) {
     await expect(selected).toHaveAttribute('src', currentImage.dataUrl)
     await expect(download).toHaveAttribute(
       'download',
-      `billboard-concept-${currentImage.id}.jpg`,
+      `bulletin-concept-${currentImage.id}.jpg`,
     )
     if (placement === 'Lead tools') {
       const retry = studio.getByRole('button', {
@@ -909,3 +912,213 @@ for (const placement of ['Form views', 'Lead tools']) {
     expect(unexpected).toEqual([])
   })
 }
+
+test('paired images persist, download separately, and retry only the failed poster attachment', async ({
+  page,
+  context,
+}, testInfo) => {
+  test.setTimeout(60_000)
+  const token = await new SignJWT({ userId })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime('1h')
+    .sign(new TextEncoder().encode(jwtSecret))
+  await context.addCookies([{ name: 'auth_token', value: token, url: baseUrl }])
+  // Deterministic geometry fixtures, not evidence of live AI rendering quality.
+  const fixture = async (height: number) => {
+    const jpeg = await sharp(
+      Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="650">
+      <rect width="1000" height="650" fill="#c8e5f5"/>
+      <rect x="475" y="250" width="50" height="400" fill="#68747a"/>
+      <rect x="108" y="108" width="784" height="${height + 24}" fill="#33434b"/>
+      <rect x="120" y="120" width="760" height="${height}" fill="#fff8ea"/>
+      <text x="155" y="180" font-family="sans-serif" font-size="28" fill="#1c4544">EXAMPLE AI</text>
+      <text x="155" y="245" font-family="sans-serif" font-size="48" font-weight="bold" fill="#1c4544">Make room for better.</text>
+      <text x="155" y="${height + 90}" font-family="sans-serif" font-size="24" fill="#1c4544">example.com</text>
+    </svg>`),
+    )
+      .jpeg()
+      .toBuffer()
+    return `data:image/jpeg;base64,${jpeg.toString('base64')}`
+  }
+  const bulletin = { ...image, dataUrl: await fixture((760 * 7) / 24) }
+  const poster = {
+    ...revisedImage,
+    sourceId: bulletin.id,
+    dataUrl: await fixture((760 * 6) / 13),
+  }
+  await page.route('**/api/**', (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path === '/api/mockup/session') return route.continue()
+    if (path === '/api/twilio-token')
+      return route.fulfill({
+        status: 503,
+        json: { error: 'Disabled for tests' },
+      })
+    return route.fulfill({
+      json: { status: 'offline', success: true, workers: [] },
+    })
+  })
+  let turns = 0
+  await page.route('**/api/mockup/chat', (route) => {
+    const body = route.request().postDataJSON()
+    turns++
+    if (turns === 1)
+      return route.fulfill(
+        wizardStream({
+          reply: 'The bulletin is ready, but the poster failed.',
+          image: bulletin,
+        }),
+      )
+    expect(body.image).toEqual(bulletin)
+    expect(body.poster).toBeNull()
+    expect(body.messages.at(-1).text).toContain(
+      'Generate only the missing poster',
+    )
+    return route.fulfill(
+      wizardStream({
+        reply: 'Both formats are ready.',
+        image: bulletin,
+        poster,
+      }),
+    )
+  })
+  await page.goto('/dashboard')
+  await page.setViewportSize({ width: 1440, height: 1100 })
+  await page
+    .getByPlaceholder('Company Name', { exact: true })
+    .fill('Example AI')
+  const tab = page
+    .getByRole('tablist', { name: 'Lead tools' })
+    .getByRole('tab', { name: 'Creative Studio' })
+  await tab.click()
+  const studio = page.getByRole('region', {
+    name: 'Creative Studio',
+    exact: true,
+  })
+  await studio
+    .getByRole('textbox', { name: 'Message', exact: true })
+    .fill('Generate both formats')
+  await studio.getByRole('button', { name: 'Send message' }).click()
+  const selected = studio.getByRole('img', {
+    name: 'Selected outdoor billboard concept for Example AI',
+  })
+  const selectedPoster = studio.getByRole('img', {
+    name: 'Selected outdoor poster concept for Example AI',
+  })
+  const retry = studio.getByRole('button', {
+    name: 'Generate poster',
+    exact: true,
+  })
+  await expect(retry).toBeVisible()
+  await expect(selected).toHaveAttribute('src', bulletin.dataUrl)
+  await retry.scrollIntoViewIfNeeded()
+  await studio.screenshot({
+    path: testInfo.outputPath('pair-missing-poster.png'),
+  })
+  await retry.click()
+  await expect(selectedPoster).toHaveAttribute('src', poster.dataUrl)
+  await expect(selected).toHaveAttribute('src', bulletin.dataUrl)
+  await expect(retry).toHaveCount(0)
+  for (const [name, filename] of [
+    ['Download selected mockup', `bulletin-concept-${bulletin.id}.jpg`],
+    ['Download poster', `poster-concept-${poster.id}.jpg`],
+  ]) {
+    const download = page.waitForEvent('download')
+    await studio.getByRole('link', { name, exact: true }).click()
+    const file = await download
+    expect(file.suggestedFilename()).toBe(filename)
+    expect(await file.failure()).toBeNull()
+  }
+  await page.reload()
+  await tab.click()
+  await expect(selected).toHaveAttribute('src', bulletin.dataUrl)
+  await expect(selectedPoster).toHaveAttribute('src', poster.dataUrl)
+  for (const format of ['Bulletin', 'Poster']) {
+    const figure = studio
+      .getByRole('figure')
+      .filter({ has: page.getByRole('heading', { name: format, exact: true }) })
+    await figure.scrollIntoViewIfNeeded()
+    await studio.screenshot({
+      path: testInfo.outputPath(`pair-${format.toLowerCase()}-desktop.png`),
+    })
+  }
+  await page.setViewportSize({ width: 390, height: 844 })
+  const mobileDownload = studio.getByRole('link', {
+    name: 'Download poster',
+    exact: true,
+  })
+  await mobileDownload.scrollIntoViewIfNeeded()
+  await expect(mobileDownload).toBeInViewport()
+  const mobileFile = page.waitForEvent('download')
+  await mobileDownload.click()
+  expect((await mobileFile).suggestedFilename()).toBe(
+    `poster-concept-${poster.id}.jpg`,
+  )
+  await studio.screenshot({
+    path: testInfo.outputPath('pair-poster-mobile.png'),
+  })
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true)
+  await page.setViewportSize({ width: 1440, height: 1100 })
+  // Creative artifacts persist across reload, but the lead form is transient.
+  await page
+    .getByPlaceholder('Company Name', { exact: true })
+    .fill('Example AI')
+  let creates = 0
+  await page.route('**/api/nutshell/create-lead', (route) => {
+    creates++
+    expect(route.request().postDataJSON()).toMatchObject({
+      entityName: 'Example AI',
+      mockupImage: bulletin,
+      mockupPoster: poster,
+    })
+    return route.fulfill({
+      json: {
+        success: true,
+        leadId: 43,
+        imageAttachmentFailed: false,
+        posterAttachmentFailed: true,
+        posterAttachmentReceipt: 'poster-upload-receipt',
+      },
+    })
+  })
+  await page.getByRole('button', { name: 'Nutshell', exact: true }).click()
+  const attachPoster = studio.getByRole('button', {
+    name: 'Retry poster attachment',
+  })
+  await expect(attachPoster).toBeVisible()
+  await expect(
+    studio.getByRole('button', { name: 'Retry image attachment' }),
+  ).toHaveCount(0)
+  await page.reload()
+  await tab.click()
+  await attachPoster.click()
+  const dialog = page.getByRole('dialog', {
+    name: 'Send this poster to Nutshell',
+  })
+  await expect(dialog.getByRole('img')).toHaveAttribute('src', poster.dataUrl)
+  await expect(dialog.getByText('Confirm: Example AI (#43)')).toBeVisible()
+  await dialog.screenshot({
+    path: testInfo.outputPath('pair-poster-retry.png'),
+  })
+  await page.route('**/api/mockup/leads', (route) => {
+    expect(route.request().postDataJSON()).toEqual({
+      leadId: 43,
+      confirmedLeadId: 43,
+      image: poster,
+      receipt: 'poster-upload-receipt',
+    })
+    return route.fulfill({ json: { success: true } })
+  })
+  await dialog.getByRole('button', { name: 'Confirm & attach poster' }).click()
+  await expect(dialog).toBeHidden()
+  await expect(attachPoster).toHaveCount(0)
+  await expect(selected).toHaveAttribute('src', bulletin.dataUrl)
+  await expect(selectedPoster).toHaveAttribute('src', poster.dataUrl)
+  expect(creates).toBe(1)
+  expect(turns).toBe(2)
+})
