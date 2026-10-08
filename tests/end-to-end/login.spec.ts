@@ -4,6 +4,7 @@ for (const path of ['/', '/login']) {
   test(`launch announcement appears on a fresh visit to ${path}`, async ({
     page,
   }) => {
+    await page.clock.setFixedTime(new Date('2026-10-20T18:00:00Z'))
     await page.goto(path)
     const announcement = page.getByRole('complementary', {
       name: 'GeoPoePoe3 launch announcement',

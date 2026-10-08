@@ -1,7 +1,28 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import { Radar, X } from 'lucide-react'
+
+// Midnight after October 20, 2026 in America/Denver (MDT).
+const expiresAt = Date.parse('2026-10-21T00:00:00-06:00')
+const isBeforeExpiry = () => Date.now() < expiresAt
+const hideOnServer = () => false
+
+function subscribeToExpiry(onChange: () => void) {
+  let timeout: ReturnType<typeof setTimeout>
+  function checkExpiry() {
+    onChange()
+    if (isBeforeExpiry()) {
+      // Clamp long waits to the browser timer limit, then check again.
+      timeout = setTimeout(
+        checkExpiry,
+        Math.min(expiresAt - Date.now(), 2147483647),
+      )
+    }
+  }
+  checkExpiry()
+  return () => clearTimeout(timeout)
+}
 
 export function LaunchAnnouncement({
   autoDismiss = false,
@@ -9,6 +30,11 @@ export function LaunchAnnouncement({
   autoDismiss?: boolean
 }) {
   const [dismissed, setDismissed] = useState(false)
+  const beforeExpiry = useSyncExternalStore(
+    subscribeToExpiry,
+    isBeforeExpiry,
+    hideOnServer,
+  )
 
   useEffect(() => {
     if (!autoDismiss || dismissed) return
@@ -16,7 +42,7 @@ export function LaunchAnnouncement({
     return () => window.clearTimeout(timeout)
   }, [autoDismiss, dismissed])
 
-  if (dismissed) return null
+  if (dismissed || !beforeExpiry) return null
 
   return (
     <aside
