@@ -38,7 +38,7 @@ export function LaunchAnnouncement({
 
   useEffect(() => {
     if (!autoDismiss || dismissed) return
-    const timeout = window.setTimeout(() => setDismissed(true), 5000)
+    const timeout = window.setTimeout(() => setDismissed(true), 60000)
     return () => window.clearTimeout(timeout)
   }, [autoDismiss, dismissed])
 
