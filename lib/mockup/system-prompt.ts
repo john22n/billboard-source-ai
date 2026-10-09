@@ -98,8 +98,8 @@ The final image should show:
 
 * A wide horizontal billboard
 * The completed advertiser design printed on the billboard face
-* The application's consistent blue-sky/cloud backdrop, without a skyline or surrounding scenery
-* A centered single-pole billboard structure, without a presentation logo or footer
+* A clean blue sky with the target location’s skyline in the background behind the billboard, subtle enough to keep the billboard dominant and readable. If no location was provided, use a clean blue sky without inventing a city. Respect any user-supplied background instead.
+* A realistic outdoor billboard structure
 * Clear readable billboard copy
 * Strong visual hierarchy
 * Professional advertising quality
