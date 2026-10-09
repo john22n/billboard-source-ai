@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import sharp from 'sharp'
 import { renderBillboard } from './render'
+
+vi.mock('ai', () => ({
+  generateObject: vi.fn(async () => ({ object: { top: 80 } })),
+}))
 
 const jpeg = 'data:image/jpeg;base64,/9j/2Q=='
 const png = 'data:image/png;base64,iVBORw0KGgo='
@@ -67,6 +72,41 @@ it('rejects image requests before fetching when the OpenAI key is missing', asyn
     'OPENAI_API_KEY',
   )
   expect(fetcher).not.toHaveBeenCalled()
+})
+
+it('returns a 2304×672 bulletin using the AI-selected off-center crop without stretching', async () => {
+  // Asymmetric markers: centering, reversing the offset or resizing loses them.
+  const source = await sharp(
+    Buffer.from(`<svg width="2304" height="768">
+    <rect width="2304" height="768" fill="white"/>
+    <rect y="80" width="2304" height="32" fill="red"/>
+    <rect y="704" width="2304" height="48" fill="blue"/>
+  </svg>`),
+  )
+    .png()
+    .toBuffer()
+  fetcher.mockResolvedValueOnce(
+    Response.json({ data: [{ b64_json: source.toString('base64') }] }),
+  )
+  const dataUrl = await renderBillboard('Alpine billboard', [])
+  const decoded = sharp(Buffer.from(dataUrl.split(',')[1], 'base64'))
+  expect(await decoded.metadata()).toMatchObject({
+    format: 'jpeg',
+    width: 2304,
+    height: 672,
+  })
+  const { data, info } = await decoded
+    .raw()
+    .toBuffer({ resolveWithObject: true })
+  for (const [y, expected] of [
+    [16, [255, 0, 0]],
+    [656, [0, 0, 255]],
+  ] as const) {
+    const offset = (y * info.width + 128) * info.channels
+    expected.forEach((channel, index) =>
+      expect(Math.abs(data[offset + index] - channel)).toBeLessThan(5),
+    )
+  }
 })
 
 it('bounds each image so a pair and its pending attachment snapshot fit browser storage', async () => {
