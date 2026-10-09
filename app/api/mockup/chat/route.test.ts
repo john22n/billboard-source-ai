@@ -362,6 +362,7 @@ it('returns a signed bulletin and matching poster, using the bulletin as the pos
   expect(mocks.render.mock.calls[0][0]).toContain('24:7')
   expect(mocks.render.mock.calls[1][0]).toContain('13:6')
   expect(mocks.render.mock.calls[1][1]).toEqual([jpeg, png])
+  expect(mocks.render.mock.calls[1][2]).toBe('poster')
   expect(data.image).toMatchObject({
     advertiser: 'Alpine Dental',
     dataUrl: jpeg,
@@ -433,7 +434,7 @@ it('edits the current image for revisions and keeps its advertiser', async () =>
     ),
   )
   expect(mocks.render).toHaveBeenCalledWith(
-    expect.stringMatching(/^Edit the supplied CURRENT selected/),
+    expect.stringContaining('CURRENT selected billboard'),
     [jpeg],
   )
   expect(data.image).toMatchObject({

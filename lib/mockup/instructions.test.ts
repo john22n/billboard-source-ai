@@ -1,10 +1,8 @@
 import { expect, it } from 'vitest'
 import { billboardImagePrompt, toolInstructions } from './instructions'
 
-it('carries the target location into the brief and requests its skyline behind the billboard', () => {
-  expect(toolInstructions).toContain(
-    'Include the target city or location from intake in the creative brief',
-  )
+it('keeps the target location as campaign context without changing the fixed presentation', () => {
+  expect(toolInstructions).toContain('Target location is campaign context only')
   const prompt = billboardImagePrompt(
     'Alpine Dental in Denver. Headline "Smile Bigger".',
     {
@@ -13,28 +11,28 @@ it('carries the target location into the brief and requests its skyline behind t
       labels: [],
     },
   )
-  expect(prompt).toContain('the target location’s skyline in the background')
+  expect(prompt).toContain('consistent sky and single-pole presentation')
   expect(prompt).toContain('Alpine Dental in Denver')
-  expect(prompt).toContain(
-    'If no location was provided, keep the clean blue sky without inventing a city',
-  )
+  expect(prompt).not.toContain('target location’s skyline')
 })
 
-it('preserves uploaded background overrides and does not restage unrelated revisions', () => {
+it('uses uploaded backgrounds inside the advertisement, not as presentation overrides', () => {
   expect(
     billboardImagePrompt('Denver', {
       revision: false,
       logo: false,
       labels: ['mountains.jpg'],
     }),
-  ).toContain('User-supplied backgrounds override the default sky/scene')
+  ).toContain(
+    'Uploaded backgrounds never replace the fixed presentation sky or structure',
+  )
   const revision = billboardImagePrompt('Make text larger', {
     revision: true,
     logo: false,
     labels: [],
   })
   expect(revision).toContain(
-    'Preserve its copy, layout, brand identity, background',
+    'Preserve its copy, layout, brand identity, advertisement background',
   )
   expect(revision).not.toContain('skyline')
 })
