@@ -46,6 +46,8 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 The GitHub Actions workflow in `.github/workflows/ci-cd.yml`:
 
 - lints, type-checks, and tests every pull request targeting `main`;
+- runs the login and Creative Studio Playwright tests in a separate job, using Chromium and disposable local PostgreSQL;
+- retains Playwright reports, failure screenshots, and retry traces for seven days;
 - audits dependencies for critical vulnerabilities; and
 - publishes an SPDX SBOM.
 
@@ -113,3 +115,30 @@ Before deploying, create a Twilio Conversation Intelligence (classic) Service in
 Twilio posts completed recordings to the signature-validated `/api/twilio/voicemail-ai-recording` endpoint. It verifies recording ownership and requests an Intelligence transcript using the Recording SID, with the Call SID as its customer key. Callback retries do not create additional transcripts. Connection/read failures and 5xx responses have bounded Twilio retries; persistent failures appear in Vercel logs as `Voicemail AI transcription request failed`. After resolving the cause, replay the recording callback using Twilio's signed webhook mechanism or request the transcript for that Recording SID through the Intelligence API.
 
 The admin Voicemail AI tab shows recording audio, legacy Twilio transcripts, and Intelligence transcript text/status for the existing rolling 21-day call window. Refresh after transcription completes; Call Events may take 15 minutes to appear. A 21-day display window is not a Twilio deletion policy. Recording/storage/transcription charges apply, and old unrecorded calls cannot be recovered. Verify the spoken notice meets the business's recording-consent requirements before release.
+
+## Playwright browser tests
+
+Install PostgreSQL locally and put `initdb` and `pg_ctl` on your `PATH` (for Homebrew PostgreSQL 17: `export PATH="$(brew --prefix postgresql@17)/bin:$PATH"`). Run as a regular user, not root. Ports 3000 and 54329 must be free.
+
+```bash
+pnpm exec playwright install chromium
+pnpm test:e2e
+# Creative Studio only:
+pnpm exec playwright test creative-studio.spec.ts
+```
+
+Playwright starts an isolated Next.js server and a temporary PostgreSQL cluster containing only a test user. Both stop after the run, and the database files are removed. Shell and `.env` service credentials are cleared for the app; the suite does not use the dev or production database.
+
+The Creative Studio test opens the actual dashboard with a signed test session and exercises all seven intake answers, editable approval, website palette propagation, generation, download, failed revision/retry, refresh persistence, and reset. AI and telephony HTTP responses are mocked, so it verifies the browser workflow and request contracts—not live model quality or website extraction. Existing API/unit tests cover those server-side contracts. The tiny JPEG fixtures are synthetic, not customer artwork.
+
+## Creative Studio AI and attachments
+
+Set the server-only `OPENAI_API_KEY` in the local environment and the relevant Vercel environments. Creative Studio calls OpenAI directly for chat and PDF search (`gpt-5.4-mini`) and image generation/editing (`gpt-image-2.5-sunburst`), using the same key as the other OpenAI features. API usage is billed to that OpenAI project.
+
+Each new concept produces two separate JPEGs: a bulletin (48′ × 14′, 24:7 face) and a matching poster (22′9″ × 10′6″, 13:6 face). The poster uses the generated bulletin as its visual reference and rearranges the same copy, branding and imagery rather than cropping or stretching it. These are outdoor concept photographs; the ratios describe the billboard face, not the 1536 × 1024 file canvas or guaranteed print-ready dimensions. Revisions regenerate both formats, replacing the selected pair only after both succeed. This uses two sequential image calls per generation and can take several minutes; it also costs more than the previous single-image workflow. The chat route requests a 600-second limit, requiring Vercel Fluid Compute on Pro/Enterprise; Hobby's 300-second maximum is insufficient for that configuration.
+
+Admins can edit the bulletin, revision and poster adaptation prompts in **Admin → Creative Studio**, separately from the intake system prompt. Each group saves and resets independently. Image prompts are read when the next chat turn starts. Apply the additive migration `0010_art_wizard_image_prompts.sql` through the approved database rollout **before deploying this code**; the nullable column preserves existing intake settings and uses the default image prompts until customized. The migration has only been exercised against disposable local test data.
+
+There is no daily image quota. The existing chat and PDF request rate limits remain. Migration `0009_remove_mockup_quotas.sql` drops the unused quota table; apply it through the normal, approved database rollout after the quota-free code is deployed. Historical migrations remain unchanged.
+
+Lead submission attaches both files to Nutshell. If an upload fails after Nutshell creates a lead, **Retry image attachment** retries the original submitted pair on that exact lead, skipping files already uploaded. The server verifies a signed receipt binding the lead, both images, advertiser, and login session, and the browser preserves the receipt and original pair across refreshes in the same tab, separately from later design revisions. The retry never creates another lead, offers an alternate lead, or replaces the currently selected design. Existing single-image sessions remain supported. Older saved mockups without the receipt or original image must be downloaded and attached manually; do not resubmit the Lead Form to retry an image. Browser storage remains temporary: heed any storage warning and download both images before leaving.

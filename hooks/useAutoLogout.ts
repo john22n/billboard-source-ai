@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { clearPersistedIssueReport } from '@/lib/issue-report-storage'
+import { clearMockupSession } from '@/stores/mockupStore'
 
 const SESSION_DURATION_MS = 10 * 60 * 60 * 1000
 
@@ -61,6 +62,7 @@ export function useAutoLogout(sessionIssuedAt: number, logoutBlocked = false) {
         throw new Error(`Logout API returned ${response.status}`)
 
       clearPersistedIssueReport()
+      clearMockupSession()
       router.replace('/login?reason=auto-logout')
     } catch (error) {
       hasLoggedOutRef.current = false
