@@ -319,13 +319,15 @@ it('rejects a tampered logo or image receipt before contacting the model', async
   expect(mocks.streamText).not.toHaveBeenCalled()
 })
 
-it('renders a new billboard with uploads as references and signs the result', async () => {
+it('returns a signed bulletin and matching poster, using the bulletin as the poster reference', async () => {
   const attachment = {
     id: 'a1',
     name: 'logo.png',
     sourceType: 'image/png',
     dataUrl: png,
   }
+  const poster = 'data:image/jpeg;base64,/9j/AA=='
+  mocks.render.mockResolvedValueOnce(jpeg).mockResolvedValueOnce(poster)
   mocks.streamText.mockImplementationOnce(
     streams(async ({ tools, messages }) => {
       expect(messages.at(-1)?.content[1].text).toContain('logo.png')
@@ -351,14 +353,38 @@ it('renders a new billboard with uploads as references and signs the result', as
     [png],
   )
   expect(mocks.render.mock.calls[0][0]).toContain('["logo.png"]')
+  expect(mocks.render.mock.calls[0][0]).toContain('24:7')
+  expect(mocks.render.mock.calls[1][0]).toContain('13:6')
+  expect(mocks.render.mock.calls[1][1]).toEqual([jpeg, png])
   expect(data.image).toMatchObject({
     advertiser: 'Alpine Dental',
     dataUrl: jpeg,
+    posterDataUrl: poster,
   })
   expect(data.image?.id).toMatch(/^[0-9a-f-]{36}$/)
   // An image with no words: the client supplies the ready message.
   expect(data.reply).toBe('')
-  // The receipt must verify against the same session.
+  // Neither half of the pair may be replaced or removed under the same receipt.
+  for (const changed of [
+    { ...data.image, posterDataUrl: jpeg },
+    { ...data.image, posterDataUrl: undefined },
+    { ...data.image, dataUrl: poster },
+  ]) {
+    expect(
+      (
+        await POST(
+          request({
+            messages: [{ role: 'user', text: 'Bigger' }],
+            image: changed,
+          }),
+        )
+      ).status,
+    ).toBe(400)
+  }
+  // The complete pair must verify against the same session.
+  mocks.streamText.mockImplementationOnce(
+    replies('What would you like changed?'),
+  )
   const followUp = await POST(
     request({
       messages: [{ role: 'user', text: 'Make the text bigger' }],
