@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import sharp from 'sharp'
-import { renderBillboard } from './render'
+import { renderBackdrop, renderBillboard } from './render'
 
 const jpeg = 'data:image/jpeg;base64,/9j/2Q=='
 const png = 'data:image/png;base64,iVBORw0KGgo='
@@ -86,8 +86,27 @@ it('rejects image requests before fetching when the OpenAI key is missing', asyn
   expect(fetcher).not.toHaveBeenCalled()
 })
 
-it('uses the same sky and single pole for different artwork and both board formats', async () => {
-  const bulletin = await renderBillboard('Denver skyline and wall mounting', [])
+it('reuses the exact city backdrop and single pole for different artwork and both formats', async () => {
+  const faceArtwork = artwork
+  artwork = (
+    await sharp(
+      Buffer.from(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="1024"><rect width="1536" height="1024" fill="#88bbdd"/><rect x="100" y="850" width="500" height="174" fill="#505050"/></svg>',
+      ),
+    )
+      .png()
+      .toBuffer()
+  ).toString('base64')
+  const backdrop = await renderBackdrop('Target city: Denver. Alpine Dental.')
+  expect(backdrop.length).toBeLessThanOrEqual(200_000)
+  expect((await sent.json()).prompt).toContain('Target city: Denver')
+  artwork = faceArtwork
+  const bulletin = await renderBillboard(
+    'Denver skyline and wall mounting',
+    [],
+    'bulletin',
+    backdrop,
+  )
   artwork = (
     await sharp({
       create: { width: 1248, height: 576, channels: 3, background: '#2222cc' },
@@ -99,6 +118,7 @@ it('uses the same sky and single pole for different artwork and both board forma
     'Street scene with landscaping',
     [bulletin],
     'poster',
+    backdrop,
   )
   const images = await Promise.all(
     [bulletin, poster].map(async (url) => {
@@ -129,8 +149,10 @@ it('uses the same sky and single pole for different artwork and both board forma
   }
   expect(pixel(0, 768, 400)[0]).toBeGreaterThan(180)
   expect(pixel(1, 768, 400)[2]).toBeGreaterThan(180)
-  expect(pixel(0, 400, 950)[2]).toBeGreaterThan(pixel(0, 400, 950)[0])
-  expect(pixel(0, 400, 950)[0] - pixel(0, 730, 950)[0]).toBeGreaterThan(60)
+  // The supplied dark city building must remain, not the old generic blue sky.
+  for (const channel of pixel(0, 400, 950))
+    expect(Math.abs(channel - 80)).toBeLessThan(5)
+  expect(pixel(0, 730, 950)[0]).toBeLessThan(130)
 })
 
 it('rejects oversized or incorrectly sized provider artwork instead of stretching it', async () => {

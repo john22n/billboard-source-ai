@@ -24,6 +24,7 @@ const session = { userId: 'rep', sessionStartedAt: 123, email: 'rep@x.test' }
 const mocks = vi.hoisted(() => ({
   streamText: vi.fn(),
   render: vi.fn(),
+  backdrop: vi.fn(),
   review: vi.fn(),
   rateLimit: vi.fn(),
   session: vi.fn(),
@@ -37,7 +38,10 @@ vi.mock('@/lib/config', () => ({
   },
 }))
 vi.mock('@/lib/rate-limit', () => ({ rateLimit: mocks.rateLimit }))
-vi.mock('@/lib/mockup/render', () => ({ renderBillboard: mocks.render }))
+vi.mock('@/lib/mockup/render', () => ({
+  renderBillboard: mocks.render,
+  renderBackdrop: mocks.backdrop,
+}))
 vi.mock('@/lib/mockup/website', () => ({ reviewWebsite: mocks.review }))
 vi.mock('@/lib/mockup/system-prompt', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/mockup/system-prompt')>()),
@@ -133,6 +137,7 @@ beforeEach(() => {
   mocks.session.mockResolvedValue(session)
   mocks.rateLimit.mockResolvedValue({ allowed: true })
   mocks.render.mockResolvedValue(jpeg)
+  mocks.backdrop.mockResolvedValue(jpeg)
   mocks.settings.mockResolvedValue({
     prompt: 'Custom wizard prompt',
     isDefault: false,
@@ -289,6 +294,8 @@ it('captures the website logo out of band and signs it for later turns', async (
   expect(mocks.render).toHaveBeenCalledWith(
     expect.stringContaining('website logo; reproduce it faithfully'),
     [png],
+    'bulletin',
+    jpeg,
   )
   expect(mocks.render.mock.calls[0][0]).toContain(
     'Creative brief: Headline "Smile Bigger"',
@@ -357,16 +364,20 @@ it('returns a signed bulletin and matching poster, using the bulletin as the pos
   expect(mocks.render).toHaveBeenCalledWith(
     expect.stringContaining('do NOT invent a logo'),
     [png],
+    'bulletin',
+    jpeg,
   )
   expect(mocks.render.mock.calls[0][0]).toContain('["logo.png"]')
   expect(mocks.render.mock.calls[0][0]).toContain('24:7')
   expect(mocks.render.mock.calls[1][0]).toContain('13:6')
   expect(mocks.render.mock.calls[1][1]).toEqual([jpeg, png])
   expect(mocks.render.mock.calls[1][2]).toBe('poster')
+  expect(mocks.render.mock.calls[1][3]).toBe(jpeg)
   expect(data.image).toMatchObject({
     advertiser: 'Alpine Dental',
     dataUrl: jpeg,
     posterDataUrl: poster,
+    backdropDataUrl: jpeg,
   })
   expect(data.image?.id).toMatch(/^[0-9a-f-]{36}$/)
   // An image with no words: the client supplies the ready message.
@@ -376,6 +387,8 @@ it('returns a signed bulletin and matching poster, using the bulletin as the pos
     { ...data.image, posterDataUrl: jpeg },
     { ...data.image, posterDataUrl: undefined },
     { ...data.image, dataUrl: poster },
+    { ...data.image, backdropDataUrl: poster },
+    { ...data.image, backdropDataUrl: undefined },
   ]) {
     expect(
       (
@@ -388,9 +401,17 @@ it('returns a signed bulletin and matching poster, using the bulletin as the pos
       ).status,
     ).toBe(400)
   }
-  // The complete pair must verify against the same session.
+  // Revisions keep the original city pixels, even if another generation would differ.
+  mocks.backdrop.mockResolvedValueOnce(poster)
   mocks.streamText.mockImplementationOnce(
-    replies('What would you like changed?'),
+    streams(async ({ tools }) => {
+      await tools.generate_billboard.execute({
+        advertiser: 'Alpine Dental',
+        prompt: 'Bigger headline',
+        revision: true,
+      })
+      return 'Updated.'
+    }),
   )
   const followUp = await POST(
     request({
@@ -399,6 +420,7 @@ it('returns a signed bulletin and matching poster, using the bulletin as the pos
     }),
   )
   expect(followUp.status).not.toBe(400)
+  expect((await readTurn(followUp)).image?.backdropDataUrl).toBe(jpeg)
 })
 
 it('edits the current image for revisions and keeps its advertiser', async () => {
@@ -436,6 +458,8 @@ it('edits the current image for revisions and keeps its advertiser', async () =>
   expect(mocks.render).toHaveBeenCalledWith(
     expect.stringContaining('CURRENT selected billboard'),
     [jpeg],
+    'bulletin',
+    jpeg,
   )
   expect(data.image).toMatchObject({
     advertiser: 'Alpine',

@@ -1,8 +1,13 @@
 import { expect, it } from 'vitest'
 import { billboardImagePrompt, toolInstructions } from './instructions'
 
-it('keeps the target location as campaign context without changing the fixed presentation', () => {
-  expect(toolInstructions).toContain('Target location is campaign context only')
+it('carries the target city into one shared backdrop for both formats', () => {
+  expect(toolInstructions).toContain(
+    'Include the target city or location from intake in the creative brief',
+  )
+  expect(toolInstructions).toContain(
+    'reuses the exact same city/sky pixels for BOTH bulletin and poster',
+  )
   const prompt = billboardImagePrompt(
     'Alpine Dental in Denver. Headline "Smile Bigger".',
     {
