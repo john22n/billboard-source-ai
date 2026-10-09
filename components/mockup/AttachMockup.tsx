@@ -180,8 +180,8 @@ function AttachmentPreview({
                 ? `${file.label} for ${image.advertiser} to attach`
                 : `Selected ${image.advertiser} mockup to attach`
             }
-            width={600}
-            height={400}
+            width={file.dimensions.width}
+            height={file.dimensions.height}
             unoptimized
             className="h-auto w-full rounded"
           />

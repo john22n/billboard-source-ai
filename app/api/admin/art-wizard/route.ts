@@ -9,7 +9,9 @@ import {
   saveSystemPrompt,
 } from '@/lib/mockup/system-prompt'
 import {
+  cropInstructions,
   defaultImagePrompts,
+  flatArtworkPrompt,
   imagePromptsSchema,
   pdfSearchInstructions,
   referenceLabelInstructions,
@@ -40,6 +42,18 @@ const instructions = [
     context:
       'Label sent before each uploaded image in the wizard conversation and PDF search. PDF labels include the selected page number, page count, and search query when present.',
     text: referenceLabelInstructions('[Filename / PDF page label]'),
+  },
+  {
+    title: 'Image output contract',
+    context:
+      'Applied to every image request after the saved creative instructions. Overrides conflicting legacy staging without changing saved custom text. Pixel dimensions are enforced by the application.',
+    text: `${flatArtworkPrompt('[Bulletin prompt and creative brief]', 'bulletin')}\n\n${flatArtworkPrompt('[Poster adaptation prompt]', 'poster')}`,
+  },
+  {
+    title: 'Bulletin crop selection',
+    context:
+      'Vision instructions for the generated bulletin. The application validates an integer offset from 0 through 96 before cropping; there is no center-crop fallback.',
+    text: cropInstructions,
   },
 ]
 

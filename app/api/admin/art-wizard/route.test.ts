@@ -60,7 +60,13 @@ it('loads the current prompt with the protected frames and saves validated instr
   expect(data).toMatchObject({ prompt: 'Custom wizard.', isDefault: false })
   expect(
     data.instructions.map((item: { title: string }) => item.title),
-  ).toEqual(['Tool instructions', 'PDF search', 'Attachment handling'])
+  ).toEqual([
+    'Tool instructions',
+    'PDF search',
+    'Attachment handling',
+    'Image output contract',
+    'Bulletin crop selection',
+  ])
   expect(
     data.instructions.every((item: { text: string }) => item.text.length > 0),
   ).toBe(true)

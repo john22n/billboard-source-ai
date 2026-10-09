@@ -130,6 +130,8 @@ function SelectedMockup({
   return (
     <div className="@container space-y-3">
       <div
+        role="group"
+        aria-label="Selected artwork"
         className={
           image.posterDataUrl ? 'grid gap-4 @xl:grid-cols-2' : 'grid gap-4'
         }
@@ -143,11 +145,11 @@ function SelectedMockup({
               src={file.dataUrl}
               alt={
                 image.posterDataUrl
-                  ? `${file.label} outdoor billboard concept for ${image.advertiser}`
-                  : `Selected outdoor billboard concept for ${image.advertiser}`
+                  ? `${file.label} advertisement for ${image.advertiser}`
+                  : `Selected billboard concept for ${image.advertiser}`
               }
-              width={1536}
-              height={1024}
+              width={file.dimensions.width}
+              height={file.dimensions.height}
               unoptimized
               className="h-auto w-full rounded-lg border"
             />
