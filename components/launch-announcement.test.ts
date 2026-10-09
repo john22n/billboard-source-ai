@@ -23,11 +23,11 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-it('keeps the dashboard announcement visible until five seconds have elapsed', () => {
+it('keeps the dashboard announcement visible until one minute has elapsed', () => {
   act(() =>
     root.render(createElement(LaunchAnnouncement, { autoDismiss: true })),
   )
-  act(() => vi.advanceTimersByTime(4999))
+  act(() => vi.advanceTimersByTime(59999))
   expect(container.textContent).toContain('GeoPoePoe3')
   act(() => vi.advanceTimersByTime(1))
   expect(container.querySelector('aside')).toBeNull()
@@ -35,7 +35,7 @@ it('keeps the dashboard announcement visible until five seconds have elapsed', (
 
 it('leaves the login announcement visible until manually dismissed', () => {
   act(() => root.render(createElement(LaunchAnnouncement)))
-  act(() => vi.advanceTimersByTime(10000))
+  act(() => vi.advanceTimersByTime(60000))
   expect(container.textContent).toContain('GeoPoePoe3')
   act(() => container.querySelector('button')!.click())
   expect(container.querySelector('aside')).toBeNull()
