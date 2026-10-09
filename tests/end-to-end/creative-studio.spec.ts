@@ -238,6 +238,12 @@ for (const placement of ['Form views', 'Lead tools']) {
       (url) => /^https?:$/.test(url.protocol) && url.origin !== baseUrl,
       (route) => route.abort(),
     )
+    // Dismiss the independently tested announcement whenever it overlays
+    // Studio controls, including after a refresh.
+    await page.addLocatorHandler(
+      page.getByRole('button', { name: 'Dismiss announcement' }),
+      (dismiss) => dismiss.click(),
+    )
 
     await page.goto('/dashboard')
     await expect(page).toHaveURL(/\/dashboard$/)
