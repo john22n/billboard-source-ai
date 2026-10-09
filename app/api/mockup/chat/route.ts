@@ -125,10 +125,11 @@ async function renderMockup(
     ),
     references,
   )
-  const posterDataUrl = await renderBillboard(job.imagePrompts.poster, [
-    dataUrl,
-    ...attachments.map((file) => file.dataUrl),
-  ])
+  const posterDataUrl = await renderBillboard(
+    job.imagePrompts.poster,
+    [dataUrl, ...attachments.map((file) => file.dataUrl)],
+    'poster',
+  )
   const id = randomUUID()
   const name = previous?.advertiser || job.advertiser.trim()
   return {

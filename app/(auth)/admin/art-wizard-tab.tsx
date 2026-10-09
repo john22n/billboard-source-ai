@@ -345,9 +345,12 @@ function ImagePromptEditor({ initial }: { initial: ImagePrompts }) {
           The bulletin is generated first. The poster uses it as a visual
           reference and rearranges the same design. Defaults request a 24:7
           bulletin face (48′ × 14′) and a 13:6 poster face (22′9″ × 10′6″),
-          inside the outdoor photograph. Edit proportions, staging, and design
-          rules here. These are AI instructions, not print-ready dimension
-          guarantees. Maximum 8,000 characters each.
+          placed into the same fixed blue-sky/cloud and single-pole template,
+          without a presentation logo or footer. Edit advertisement design rules
+          here; saved staging directions cannot change the fixed surroundings.
+          The bulletin trims 32 pixels from each vertical edge before placement,
+          so keep essential copy inside the safe area. These are concepts, not
+          print-ready files. Maximum 8,000 characters each.
         </p>
       </div>
       {keys.map((key) => (
