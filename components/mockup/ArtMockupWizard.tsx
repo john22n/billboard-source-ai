@@ -17,6 +17,7 @@ import { useFormStore } from '@/stores/formStore'
 import { getErrorMessage } from '@/lib/error-handling'
 import {
   leadFormContext,
+  mockupFiles,
   MAX_MESSAGES,
   MOCKUP_READY,
   START_COMMAND,
@@ -127,31 +128,43 @@ function SelectedMockup({
   image: NonNullable<MockupState['image']>
 }) {
   return (
-    <figure className="space-y-3">
-      <Image
-        src={image.dataUrl}
-        alt={`Selected outdoor billboard concept for ${image.advertiser}`}
-        width={1536}
-        height={1024}
-        unoptimized
-        className="h-auto w-full rounded-lg border"
-      />
-      <figcaption className="text-xs text-muted-foreground">
-        Concept only · Check text and brand details before sharing.
-      </figcaption>
-      <div className="flex flex-wrap gap-2">
-        <Button asChild variant="outline">
-          <a
-            href={image.dataUrl}
-            download={`billboard-concept-${image.id}.jpg`}
-          >
-            <Download data-icon="inline-start" className="size-4" />
-            Download selected mockup
-          </a>
-        </Button>
-        <AttachMockup />
+    <div className="@container space-y-3">
+      <div
+        className={
+          image.posterDataUrl ? 'grid gap-4 @xl:grid-cols-2' : 'grid gap-4'
+        }
+      >
+        {mockupFiles(image).map((file) => (
+          <figure key={file.name} className="min-w-0 space-y-3">
+            <figcaption className="text-sm font-medium">
+              {file.label}
+            </figcaption>
+            <Image
+              src={file.dataUrl}
+              alt={
+                image.posterDataUrl
+                  ? `${file.label} outdoor billboard concept for ${image.advertiser}`
+                  : `Selected outdoor billboard concept for ${image.advertiser}`
+              }
+              width={1536}
+              height={1024}
+              unoptimized
+              className="h-auto w-full rounded-lg border"
+            />
+            <Button asChild variant="outline">
+              <a href={file.dataUrl} download={file.name}>
+                <Download data-icon="inline-start" className="size-4" />
+                Download {file.label.toLowerCase()}
+              </a>
+            </Button>
+          </figure>
+        ))}
       </div>
-    </figure>
+      <p className="text-xs text-muted-foreground">
+        Concept only · Check text and brand details before sharing.
+      </p>
+      <AttachMockup />
+    </div>
   )
 }
 
@@ -162,7 +175,7 @@ function MockupProgress() {
     <p role="status" className="animate-pulse text-sm text-muted-foreground">
       {preparingFiles
         ? 'Preparing file previews…'
-        : 'The wizard is working. Rendering a billboard can take a couple of minutes; your current image stays selected.'}
+        : 'The wizard is working. Rendering the bulletin and matching poster can take several minutes; your current design stays selected until both are ready.'}
     </p>
   )
 }

@@ -1,5 +1,10 @@
 import { nutshellRequest } from '@/lib/nutshell'
-import { sameAdvertiser, type LeadTarget, type MockupImage } from './state'
+import {
+  mockupFiles,
+  sameAdvertiser,
+  type LeadTarget,
+  type MockupImage,
+} from './state'
 
 type NutshellFile = {
   id?: number
@@ -40,7 +45,7 @@ function leadTarget(lead: NutshellLead): LeadTarget {
   }
 }
 
-/** Retry the same deterministic filename, retaining ALL existing lead files. No newLead call here. */
+/** Retry only missing files under deterministic names; never create another lead. */
 export async function attachMockup(
   leadId: number,
   image: MockupImage,
@@ -56,24 +61,41 @@ export async function attachMockup(
     throw new Error(
       'The original lead’s advertiser does not match this mockup.',
     )
-  const name = `billboard-concept-${image.id}.jpg`
-  let file = lead.file?.find((item) => item.name === name)
-  if (file?.size) return target
-  if (!file) {
+  const images = mockupFiles(image)
+  const missing = images.filter(
+    ({ name }) => !lead.file?.some((file) => file.name === name),
+  )
+  if (missing.length) {
     lead = await mockupNutshellRequest<NutshellLead>(
       'editLead',
       {
         leadId,
         rev: lead.rev,
-        lead: { file: [...(lead.file || []), { entityType: 'Files', name }] },
+        lead: {
+          file: [
+            ...(lead.file || []),
+            ...missing.map(({ name }) => ({ entityType: 'Files', name })),
+          ],
+        },
       },
       credentials,
     )
-    file = lead.file?.find((item) => item.name === name)
   }
-  if (!file?.uri)
-    throw new Error('Nutshell did not provide an upload destination.')
-  const url = new URL(file.uri)
+  for (const image of images) {
+    const file = lead.file?.find((item) => item.name === image.name)
+    if (file?.size) continue
+    await uploadImage(file?.uri, image, credentials)
+  }
+  return target
+}
+
+async function uploadImage(
+  uri: string | undefined,
+  image: { dataUrl: string; name: string },
+  credentials: string,
+) {
+  if (!uri) throw new Error('Nutshell did not provide an upload destination.')
+  const url = new URL(uri)
   // Never leak CRM credentials to a redirect or arbitrary upload host.
   if (
     url.origin !== 'https://app.nutshell.com' ||
@@ -88,7 +110,7 @@ export async function attachMockup(
     new Blob([Buffer.from(image.dataUrl.split(',')[1], 'base64')], {
       type: 'image/jpeg',
     }),
-    name,
+    image.name,
   )
   const response = await fetch(url, {
     method: 'POST',
@@ -98,5 +120,4 @@ export async function attachMockup(
     signal: AbortSignal.timeout(30_000),
   })
   if (!response.ok) throw new Error('Nutshell image upload failed.')
-  return target
 }

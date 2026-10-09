@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm'
 import { db } from '@/db'
 import { artWizardSettings } from '@/db/schema'
+import { defaultImagePrompts, type ImagePrompts } from './instructions'
 
 /** The original Billboard Source Mockup Wizard prompt. "Reset" restores it verbatim. */
 export const defaultSystemPrompt = `You are the Billboard Source Mockup Wizard.
@@ -153,15 +154,22 @@ Do not reuse old chats unless you are revising that same advertiser’s mockup.`
 export async function getSystemPrompt(): Promise<{
   prompt: string
   isDefault: boolean
+  imagePrompts: ImagePrompts
 }> {
   const [settings] = await db
-    .select({ prompt: artWizardSettings.systemPrompt })
+    .select({
+      prompt: artWizardSettings.systemPrompt,
+      imagePrompts: artWizardSettings.imagePrompts,
+    })
     .from(artWizardSettings)
     .where(eq(artWizardSettings.id, 1))
     .limit(1)
-  return settings
-    ? { prompt: settings.prompt, isDefault: false }
-    : { prompt: defaultSystemPrompt, isDefault: true }
+  const prompt = settings?.prompt ?? defaultSystemPrompt
+  return {
+    prompt,
+    isDefault: prompt === defaultSystemPrompt,
+    imagePrompts: settings?.imagePrompts ?? defaultImagePrompts,
+  }
 }
 
 export async function saveSystemPrompt(prompt: string) {
@@ -174,7 +182,17 @@ export async function saveSystemPrompt(prompt: string) {
     })
 }
 
-/** Deleting the row makes the code-owned original prompt authoritative again. */
+/** Reset only intake, preserving independently edited image instructions. */
 export async function resetSystemPrompt() {
-  await db.delete(artWizardSettings).where(eq(artWizardSettings.id, 1))
+  await saveSystemPrompt(defaultSystemPrompt)
+}
+
+export async function saveImagePrompts(imagePrompts: ImagePrompts | null) {
+  await db
+    .insert(artWizardSettings)
+    .values({ id: 1, systemPrompt: defaultSystemPrompt, imagePrompts })
+    .onConflictDoUpdate({
+      target: artWizardSettings.id,
+      set: { imagePrompts },
+    })
 }

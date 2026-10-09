@@ -124,7 +124,7 @@ function handleNutshellResponse(
   if (response.ok) {
     actions.updateSubmissionStatus('success')
     const message = result.imageAttachmentFailed
-      ? 'Lead created; image could not be attached. Download it from Creative Studio. Do not resubmit the Lead Form.'
+      ? 'Lead created; one or more images could not be attached. Retry or download them from Creative Studio. Do not resubmit the Lead Form.'
       : 'Lead created'
     actions.updateSubmissionMessage(message)
     showSuccessToast(message)
@@ -570,7 +570,11 @@ function LeadActions({
     <div className="mt-auto flex flex-shrink-0 flex-col items-center gap-1 border-t border-slate-200 bg-white pt-2 sm:gap-2">
       {image && (
         <p className="px-2 text-center text-xs text-muted-foreground">
-          Nutshell will include the selected mockup for {image.advertiser}.
+          Nutshell will include{' '}
+          {image.posterDataUrl
+            ? 'the bulletin and poster'
+            : 'the selected mockup'}{' '}
+          for {image.advertiser}.
         </p>
       )}
       {nutshellStatus !== 'idle' && (

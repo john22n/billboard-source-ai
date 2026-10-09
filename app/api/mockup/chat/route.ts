@@ -20,6 +20,7 @@ import {
 import {
   billboardImagePrompt,
   toolInstructions,
+  type ImagePrompts,
 } from '@/lib/mockup/instructions'
 import { renderBillboard } from '@/lib/mockup/render'
 import {
@@ -31,6 +32,7 @@ import {
 import {
   brandSchema,
   chatMessageSchema,
+  imageReceiptData,
   imageSchema,
   MAX_MESSAGES,
   WIZARD_ERROR,
@@ -41,7 +43,7 @@ import type { WizardReply } from '@/lib/mockup/stream'
 import { getSystemPrompt } from '@/lib/mockup/system-prompt'
 import { reviewWebsite } from '@/lib/mockup/website'
 
-export const maxDuration = 300
+export const maxDuration = 600
 const inputSchema = z.object({
   messages: z
     .array(chatMessageSchema)
@@ -102,6 +104,7 @@ async function renderMockup(
     attachments: Input['attachments']
     advertiser: string
     prompt: string
+    imagePrompts: ImagePrompts
   },
 ): Promise<MockupImage> {
   const { previous, attachments } = job
@@ -111,25 +114,45 @@ async function renderMockup(
     ...attachments.map((file) => file.dataUrl),
   ].filter((value): value is string => !!value)
   const dataUrl = await renderBillboard(
-    billboardImagePrompt(job.prompt, {
-      revision: !!previous,
-      logo: !!logo,
-      labels: attachments.map(attachmentLabel),
-    }),
+    billboardImagePrompt(
+      job.prompt,
+      {
+        revision: !!previous,
+        logo: !!logo,
+        labels: attachments.map(attachmentLabel),
+      },
+      job.imagePrompts,
+    ),
     references,
   )
+  const posterDataUrl = await renderBillboard(job.imagePrompts.poster, [
+    dataUrl,
+    ...attachments.map((file) => file.dataUrl),
+  ])
   const id = randomUUID()
   const name = previous?.advertiser || job.advertiser.trim()
   return {
     id,
     advertiser: name,
     dataUrl,
-    receipt: await signArtifact(session, 'image', dataUrl, name, id),
+    posterDataUrl,
+    receipt: await signArtifact(
+      session,
+      'image',
+      imageReceiptData({ dataUrl, posterDataUrl }),
+      name,
+      id,
+    ),
   }
 }
 
 /** Tools capture the logo and image out of band; the model only sees whether they exist. */
-function wizardTools(session: MockupSession, input: Input) {
+function wizardTools(
+  session: MockupSession,
+  input: Input,
+  imagePrompts: ImagePrompts,
+) {
+  let rendered = false
   const captured: { brand: Brand | null; image: MockupImage | null } = {
     brand: input.brand,
     image: null,
@@ -160,7 +183,7 @@ function wizardTools(session: MockupSession, input: Input) {
     }),
     generate_billboard: tool({
       description:
-        'Render the billboard mockup image and show it to the user. Use revision=true to edit the current mockup.',
+        'Render a bulletin and matching poster and show both to the user. Use revision=true to edit the current design in both formats.',
       inputSchema: z.object({
         advertiser: z.string().min(1).max(2000),
         prompt: z
@@ -173,6 +196,13 @@ function wizardTools(session: MockupSession, input: Input) {
         revision: z.boolean(),
       }),
       execute: async ({ advertiser, prompt, revision }) => {
+        if (rendered)
+          return {
+            ok: false,
+            error:
+              'Only one pair can be rendered per turn. Ask the user to send another message to retry.',
+          }
+        rendered = true
         try {
           captured.image = await renderMockup(session, {
             previous: revision ? input.image : null,
@@ -180,10 +210,11 @@ function wizardTools(session: MockupSession, input: Input) {
             attachments: input.attachments,
             advertiser,
             prompt,
+            imagePrompts,
           })
           return {
             ok: true,
-            note: 'The mockup is now displayed to the user below your reply.',
+            note: 'Both the bulletin and matching poster are now displayed to the user below your reply.',
           }
         } catch (error) {
           logFailure('image-rendering', error)
@@ -231,8 +262,8 @@ export async function POST(request: Request) {
       apiKey: serverConfig.openai.requireApiKey(),
     })
     stage = 'system-prompt'
-    const { prompt } = await getSystemPrompt()
-    const { tools, captured } = wizardTools(session, input.data)
+    const { prompt, imagePrompts } = await getSystemPrompt()
+    const { tools, captured } = wizardTools(session, input.data, imagePrompts)
     stage = 'conversation'
     const result = streamText({
       model: provider('gpt-5.4-mini'),
@@ -241,7 +272,7 @@ export async function POST(request: Request) {
       tools,
       stopWhen: stepCountIs(6),
       maxRetries: 0,
-      abortSignal: AbortSignal.timeout(280_000),
+      abortSignal: AbortSignal.timeout(570_000),
     })
     // Text streams as it is written; the captured image and brand are attached
     // to the final chunk so the client commits them together with the reply.

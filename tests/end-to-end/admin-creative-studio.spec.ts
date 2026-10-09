@@ -49,7 +49,7 @@ test('admin edits the wizard system prompt and restores the original in one clic
   await expect(
     page.getByText(original.instructions[0].text, { exact: true }),
   ).toBeVisible()
-  await expect(page.getByRole('textbox')).toHaveCount(1)
+  await expect(page.getByRole('textbox')).toHaveCount(4)
 
   const custom =
     'You are the Billboard Source Mockup Wizard. Ask only three questions, then generate the billboard.'
@@ -68,6 +68,34 @@ test('admin edits the wizard system prompt and restores the original in one clic
   expect(saved.isDefault).toBe(false)
   expect(saved.instructions).toEqual(original.instructions)
 
+  const bulletin = page.getByRole('textbox', {
+    name: 'Bulletin image prompt',
+    exact: true,
+  })
+  const poster = page.getByRole('textbox', {
+    name: 'Poster adaptation prompt',
+    exact: true,
+  })
+  await expect(bulletin).toHaveValue(/24:7/)
+  await expect(poster).toHaveValue(/13:6/)
+  const customPoster =
+    'Rearrange the same bulletin design onto a 13:6 poster face. Preserve its exact copy and logo.'
+  await poster.fill(customPoster)
+  await page
+    .getByRole('button', { name: 'Save image prompts', exact: true })
+    .click()
+  await expect(
+    page.getByText('Image prompts saved. The next generation will use them.'),
+  ).toBeVisible()
+  const formatsSaved = await (
+    await context.request.get('/api/admin/art-wizard')
+  ).json()
+  expect(formatsSaved.imagePrompts).toEqual({
+    ...original.imagePrompts,
+    poster: customPoster,
+  })
+  expect(formatsSaved.prompt).toBe(custom)
+
   const denied = await context.request.put('/api/admin/art-wizard', {
     data: { prompt: 'Unwanted replacement', instructions: [] },
   })
@@ -76,6 +104,7 @@ test('admin edits the wizard system prompt and restores the original in one clic
   await page.reload()
   await page.getByRole('tab', { name: 'Creative Studio' }).click()
   await expect(editor).toHaveValue(custom)
+  await expect(poster).toHaveValue(customPoster)
   await expect(page.getByText('Using a customized prompt.')).toBeVisible()
   await page.getByText('Tool instructions', { exact: true }).click()
   await page.screenshot({
@@ -97,9 +126,19 @@ test('admin edits the wizard system prompt and restores the original in one clic
   ).json()
   expect(restored.isDefault).toBe(true)
   expect(restored.prompt).toBe(original.prompt)
+  expect(restored.imagePrompts.poster).toBe(customPoster)
+  await page
+    .getByRole('button', { name: 'Reset image prompts', exact: true })
+    .click()
+  await expect(poster).toHaveValue(original.imagePrompts.poster)
+  const resetImages = await (
+    await context.request.get('/api/admin/art-wizard')
+  ).json()
+  expect(resetImages.imagePrompts).toEqual(original.imagePrompts)
+  expect(resetImages.prompt).toBe(original.prompt)
 
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.getByText('New image frame', { exact: true }).click()
+  await page.getByText('PDF search', { exact: true }).click()
   await expect(
     page.getByText(original.instructions[1].text, { exact: true }),
   ).toBeVisible()

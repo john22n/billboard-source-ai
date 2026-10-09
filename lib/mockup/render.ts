@@ -35,7 +35,10 @@ export async function renderBillboard(prompt: string, references: string[]) {
       })
     : await client.images.generate(options)
   const encoded = result.data?.[0]?.b64_json
-  if (!encoded || encoded.length > 2_750_000)
+  // Leave room in browser storage for the pair, an original pair awaiting
+  // attachment retry, the uploaded reference, website logo and chat history.
+  // Subsequent requests also stay below Vercel's 4.5 MB body limit.
+  if (!encoded || encoded.length > 999_977)
     throw new Error('No usable image returned')
   return `data:image/jpeg;base64,${encoded}`
 }

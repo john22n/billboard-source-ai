@@ -29,6 +29,7 @@ const image = {
   advertiser: 'Example AI',
   receipt: 'test-receipt',
   dataUrl: `data:image/jpeg;base64,${readFileSync(new URL('./fixtures/billboard.jpg', import.meta.url)).toString('base64')}`,
+  posterDataUrl: `data:image/jpeg;base64,${readFileSync(new URL('./fixtures/revised-billboard.jpg', import.meta.url)).toString('base64')}`,
 }
 const revisedImage = {
   ...image,
@@ -622,9 +623,16 @@ for (const placement of ['Form views', 'Lead tools']) {
       studio.getByText('Here is your billboard mockup.', { exact: false }),
     ).toBeVisible()
     const selected = studio.getByRole('img', {
-      name: 'Selected outdoor billboard concept for Example AI',
+      name: 'Bulletin outdoor billboard concept for Example AI',
     })
     await expect(selected).toBeVisible()
+    const poster = studio.getByRole('img', {
+      name: 'Poster outdoor billboard concept for Example AI',
+    })
+    await expect(poster).toHaveAttribute('src', image.posterDataUrl)
+    await expect(
+      studio.getByRole('link', { name: 'Download poster', exact: true }),
+    ).toHaveAttribute('href', image.posterDataUrl)
     await expect(
       studio.getByText(
         'Concept only · Check text and brand details before sharing.',
@@ -663,7 +671,7 @@ for (const placement of ['Form views', 'Lead tools']) {
     })
     references.forEach(expectCompactImage)
     const download = studio.getByRole('link', {
-      name: 'Download selected mockup',
+      name: 'Download bulletin',
     })
     await expect(download).toHaveAttribute('href', image.dataUrl)
     await expect(selected).toHaveJSProperty('naturalWidth', 32)
@@ -671,7 +679,7 @@ for (const placement of ['Form views', 'Lead tools']) {
     await download.click()
     const downloaded = await downloadEvent
     expect(downloaded.suggestedFilename()).toBe(
-      `billboard-concept-${image.id}.jpg`,
+      `billboard-bulletin-${image.id}.jpg`,
     )
     expect(await downloaded.failure()).toBeNull()
 
@@ -689,7 +697,7 @@ for (const placement of ['Form views', 'Lead tools']) {
     await expect(revision).toHaveValue('Make the headline larger')
     await expect(download).toHaveAttribute(
       'download',
-      `billboard-concept-${image.id}.jpg`,
+      `billboard-bulletin-${image.id}.jpg`,
     )
     if (placement === 'Lead tools') {
       const views = page.getByRole('tablist', { name: 'Form views' })
@@ -709,7 +717,7 @@ for (const placement of ['Form views', 'Lead tools']) {
     await studio.getByRole('button', { name: 'Send message' }).click()
     await expect(download).toHaveAttribute(
       'download',
-      'billboard-concept-22222222-2222-4222-8222-222222222222.jpg',
+      'billboard-bulletin-22222222-2222-4222-8222-222222222222.jpg',
     )
     await expect(studio.getByRole('alert')).toHaveCount(0)
     await expect(selected).toHaveAttribute('src', revisedImage.dataUrl)
@@ -730,7 +738,7 @@ for (const placement of ['Form views', 'Lead tools']) {
     if (placement === 'Lead tools') {
       await expect(
         page.getByText(
-          'Nutshell will include the selected mockup for Example AI.',
+          'Nutshell will include the bulletin and poster for Example AI.',
         ),
       ).toBeVisible()
       let submitted: Record<string, unknown> | undefined
@@ -830,9 +838,10 @@ for (const placement of ['Form views', 'Lead tools']) {
     const currentImage =
       placement === 'Lead tools' ? postSubmissionImage : revisedImage
     await expect(selected).toHaveAttribute('src', currentImage.dataUrl)
+    await expect(poster).toHaveAttribute('src', currentImage.posterDataUrl)
     await expect(download).toHaveAttribute(
       'download',
-      `billboard-concept-${currentImage.id}.jpg`,
+      `billboard-bulletin-${currentImage.id}.jpg`,
     )
     if (placement === 'Lead tools') {
       const retry = studio.getByRole('button', {
@@ -844,16 +853,18 @@ for (const placement of ['Form views', 'Lead tools']) {
       })
       await expect(dialog.getByText('Confirm: Example AI (#42)')).toBeVisible()
       await expect(dialog.getByRole('textbox')).toHaveCount(0)
-      await expect(dialog.getByRole('img')).toHaveAttribute(
-        'src',
-        revisedImage.dataUrl,
-      )
+      await expect(
+        dialog.getByRole('img', { name: 'Bulletin for Example AI to attach' }),
+      ).toHaveAttribute('src', revisedImage.dataUrl)
+      await expect(
+        dialog.getByRole('img', { name: 'Poster for Example AI to attach' }),
+      ).toHaveAttribute('src', revisedImage.posterDataUrl)
       await dialog.screenshot({
         path: testInfo.outputPath('same-lead-attachment.png'),
         animations: 'disabled',
       })
       await dialog
-        .getByRole('button', { name: 'Confirm & attach image' })
+        .getByRole('button', { name: 'Confirm & attach images', exact: true })
         .click()
       await expect(dialog).toBeHidden()
       await expect(retry).toHaveCount(0)
@@ -882,7 +893,10 @@ for (const placement of ['Form views', 'Lead tools']) {
         'Do not resubmit the Lead Form.',
       )
       await expect(
-        dialog.getByRole('button', { name: 'Confirm & attach image' }),
+        dialog.getByRole('button', {
+          name: 'Confirm & attach images',
+          exact: true,
+        }),
       ).toBeDisabled()
       await page.setViewportSize({ width: 390, height: 844 })
       await dialog.screenshot({

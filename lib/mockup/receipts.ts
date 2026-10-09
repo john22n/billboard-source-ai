@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { SignJWT, jwtVerify } from 'jose'
 import { serverConfig } from '@/lib/config'
-import type { MockupImage } from './state'
+import { imageReceiptData, type MockupImage } from './state'
 
 export type MockupSession = { userId: string; sessionStartedAt: number }
 const hash = (data: string) => createHash('sha256').update(data).digest('hex')
@@ -55,7 +55,7 @@ export async function verifyImage(session: MockupSession, image: MockupImage) {
   await verifyArtifact(
     session,
     'image',
-    image.dataUrl,
+    imageReceiptData(image),
     image.advertiser,
     image.id,
     image.receipt,

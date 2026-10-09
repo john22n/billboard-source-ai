@@ -10,6 +10,11 @@ import {
 } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  defaultImagePrompts,
+  imagePromptsSchema,
+  type ImagePrompts,
+} from '@/lib/mockup/instructions'
 
 type Instruction = { title: string; context: string; text: string }
 type Saved = { prompt: string; isDefault: boolean }
@@ -22,6 +27,7 @@ function promptLoadError(status: number, apiError?: string) {
 
 export default function ArtWizardTab() {
   const [saved, setSaved] = useState<Saved | null>(null)
+  const [imagePrompts, setImagePrompts] = useState<ImagePrompts | null>(null)
   const [instructions, setInstructions] = useState<Instruction[]>([])
   const [error, setError] = useState<string | null>(null)
   const [retry, setRetry] = useState(0)
@@ -39,6 +45,7 @@ export default function ArtWizardTab() {
           throw new Error(promptLoadError(response.status, data?.error))
         if (!controller.signal.aborted) {
           setSaved({ prompt: data.prompt, isDefault: !!data.isDefault })
+          setImagePrompts(data.imagePrompts ?? null)
           setInstructions(data.instructions ?? [])
         }
       } catch (cause) {
@@ -59,10 +66,9 @@ export default function ArtWizardTab() {
       <CardHeader>
         <h2 className="text-lg font-semibold">Creative Studio</h2>
         <CardDescription>
-          The Mockup Wizard runs on one system prompt, exactly like a ChatGPT
-          project. Edit it here for all reps, or reset to the original prompt in
-          one click. The application appends the protected tool and image frames
-          shown below.
+          One design, two formats. Manage the wizard’s intake separately from
+          the image prompts used to create a bulletin and its matching poster.
+          Changes apply to all reps; each group can be reset independently.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-8">
@@ -88,6 +94,7 @@ export default function ArtWizardTab() {
           </p>
         )}
         {saved !== null && <PromptEditor initial={saved} />}
+        {imagePrompts !== null && <ImagePromptEditor initial={imagePrompts} />}
         {saved !== null && (
           <section
             aria-labelledby="protected-instructions-heading"
@@ -99,10 +106,10 @@ export default function ArtWizardTab() {
               </h3>
               <p className="text-sm text-muted-foreground">
                 Read-only · These frames share their source with the live
-                workflow. They connect the wizard to website review and image
-                rendering and keep every mockup on a realistic billboard.
-                Changing them requires a code update and regression tests.
-                Expand a section to read its complete text.
+                workflow. They connect the wizard to website review, paired
+                image rendering, and reference handling. Changing them requires
+                a code update and regression tests. Expand a section to read its
+                complete text.
               </p>
             </div>
             <div className="divide-y rounded-lg border">
@@ -237,9 +244,9 @@ function PromptEditor({ initial }: { initial: Saved }) {
         <p id="wizard-prompt-help" className="text-sm text-muted-foreground">
           Editable · Questions, order, design rules, tone and reset behavior all
           live here. The wizard asks these questions itself, reviews the website
-          with the application’s tool, and renders the image through the
-          protected frames below. Saving affects new conversations for all reps;
-          test a mockup after saving. Maximum 20,000 characters.
+          with the application’s tool, and renders both formats using the image
+          prompts below. Saving affects subsequent turns for all reps; test a
+          mockup after saving. Maximum 20,000 characters.
         </p>
       </div>
       {error && (
@@ -265,4 +272,139 @@ function PromptEditor({ initial }: { initial: Saved }) {
       </div>
     </form>
   )
+}
+
+const imagePromptLabels: Record<keyof ImagePrompts, string> = {
+  bulletin: 'Bulletin image prompt',
+  revision: 'Bulletin revision prompt',
+  poster: 'Poster adaptation prompt',
+}
+
+async function submitImagePrompts(
+  prompts: ImagePrompts | null,
+): Promise<ImagePrompts> {
+  const response = await fetch('/api/admin/art-wizard', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ imagePrompts: prompts }),
+  })
+  const data = await response.json()
+  if (!response.ok)
+    throw new Error(data.error || 'Could not save image prompts.')
+  return data.imagePrompts
+}
+
+function ImagePromptEditor({ initial }: { initial: ImagePrompts }) {
+  const [prompts, setPrompts] = useState(initial)
+  const [saved, setSaved] = useState(initial)
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const keys = Object.keys(imagePromptLabels) as (keyof ImagePrompts)[]
+  const dirty = keys.some((key) => prompts[key].trim() !== saved[key])
+  const isDefault = keys.every((key) => saved[key] === defaultImagePrompts[key])
+  const valid = imagePromptsSchema.safeParse(prompts)
+
+  async function submit(value: ImagePrompts | null) {
+    setPending(true)
+    setError('')
+    setNotice('')
+    try {
+      const next = await submitImagePrompts(value)
+      setPrompts(next)
+      setSaved(next)
+      setNotice(
+        value
+          ? 'Image prompts saved. The next generation will use them.'
+          : 'Original image prompts restored.',
+      )
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : 'Could not save image prompts. Your edits are preserved; retry.',
+      )
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <form
+      aria-label="Image generation prompts"
+      aria-busy={pending}
+      className="space-y-4 border-t pt-6"
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (!pending && dirty && valid.success) void submit(valid.data)
+      }}
+    >
+      <div className="space-y-2">
+        <h3 className="font-semibold">Image generation prompts</h3>
+        <p id="image-prompts-help" className="text-sm text-muted-foreground">
+          The bulletin is generated first. The poster uses it as a visual
+          reference and rearranges the same design. Defaults request a 24:7
+          bulletin face (48′ × 14′) and a 13:6 poster face (22′9″ × 10′6″),
+          inside the outdoor photograph. Edit proportions, staging, and design
+          rules here. These are AI instructions, not print-ready dimension
+          guarantees. Maximum 8,000 characters each.
+        </p>
+      </div>
+      {keys.map((key) => (
+        <div key={key} className="space-y-2">
+          <Label htmlFor={`image-prompt-${key}`}>
+            {imagePromptLabels[key]}
+          </Label>
+          <Textarea
+            id={`image-prompt-${key}`}
+            aria-describedby="image-prompts-help"
+            className="min-h-40 resize-y font-mono leading-relaxed"
+            value={prompts[key]}
+            disabled={pending}
+            required
+            maxLength={8000}
+            onChange={(event) => {
+              setPrompts({ ...prompts, [key]: event.target.value })
+              setNotice('')
+            }}
+          />
+        </div>
+      ))}
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="submit" disabled={pending || !dirty || !valid.success}>
+          Save image prompts
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={pending || (isDefault && !dirty)}
+          onClick={() => void submit(null)}
+        >
+          Reset image prompts
+        </Button>
+        <p role="status" className="text-sm text-muted-foreground">
+          {imagePromptStatus({ pending, dirty, notice, isDefault })}
+        </p>
+      </div>
+    </form>
+  )
+}
+
+function imagePromptStatus(input: {
+  pending: boolean
+  dirty: boolean
+  notice: string
+  isDefault: boolean
+}) {
+  if (input.pending) return 'Saving image prompts…'
+  if (input.dirty) return 'Unsaved image prompt changes'
+  if (input.notice) return input.notice
+  return input.isDefault
+    ? 'Using original image prompts.'
+    : 'Using customized image prompts.'
 }

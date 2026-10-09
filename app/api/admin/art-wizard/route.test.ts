@@ -1,10 +1,12 @@
 import { beforeEach, expect, it, vi } from 'vitest'
+import { defaultImagePrompts } from '@/lib/mockup/instructions'
 
 const mocks = vi.hoisted(() => ({
   session: vi.fn(),
   read: vi.fn(),
   save: vi.fn(),
   reset: vi.fn(),
+  saveImages: vi.fn(),
 }))
 vi.mock('@/lib/auth', () => ({ getSession: mocks.session }))
 vi.mock('@/lib/mockup/system-prompt', () => ({
@@ -12,6 +14,7 @@ vi.mock('@/lib/mockup/system-prompt', () => ({
   getSystemPrompt: mocks.read,
   saveSystemPrompt: mocks.save,
   resetSystemPrompt: mocks.reset,
+  saveImagePrompts: mocks.saveImages,
 }))
 
 import { DELETE, GET, PUT } from './route'
@@ -40,9 +43,14 @@ it.each([
       status,
     )
     expect((await DELETE()).status).toBe(status)
+    expect(
+      (await PUT(request({ imagePrompts: defaultImagePrompts }))).status,
+    ).toBe(status)
+    expect((await PUT(request({ imagePrompts: null }))).status).toBe(status)
     expect(mocks.read).not.toHaveBeenCalled()
     expect(mocks.save).not.toHaveBeenCalled()
     expect(mocks.reset).not.toHaveBeenCalled()
+    expect(mocks.saveImages).not.toHaveBeenCalled()
   },
 )
 
@@ -52,13 +60,7 @@ it('loads the current prompt with the protected frames and saves validated instr
   expect(data).toMatchObject({ prompt: 'Custom wizard.', isDefault: false })
   expect(
     data.instructions.map((item: { title: string }) => item.title),
-  ).toEqual([
-    'Tool instructions',
-    'New image frame',
-    'Revision frame',
-    'PDF search',
-    'Attachment handling',
-  ])
+  ).toEqual(['Tool instructions', 'PDF search', 'Attachment handling'])
   expect(
     data.instructions.every((item: { text: string }) => item.text.length > 0),
   ).toBe(true)
@@ -120,4 +122,28 @@ it('does not report success when storage fails', async () => {
     'Failed to load Creative Studio instructions',
     expect.any(Error),
   )
+})
+
+it('validates the complete image prompt group and never changes intake when saving or resetting it', async () => {
+  for (const imagePrompts of [
+    { ...defaultImagePrompts, poster: '' },
+    { ...defaultImagePrompts, bulletin: 'x'.repeat(8001) },
+    { poster: 'Only one field' },
+    { ...defaultImagePrompts, model: 'other' },
+  ]) {
+    expect((await PUT(request({ imagePrompts }))).status).toBe(400)
+  }
+  expect(mocks.saveImages).not.toHaveBeenCalled()
+  const custom = {
+    ...defaultImagePrompts,
+    poster: 'Use the same design on a 13:6 face.',
+  }
+  expect(await (await PUT(request({ imagePrompts: custom }))).json()).toEqual({
+    imagePrompts: custom,
+  })
+  expect(await (await PUT(request({ imagePrompts: null }))).json()).toEqual({
+    imagePrompts: defaultImagePrompts,
+  })
+  expect(mocks.save).not.toHaveBeenCalled()
+  expect(mocks.reset).not.toHaveBeenCalled()
 })

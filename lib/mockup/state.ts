@@ -20,9 +20,50 @@ export const imageSchema = z.object({
   id: z.string().uuid(),
   advertiser: z.string().max(2000),
   dataUrl: z.string().max(2_800_000).startsWith('data:image/jpeg;base64,'),
+  // New designs carry a bulletin and companion poster under one receipt.
+  // Older browser sessions retain their original single-image behavior.
+  posterDataUrl: z
+    .string()
+    .max(1_500_000)
+    .startsWith('data:image/jpeg;base64,')
+    .optional(),
   receipt: z.string().max(6000),
 })
 export type MockupImage = z.infer<typeof imageSchema>
+
+/** The exact same files are previewed, downloaded, and delivered to Nutshell. */
+export function mockupFiles(image: MockupImage) {
+  return image.posterDataUrl
+    ? [
+        {
+          label: 'Bulletin',
+          dataUrl: image.dataUrl,
+          name: `billboard-bulletin-${image.id}.jpg`,
+        },
+        {
+          label: 'Poster',
+          dataUrl: image.posterDataUrl,
+          name: `billboard-poster-${image.id}.jpg`,
+        },
+      ]
+    : [
+        {
+          label: 'Selected mockup',
+          dataUrl: image.dataUrl,
+          name: `billboard-concept-${image.id}.jpg`,
+        },
+      ]
+}
+
+/** Bind both formats together while preserving receipts from older sessions. */
+export function imageReceiptData(
+  image: Pick<MockupImage, 'dataUrl' | 'posterDataUrl'>,
+) {
+  return image.posterDataUrl
+    ? JSON.stringify([image.dataUrl, image.posterDataUrl])
+    : image.dataUrl
+}
+
 export type LeadTarget = {
   id: number
   name: string

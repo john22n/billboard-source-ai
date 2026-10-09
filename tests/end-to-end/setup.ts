@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Pool } from 'pg'
@@ -65,6 +65,15 @@ export default async function setup() {
         id integer PRIMARY KEY DEFAULT 1,
         system_prompt text NOT NULL
       )`)
+      await pool.query(
+        readFileSync(
+          new URL(
+            '../../drizzle/0010_art_wizard_image_prompts.sql',
+            import.meta.url,
+          ),
+          'utf8',
+        ),
+      )
     } finally {
       await pool.end()
     }

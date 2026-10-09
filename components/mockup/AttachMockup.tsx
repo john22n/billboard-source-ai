@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dialog'
 import { useMockupStore } from '@/stores/mockupStore'
 import {
+  mockupFiles,
   sameAdvertiser,
   type LeadTarget,
   type MockupImage,
@@ -27,6 +28,7 @@ export function AttachMockup() {
   const [message, setMessage] = useState('')
   const image = (open ? target?.image : state.lastLead?.image) ?? state.image
   if (!image || !state.attachmentFailed) return null
+  const verifiedTarget = target?.receipt && target.image
 
   async function attach(target: LeadTarget, image: MockupImage) {
     setIsPending(true)
@@ -65,7 +67,8 @@ export function AttachMockup() {
   return (
     <>
       <p role="status" className="text-sm">
-        Lead created; image could not be attached. Download is still available.
+        Lead created; one or more images could not be attached. Downloads are
+        still available.
       </p>
       <Button
         variant="outline"
@@ -83,13 +86,13 @@ export function AttachMockup() {
           <DialogHeader>
             <DialogTitle>Send this mockup to Nutshell</DialogTitle>
             <DialogDescription>
-              Retry the original submitted image for the lead already created
+              Retry the original submitted files for the lead already created
               below, not any later revision. The target cannot be changed, and
-              this never creates a new lead.
+              this never creates a new lead. Files already uploaded are skipped.
             </DialogDescription>
           </DialogHeader>
           {target && <AttachmentPreview target={target} image={image} />}
-          {(!target?.receipt || !target.image) && (
+          {!verifiedTarget && (
             <p role="alert" className="text-sm text-destructive">
               This older mockup has no verified attachment target or original
               image. Download it and attach it to the created lead manually. Do
@@ -101,29 +104,54 @@ export function AttachMockup() {
               {message}
             </p>
           )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)}>
-              Close
-            </Button>
-            <Button
-              disabled={
-                isPending ||
-                generating ||
-                !target?.receipt ||
-                !target.image ||
-                !sameAdvertiser(target.advertiser, image.advertiser)
-              }
-              onClick={() => {
-                if (target?.receipt && target.image)
-                  void attach(target, target.image)
-              }}
-            >
-              {isPending ? 'Working…' : 'Confirm & attach image'}
-            </Button>
-          </DialogFooter>
+          <AttachmentActions
+            target={target}
+            image={image}
+            pending={isPending || generating}
+            close={() => setOpen(false)}
+            attach={attach}
+          />
         </DialogContent>
       </Dialog>
     </>
+  )
+}
+
+function AttachmentActions({
+  target,
+  image,
+  pending,
+  close,
+  attach,
+}: {
+  target: MockupState['lastLead']
+  image: MockupImage
+  pending: boolean
+  close: () => void
+  attach: (target: LeadTarget, image: MockupImage) => Promise<void>
+}) {
+  const original = target?.receipt && target.image
+  const confirmLabel = image.posterDataUrl
+    ? 'Confirm & attach images'
+    : 'Confirm & attach image'
+  return (
+    <DialogFooter>
+      <Button variant="outline" onClick={close}>
+        Close
+      </Button>
+      <Button
+        disabled={
+          pending ||
+          !original ||
+          !sameAdvertiser(target.advertiser, image.advertiser)
+        }
+        onClick={() => {
+          if (original) void attach(target, original)
+        }}
+      >
+        {pending ? 'Working…' : confirmLabel}
+      </Button>
+    </DialogFooter>
   )
 }
 
@@ -142,14 +170,23 @@ function AttachmentPreview({
       <p className="text-sm">
         Advertiser: {target.advertiser || 'Not identified'}
       </p>
-      <Image
-        src={image.dataUrl}
-        alt={`Selected ${image.advertiser} mockup to attach`}
-        width={600}
-        height={400}
-        unoptimized
-        className="h-auto w-full rounded"
-      />
+      {mockupFiles(image).map((file) => (
+        <figure key={file.name} className="space-y-2">
+          <figcaption className="text-sm font-medium">{file.label}</figcaption>
+          <Image
+            src={file.dataUrl}
+            alt={
+              image.posterDataUrl
+                ? `${file.label} for ${image.advertiser} to attach`
+                : `Selected ${image.advertiser} mockup to attach`
+            }
+            width={600}
+            height={400}
+            unoptimized
+            className="h-auto w-full rounded"
+          />
+        </figure>
+      ))}
       {!sameAdvertiser(target.advertiser, image.advertiser) && (
         <p role="alert" className="text-sm text-destructive">
           This lead’s advertiser does not match {image.advertiser}. Download the

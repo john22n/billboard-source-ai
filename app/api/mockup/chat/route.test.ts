@@ -9,7 +9,10 @@ import {
   type UIMessageStreamOptions,
 } from 'ai'
 import { defaultSystemPrompt } from '@/lib/mockup/system-prompt'
-import { toolInstructions } from '@/lib/mockup/instructions'
+import {
+  defaultImagePrompts,
+  toolInstructions,
+} from '@/lib/mockup/instructions'
 import {
   readWizardReply,
   replyText,
@@ -24,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   review: vi.fn(),
   rateLimit: vi.fn(),
   session: vi.fn(),
+  settings: vi.fn(),
 }))
 vi.mock('@/lib/auth', () => ({ getSession: mocks.session }))
 vi.mock('@/lib/config', () => ({
@@ -37,10 +41,7 @@ vi.mock('@/lib/mockup/render', () => ({ renderBillboard: mocks.render }))
 vi.mock('@/lib/mockup/website', () => ({ reviewWebsite: mocks.review }))
 vi.mock('@/lib/mockup/system-prompt', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/mockup/system-prompt')>()),
-  getSystemPrompt: async () => ({
-    prompt: 'Custom wizard prompt',
-    isDefault: false,
-  }),
+  getSystemPrompt: mocks.settings,
 }))
 vi.mock('@/db', () => ({ db: {} }))
 vi.mock('ai', async (importOriginal) => ({
@@ -132,6 +133,11 @@ beforeEach(() => {
   mocks.session.mockResolvedValue(session)
   mocks.rateLimit.mockResolvedValue({ allowed: true })
   mocks.render.mockResolvedValue(jpeg)
+  mocks.settings.mockResolvedValue({
+    prompt: 'Custom wizard prompt',
+    isDefault: false,
+    imagePrompts: defaultImagePrompts,
+  })
 })
 
 it('requires a signed-in rep, a user message last, and respects the rate limit', async () => {
@@ -437,28 +443,77 @@ it('edits the current image for revisions and keeps its advertiser', async () =>
   expect(data.image?.id).not.toBe(id)
 })
 
-it('reports rendering failures to the model instead of failing the turn', async () => {
-  mocks.render.mockRejectedValueOnce(new Error('provider down'))
-  mocks.streamText.mockImplementationOnce(
-    streams(async ({ tools }) => {
-      const result = await tools.generate_billboard.execute({
-        advertiser: 'Alpine',
-        prompt: 'x',
-        revision: false,
-      })
-      expect(result).toMatchObject({ ok: false })
-      return 'The image failed; shall I retry?'
-    }),
-  )
-  const response = await POST(
-    request({ messages: [{ role: 'user', text: 'Generate' }] }),
-  )
-  expect(await readTurn(response)).toEqual({
-    reply: 'The image failed; shall I retry?',
-    image: null,
-    brand: null,
-  })
-})
+it.each(['bulletin', 'poster'])(
+  'does not return a partial pair when %s rendering fails',
+  async (format) => {
+    if (format === 'poster') mocks.render.mockResolvedValueOnce(jpeg)
+    mocks.render.mockRejectedValueOnce(new Error('provider down'))
+    mocks.streamText.mockImplementationOnce(
+      streams(async ({ tools }) => {
+        const result = await tools.generate_billboard.execute({
+          advertiser: 'Alpine',
+          prompt: 'x',
+          revision: false,
+        })
+        expect(result).toMatchObject({ ok: false })
+        return 'The image failed; shall I retry?'
+      }),
+    )
+    const response = await POST(
+      request({ messages: [{ role: 'user', text: 'Generate' }] }),
+    )
+    expect(await readTurn(response)).toEqual({
+      reply: 'The image failed; shall I retry?',
+      image: null,
+      brand: null,
+    })
+  },
+)
+
+it.each([false, true])(
+  'uses saved image prompts for generation and revisions (revision=%s)',
+  async (revision) => {
+    const frames = {
+      bulletin: 'Custom bulletin staging.',
+      revision: 'Custom revision staging.',
+      poster: 'Custom poster rearrangement.',
+    }
+    mocks.settings.mockResolvedValue({
+      prompt: 'Custom wizard prompt',
+      isDefault: false,
+      imagePrompts: frames,
+    })
+    const id = '11111111-1111-4111-8111-111111111111'
+    const image = {
+      id,
+      advertiser: 'Alpine',
+      dataUrl: jpeg,
+      receipt: await receipt('image', jpeg, 'Alpine', id),
+    }
+    mocks.streamText.mockImplementationOnce(
+      streams(async ({ tools }) => {
+        await tools.generate_billboard.execute({
+          advertiser: 'Alpine',
+          prompt: 'Headline "Smile"',
+          revision,
+        })
+        return 'Ready.'
+      }),
+    )
+    await readTurn(
+      await POST(
+        request({
+          messages: [{ role: 'user', text: 'Generate' }],
+          image: revision ? image : null,
+        }),
+      ),
+    )
+    expect(mocks.render.mock.calls[0][0]).toContain(
+      revision ? frames.revision : frames.bulletin,
+    )
+    expect(mocks.render.mock.calls[1][0]).toBe(frames.poster)
+  },
+)
 
 it('reports a model failure inside the stream without leaking details', async () => {
   mocks.streamText.mockImplementationOnce(() => ({

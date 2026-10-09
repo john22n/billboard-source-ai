@@ -3,6 +3,7 @@ import { getSession } from '@/lib/auth'
 import { upsertNutshellLead } from '@/lib/dal'
 import { nutshellRequest } from '@/lib/nutshell'
 import {
+  imageReceiptData,
   imageSchema,
   sameAdvertiser,
   type MockupImage,
@@ -546,7 +547,7 @@ async function createLeadAndPersist(options: {
       imageAttachmentReceipt = await signArtifact(
         session,
         'attachment',
-        options.mockupImage.dataUrl,
+        imageReceiptData(options.mockupImage),
         options.mockupImage.advertiser,
         `${Number(leadId)}:${options.mockupImage.id}`,
       )
@@ -564,7 +565,7 @@ async function createLeadAndPersist(options: {
     imageAttachmentFailed,
     imageAttachmentReceipt,
     message: imageAttachmentFailed
-      ? 'Lead created; image could not be attached'
+      ? 'Lead created; one or more images could not be attached'
       : 'Lead created successfully in Nutshell',
   })
 }

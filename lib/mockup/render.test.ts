@@ -68,3 +68,19 @@ it('rejects image requests before fetching when the OpenAI key is missing', asyn
   )
   expect(fetcher).not.toHaveBeenCalled()
 })
+
+it('bounds each image so a pair and its pending attachment snapshot fit browser storage', async () => {
+  const withinBudget = 'A'.repeat(999_976)
+  fetcher.mockResolvedValueOnce(
+    Response.json({ data: [{ b64_json: withinBudget }] }),
+  )
+  expect(await renderBillboard('Alpine billboard', [])).toBe(
+    `data:image/jpeg;base64,${withinBudget}`,
+  )
+  fetcher.mockResolvedValueOnce(
+    Response.json({ data: [{ b64_json: 'A'.repeat(1_000_000) }] }),
+  )
+  await expect(renderBillboard('Alpine billboard', [])).rejects.toThrow(
+    'No usable image returned',
+  )
+})

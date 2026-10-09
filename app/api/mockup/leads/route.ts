@@ -2,11 +2,11 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getSession } from '@/lib/auth'
 import { serverConfig } from '@/lib/config'
-import { imageSchema } from '@/lib/mockup/state'
+import { imageReceiptData, imageSchema } from '@/lib/mockup/state'
 import { attachMockup } from '@/lib/mockup/nutshell'
 import { verifyArtifact, verifyImage } from '@/lib/mockup/receipts'
 
-export const maxDuration = 90
+export const maxDuration = 120
 
 export async function POST(request: Request) {
   const session = await getSession()
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
     await verifyArtifact(
       session,
       'attachment',
-      input.data.image.dataUrl,
+      imageReceiptData(input.data.image),
       input.data.image.advertiser,
       `${input.data.leadId}:${input.data.image.id}`,
       input.data.receipt,
