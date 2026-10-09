@@ -22,7 +22,7 @@ import {
   toolInstructions,
   type ImagePrompts,
 } from '@/lib/mockup/instructions'
-import { renderBillboard } from '@/lib/mockup/render'
+import { renderBackdrop, renderBillboard } from '@/lib/mockup/render'
 import {
   signArtifact,
   verifyArtifact,
@@ -109,6 +109,8 @@ async function renderMockup(
 ): Promise<MockupImage> {
   const { previous, attachments } = job
   const logo = previous ? null : job.logo
+  const backdropDataUrl =
+    previous?.backdropDataUrl ?? (await renderBackdrop(job.prompt))
   const references = [
     previous?.dataUrl ?? logo,
     ...attachments.map((file) => file.dataUrl),
@@ -124,11 +126,14 @@ async function renderMockup(
       job.imagePrompts,
     ),
     references,
+    'bulletin',
+    backdropDataUrl,
   )
   const posterDataUrl = await renderBillboard(
     job.imagePrompts.poster,
     [dataUrl, ...attachments.map((file) => file.dataUrl)],
     'poster',
+    backdropDataUrl,
   )
   const id = randomUUID()
   const name = previous?.advertiser || job.advertiser.trim()
@@ -137,10 +142,11 @@ async function renderMockup(
     advertiser: name,
     dataUrl,
     posterDataUrl,
+    backdropDataUrl,
     receipt: await signArtifact(
       session,
       'image',
-      imageReceiptData({ dataUrl, posterDataUrl }),
+      imageReceiptData({ dataUrl, posterDataUrl, backdropDataUrl }),
       name,
       id,
     ),

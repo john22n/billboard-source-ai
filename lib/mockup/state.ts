@@ -27,6 +27,12 @@ export const imageSchema = z.object({
     .max(1_500_000)
     .startsWith('data:image/jpeg;base64,')
     .optional(),
+  // Retained to reuse the same city pixels when revising either format.
+  backdropDataUrl: z
+    .string()
+    .max(200_000)
+    .startsWith('data:image/jpeg;base64,')
+    .optional(),
   receipt: z.string().max(6000),
 })
 export type MockupImage = z.infer<typeof imageSchema>
@@ -57,8 +63,14 @@ export function mockupFiles(image: MockupImage) {
 
 /** Bind both formats together while preserving receipts from older sessions. */
 export function imageReceiptData(
-  image: Pick<MockupImage, 'dataUrl' | 'posterDataUrl'>,
+  image: Pick<MockupImage, 'dataUrl' | 'posterDataUrl' | 'backdropDataUrl'>,
 ) {
+  if (image.backdropDataUrl)
+    return JSON.stringify([
+      image.dataUrl,
+      image.posterDataUrl,
+      image.backdropDataUrl,
+    ])
   return image.posterDataUrl
     ? JSON.stringify([image.dataUrl, image.posterDataUrl])
     : image.dataUrl
