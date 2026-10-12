@@ -190,6 +190,30 @@ async function handleTaskRouterEvent(formData: FormData) {
       console.log('Reason:', formData.get('TaskCanceledReason') || 'unknown')
       break
 
+    case 'task.wrapup': {
+      // Conference calls enter wrapping when they end. That still consumes
+      // voice capacity even if the worker's activity is already Available.
+      // We have no manual after-call work, so release the slot here rather
+      // than relying on the separate conference-end callback arriving.
+      const taskSid = formData.get('TaskSid') as string
+      const { accountSid, authToken } =
+        serverConfig.twilio.requireAccountCredentials()
+      const client = twilio(accountSid, authToken)
+      const task = client.taskrouter.v1
+        .workspaces(serverConfig.taskRouter.requireWorkspaceSid())
+        .tasks(taskSid)
+      const current = await task.fetch()
+      // Ignore redeliveries after another callback has completed the task.
+      if (current.assignmentStatus === 'wrapping') {
+        await task.update({
+          assignmentStatus: 'completed',
+          reason: 'Call wrap-up finished; releasing voice capacity',
+        })
+        console.log(`✅ Completed wrap-up for task: ${taskSid}`)
+      }
+      break
+    }
+
     case 'task.completed':
       console.log(`📞 Task completed for worker: ${workerSid}`)
       break
