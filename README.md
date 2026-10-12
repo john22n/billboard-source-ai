@@ -26,6 +26,15 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Proposal Generator
+
+Set `NEXT_PUBLIC_PROPOSAL_GENERATOR_URL` to Brent's iframe URL in the non-live
+environment before building (or in `.env.dev` for local development). The fourth
+dashboard tab embeds that URL as supplied, including any required query parameters.
+Without it, the tab displays a not-configured message. The URL is public browser
+configuration and must not contain secrets. The generator must permit framing by
+the GPP3 site's origin through its CSP and X-Frame-Options headers.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

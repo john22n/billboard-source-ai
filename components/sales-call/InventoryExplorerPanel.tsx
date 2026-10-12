@@ -31,7 +31,7 @@ export function InventoryExplorerPanel({
     <iframe
       src={src}
       className="h-full min-h-[300px] w-full rounded-lg border-0"
-      title="Inventory Map"
+      title="Inventory Explorer"
     />
   )
 }
