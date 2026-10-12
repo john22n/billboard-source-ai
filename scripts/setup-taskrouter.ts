@@ -9,19 +9,19 @@
  * Safe to rerun: deletes old workspace with same name, waits between API calls to prevent rate limits.
  */
 
-import twilio from 'twilio';
+import twilio from 'twilio'
 
-const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
-const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!
+const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
 
 if (!ACCOUNT_SID || !AUTH_TOKEN) {
-  console.error('❌ Missing TWILIO credentials');
-  process.exit(1);
+  console.error('❌ Missing TWILIO credentials')
+  process.exit(1)
 }
 
-const client = twilio(ACCOUNT_SID, AUTH_TOKEN);
-const MAIN_ROUTING_NUMBER = '+18338547126';
+const client = twilio(ACCOUNT_SID, AUTH_TOKEN)
+const MAIN_ROUTING_NUMBER = '+18338547126'
 
 /**
  * Direct phone numbers (one per user)
@@ -38,120 +38,135 @@ const DIRECT_NUMBERS = [
   '+19783916647',
   '+17654396669',
   '+17123773679',
-];
+]
 
 /** Simple sleep helper */
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 async function setupTaskRouter() {
-  console.log('═══════════════════════════════════════════');
-  console.log('🚀 TASKROUTER SETUP STARTING');
-  console.log('═══════════════════════════════════════════');
+  console.log('═══════════════════════════════════════════')
+  console.log('🚀 TASKROUTER SETUP STARTING')
+  console.log('═══════════════════════════════════════════')
 
-  const workspaceFriendlyName = 'Billboard Source Sales';
+  const workspaceFriendlyName = 'Billboard Source Sales'
 
   // Check for existing workspace
-  console.log('🔍 Checking for existing workspace...');
-  const existingWorkspaces = await client.taskrouter.v1.workspaces.list({ friendlyName: workspaceFriendlyName });
+  console.log('🔍 Checking for existing workspace...')
+  const existingWorkspaces = await client.taskrouter.v1.workspaces.list({
+    friendlyName: workspaceFriendlyName,
+  })
   if (existingWorkspaces.length > 0) {
-    console.log(`🗑 Deleting existing workspace: ${existingWorkspaces[0].sid}`);
-    await client.taskrouter.v1.workspaces(existingWorkspaces[0].sid).remove();
-    await sleep(2000); // wait 2s to avoid rate limits
+    console.log(`🗑 Deleting existing workspace: ${existingWorkspaces[0].sid}`)
+    await client.taskrouter.v1.workspaces(existingWorkspaces[0].sid).remove()
+    await sleep(2000) // wait 2s to avoid rate limits
   }
 
   // Create workspace
-  console.log('📦 Creating workspace...');
+  console.log('📦 Creating workspace...')
   const workspace = await client.taskrouter.v1.workspaces.create({
     friendlyName: workspaceFriendlyName,
     eventCallbackUrl: `${APP_URL}/api/taskrouter/events`,
     eventsFilter:
-      'task.created,task.canceled,task-queue.entered,reservation.created,reservation.accepted,reservation.rejected,reservation.timeout,reservation.canceled',
-  });
-  const workspaceSid = workspace.sid;
-  console.log(`✅ Created workspace: ${workspaceSid}`);
-  await sleep(1000);
+      'task.created,task.canceled,task.wrapup,task-queue.entered,reservation.created,reservation.accepted,reservation.rejected,reservation.timeout,reservation.canceled',
+  })
+  const workspaceSid = workspace.sid
+  console.log(`✅ Created workspace: ${workspaceSid}`)
+  await sleep(1000)
 
   /** ------------------------------------------------------------------ */
   /** 1️⃣ Activities                                                     */
   /** ------------------------------------------------------------------ */
-  console.log('\n📌 Creating/Checking activities...');
+  console.log('\n📌 Creating/Checking activities...')
 
   async function findOrCreateActivity(name: string, available: boolean) {
-    const existing = await client.taskrouter.v1.workspaces(workspaceSid).activities.list({ friendlyName: name });
-    if (existing.length > 0) return existing[0];
-    const activity = await client.taskrouter.v1.workspaces(workspaceSid).activities.create({ friendlyName: name, available });
-    await sleep(500);
-    return activity;
+    const existing = await client.taskrouter.v1
+      .workspaces(workspaceSid)
+      .activities.list({ friendlyName: name })
+    if (existing.length > 0) return existing[0]
+    const activity = await client.taskrouter.v1
+      .workspaces(workspaceSid)
+      .activities.create({ friendlyName: name, available })
+    await sleep(500)
+    return activity
   }
 
-  const available = await findOrCreateActivity('Available', true);
-  const unavailable = await findOrCreateActivity('Unavailable', false);
-  const offline = await findOrCreateActivity('Offline', false);
+  const available = await findOrCreateActivity('Available', true)
+  const unavailable = await findOrCreateActivity('Unavailable', false)
+  const offline = await findOrCreateActivity('Offline', false)
 
   /** ------------------------------------------------------------------ */
   /** 2️⃣ Queues                                                         */
   /** ------------------------------------------------------------------ */
-  console.log('\n📌 Creating/Checking queues...');
+  console.log('\n📌 Creating/Checking queues...')
 
   async function findOrCreateQueue(
     name: string,
     targetWorkers: string,
     reservationSid: string,
-    assignmentSid: string
+    assignmentSid: string,
   ) {
-    const existing = await client.taskrouter.v1.workspaces(workspaceSid).taskQueues.list({ friendlyName: name });
-    if (existing.length > 0) return existing[0];
-    const queue = await client.taskrouter.v1.workspaces(workspaceSid).taskQueues.create({
-      friendlyName: name,
-      targetWorkers,
-      reservationActivitySid: reservationSid,
-      assignmentActivitySid: assignmentSid,
-    });
-    await sleep(1500);
-    return queue;
+    const existing = await client.taskrouter.v1
+      .workspaces(workspaceSid)
+      .taskQueues.list({ friendlyName: name })
+    if (existing.length > 0) return existing[0]
+    const queue = await client.taskrouter.v1
+      .workspaces(workspaceSid)
+      .taskQueues.create({
+        friendlyName: name,
+        targetWorkers,
+        reservationActivitySid: reservationSid,
+        assignmentActivitySid: assignmentSid,
+      })
+    await sleep(1500)
+    return queue
   }
 
-  const mainQueue = await findOrCreateQueue('Main Random Queue', 'available == true', unavailable.sid, unavailable.sid);
-  await sleep(1000);
-  const directQueues: Record<string, string> = {};
+  const mainQueue = await findOrCreateQueue(
+    'Main Random Queue',
+    'available == true',
+    unavailable.sid,
+    unavailable.sid,
+  )
+  await sleep(1000)
+  const directQueues: Record<string, string> = {}
 
   for (const num of DIRECT_NUMBERS) {
     const queue = await findOrCreateQueue(
       `Direct ${num}`,
       `phoneNumber == "${num}" AND available == true`,
       unavailable.sid,
-      unavailable.sid
-    );
-    directQueues[num] = queue.sid;
+      unavailable.sid,
+    )
+    directQueues[num] = queue.sid
   }
 
   const voicemailQueue = await findOrCreateQueue(
     'Voicemail',
     'role == "voicemail"',
     unavailable.sid,
-    unavailable.sid
-  );
+    unavailable.sid,
+  )
 
   /** ------------------------------------------------------------------ */
   /** 2.5️⃣ Voicemail Worker                                              */
   /** ------------------------------------------------------------------ */
-  console.log('\n👤 Creating voicemail worker...');
+  console.log('\n👤 Creating voicemail worker...')
 
   const voicemailWorkerAttrs = {
     email: 'voicemail@system',
     role: 'voicemail',
     contact_uri: 'client:voicemail',
-  };
+  }
 
   // Check if voicemail worker exists
   const existingWorkers = await client.taskrouter.v1
     .workspaces(workspaceSid)
-    .workers.list({ friendlyName: 'Voicemail Worker' });
+    .workers.list({ friendlyName: 'Voicemail Worker' })
 
-  let voicemailWorker;
+  let voicemailWorker
   if (existingWorkers.length > 0) {
-    voicemailWorker = existingWorkers[0];
-    console.log(`ℹ️ Voicemail worker already exists: ${voicemailWorker.sid}`);
+    voicemailWorker = existingWorkers[0]
+    console.log(`ℹ️ Voicemail worker already exists: ${voicemailWorker.sid}`)
   } else {
     voicemailWorker = await client.taskrouter.v1
       .workspaces(workspaceSid)
@@ -159,26 +174,26 @@ async function setupTaskRouter() {
         friendlyName: 'Voicemail Worker',
         activitySid: available.sid,
         attributes: JSON.stringify(voicemailWorkerAttrs),
-      });
-    console.log(`✅ Created voicemail worker: ${voicemailWorker.sid}`);
+      })
+    console.log(`✅ Created voicemail worker: ${voicemailWorker.sid}`)
   }
-  await sleep(500);
+  await sleep(500)
 
   /** ------------------------------------------------------------------ */
   /** 3️⃣ Workflow                                                       */
   /** ------------------------------------------------------------------ */
-  console.log('\n🧠 Creating workflow...');
+  console.log('\n🧠 Creating workflow...')
 
   const workflowConfig = {
     task_routing: {
       filters: [
         // Direct numbers - try direct rep first, then fallback to any available rep
-        ...DIRECT_NUMBERS.map(num => ({
+        ...DIRECT_NUMBERS.map((num) => ({
           filter_friendly_name: `Direct ${num}`,
           expression: `callTo == "${num}"`,
           targets: [
             { queue: directQueues[num], timeout: 20 },
-            { queue: mainQueue.sid, timeout: 20 },  // Fallback to any available rep
+            { queue: mainQueue.sid, timeout: 20 }, // Fallback to any available rep
             { queue: voicemailQueue.sid, timeout: 120 },
           ],
         })),
@@ -195,33 +210,35 @@ async function setupTaskRouter() {
       ],
       default_filter: { queue: voicemailQueue.sid },
     },
-  };
+  }
 
-  const workflow = await client.taskrouter.v1.workspaces(workspaceSid).workflows.create({
-    friendlyName: 'Inbound Sales Routing',
-    configuration: JSON.stringify(workflowConfig),
-    assignmentCallbackUrl: `${APP_URL}/api/taskrouter/assignment`,
-    fallbackAssignmentCallbackUrl: `${APP_URL}/api/taskrouter/assignment`,
-    taskReservationTimeout: 120,
-  });
-  console.log(`✅ Workflow created: ${workflow.sid}`);
-  await sleep(500);
+  const workflow = await client.taskrouter.v1
+    .workspaces(workspaceSid)
+    .workflows.create({
+      friendlyName: 'Inbound Sales Routing',
+      configuration: JSON.stringify(workflowConfig),
+      assignmentCallbackUrl: `${APP_URL}/api/taskrouter/assignment`,
+      fallbackAssignmentCallbackUrl: `${APP_URL}/api/taskrouter/assignment`,
+      taskReservationTimeout: 120,
+    })
+  console.log(`✅ Workflow created: ${workflow.sid}`)
+  await sleep(500)
 
   /** ------------------------------------------------------------------ */
   /** OUTPUT                                                             */
   /** ------------------------------------------------------------------ */
-  console.log('\n═══════════════════════════════════════════');
-  console.log('✅ TASKROUTER SETUP COMPLETE');
-  console.log('═══════════════════════════════════════════');
-  console.log(`TASKROUTER_WORKSPACE_SID=${workspaceSid}`);
-  console.log(`TASKROUTER_WORKFLOW_SID=${workflow.sid}`);
-  console.log(`TASKROUTER_MAIN_QUEUE_SID=${mainQueue.sid}`);
-  console.log(`TASKROUTER_VOICEMAIL_QUEUE_SID=${voicemailQueue.sid}`);
-  console.log(`TASKROUTER_ACTIVITY_AVAILABLE_SID=${available.sid}`);
-  console.log(`TASKROUTER_ACTIVITY_UNAVAILABLE_SID=${unavailable.sid}`);
-  console.log(`TASKROUTER_ACTIVITY_OFFLINE_SID=${offline.sid}`);
-  console.log('\nDirect Queues:');
-  console.log(JSON.stringify(directQueues, null, 2));
+  console.log('\n═══════════════════════════════════════════')
+  console.log('✅ TASKROUTER SETUP COMPLETE')
+  console.log('═══════════════════════════════════════════')
+  console.log(`TASKROUTER_WORKSPACE_SID=${workspaceSid}`)
+  console.log(`TASKROUTER_WORKFLOW_SID=${workflow.sid}`)
+  console.log(`TASKROUTER_MAIN_QUEUE_SID=${mainQueue.sid}`)
+  console.log(`TASKROUTER_VOICEMAIL_QUEUE_SID=${voicemailQueue.sid}`)
+  console.log(`TASKROUTER_ACTIVITY_AVAILABLE_SID=${available.sid}`)
+  console.log(`TASKROUTER_ACTIVITY_UNAVAILABLE_SID=${unavailable.sid}`)
+  console.log(`TASKROUTER_ACTIVITY_OFFLINE_SID=${offline.sid}`)
+  console.log('\nDirect Queues:')
+  console.log(JSON.stringify(directQueues, null, 2))
 }
 
 /** ------------------------------------------------------------------ */
@@ -229,10 +246,10 @@ async function setupTaskRouter() {
 /** ------------------------------------------------------------------ */
 setupTaskRouter()
   .then(() => {
-    console.log('\n🎉 Setup completed successfully!');
-    process.exit(0);
+    console.log('\n🎉 Setup completed successfully!')
+    process.exit(0)
   })
-  .catch(err => {
-    console.error('\n❌ Setup failed:', err);
-    process.exit(1);
-  });
+  .catch((err) => {
+    console.error('\n❌ Setup failed:', err)
+    process.exit(1)
+  })
