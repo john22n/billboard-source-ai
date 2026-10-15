@@ -1,3 +1,20 @@
+overrides:
+  'brace-expansion@<1.1.13': 1.1.13
+  'esbuild@<=0.24.2': 0.25.12
+  flatted: 3.4.2
+  lodash: 4.18.1
+  'picomatch@>=4.0.0 <5': 4.0.5
+  postcss: 8.5.19
+
+supportedArchitectures:
+  os:
+    - current
+    - darwin
+    - linux
+  cpu:
+    - current
+    - arm64
+
 allowBuilds:
   '@vaadin/vaadin-usage-statistics': false
   bcrypt: true

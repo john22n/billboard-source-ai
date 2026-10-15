@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react'
 
-const INVENTORY_EXPLORER_URL = 'https://geopoepoe.com/a/inventory_explorer.html'
+const INVENTORY_EXPLORER_URL = 'https://geopoepoe.com/gpp/v3/inventory-explorer'
 
 interface InventoryExplorerPanelProps {
   city?: string

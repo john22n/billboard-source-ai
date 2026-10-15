@@ -784,17 +784,11 @@ function TabbedBody(props: TabbedBodyProps) {
           value="proposal"
           className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col"
         >
-          {process.env.NEXT_PUBLIC_PROPOSAL_GENERATOR_URL ? (
-            <iframe
-              src={process.env.NEXT_PUBLIC_PROPOSAL_GENERATOR_URL}
-              title="Proposal Generator"
-              className="h-full min-h-[300px] w-full rounded-lg border-0"
-            />
-          ) : (
-            <div className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground">
-              Proposal Generator is not configured yet.
-            </div>
-          )}
+          <iframe
+            src="https://geopoepoe.com/gpp/v3/proposals"
+            title="Proposal Generator"
+            className="h-full min-h-[300px] w-full rounded-lg border-0"
+          />
         </TabsContent>
         <TabsContent
           value="transcript"

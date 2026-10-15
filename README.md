@@ -28,12 +28,11 @@ This project uses [`next/font`](https://nextjs.org/docs/app/building-your-applic
 
 ## Proposal Generator
 
-Set `NEXT_PUBLIC_PROPOSAL_GENERATOR_URL` to Brent's iframe URL in the non-live
-environment before building (or in `.env.dev` for local development). The fourth
-dashboard tab embeds that URL as supplied, including any required query parameters.
-Without it, the tab displays a not-configured message. The URL is public browser
-configuration and must not contain secrets. The generator must permit framing by
-the GPP3 site's origin through its CSP and X-Frame-Options headers.
+The fourth dashboard tab embeds `https://geopoepoe.com/gpp/v3/proposals`.
+The Inventory Explorer tab embeds `https://geopoepoe.com/gpp/v3/inventory-explorer`,
+preserving the market city/state and embedded filter controls. No additional
+environment configuration is required. Both pages must permit framing by the GPP3
+site's origin through their CSP and X-Frame-Options headers.
 
 ## Learn More
 
