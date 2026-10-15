@@ -654,8 +654,7 @@ function TabbedBody(props: TabbedBodyProps) {
             value="proposal"
             className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs"
           >
-            <span className="hidden sm:inline">Proposal Generator</span>
-            <span className="sm:hidden">Proposal</span>
+            Proposals
           </TabsTrigger>
           <TabsTrigger
             value="transcript"
@@ -739,7 +738,8 @@ function TabbedBody(props: TabbedBodyProps) {
               </TabsContent>
               <TabsContent
                 value="inventory"
-                className="mt-0 min-h-0 overflow-hidden data-[state=active]:block"
+                forceMount
+                className="mt-0 min-h-0 overflow-hidden data-[state=inactive]:hidden data-[state=active]:block"
               >
                 <InventoryExplorerPanel
                   city={currentMarketLocation.city}
@@ -771,7 +771,8 @@ function TabbedBody(props: TabbedBodyProps) {
         </TabsContent>
         <TabsContent
           value="inventory"
-          className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col"
+          forceMount
+          className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=inactive]:hidden data-[state=active]:flex data-[state=active]:flex-col"
         >
           <div className="h-full overflow-hidden">
             <InventoryExplorerPanel
@@ -782,11 +783,12 @@ function TabbedBody(props: TabbedBodyProps) {
         </TabsContent>
         <TabsContent
           value="proposal"
-          className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col"
+          forceMount
+          className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=inactive]:hidden data-[state=active]:flex data-[state=active]:flex-col"
         >
           <iframe
             src="https://geopoepoe.com/gpp/v3/proposals"
-            title="Proposal Generator"
+            title="Proposals"
             className="h-full min-h-[300px] w-full rounded-lg border-0"
           />
         </TabsContent>
