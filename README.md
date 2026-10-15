@@ -26,6 +26,14 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Proposal Generator
+
+The fourth dashboard tab embeds `https://geopoepoe.com/gpp/v3/proposals`.
+The Inventory Explorer tab embeds `https://geopoepoe.com/gpp/v3/inventory-explorer`,
+preserving the market city/state and embedded filter controls. No additional
+environment configuration is required. Both pages must permit framing by the GPP3
+site's origin through their CSP and X-Frame-Options headers.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
