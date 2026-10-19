@@ -26,6 +26,8 @@ const mocks = vi.hoisted(() => ({
   streamText: vi.fn(),
   crop: vi.fn(),
   render: vi.fn(),
+  compose: vi.fn(),
+  revision: vi.fn(),
   review: vi.fn(),
   rateLimit: vi.fn(),
   session: vi.fn(),
@@ -40,6 +42,10 @@ vi.mock('@/lib/config', () => ({
 }))
 vi.mock('@/lib/rate-limit', () => ({ rateLimit: mocks.rateLimit }))
 vi.mock('@/lib/mockup/render', () => ({ renderBillboard: mocks.render }))
+vi.mock('@/lib/mockup/template', () => ({
+  composeMockup: mocks.compose,
+  revisionArtwork: mocks.revision,
+}))
 vi.mock('@/lib/mockup/website', () => ({ reviewWebsite: mocks.review }))
 vi.mock('@/lib/mockup/system-prompt', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/mockup/system-prompt')>()),
@@ -136,6 +142,8 @@ beforeEach(() => {
   mocks.session.mockResolvedValue(session)
   mocks.rateLimit.mockResolvedValue({ allowed: true })
   mocks.render.mockResolvedValue(jpeg)
+  mocks.compose.mockImplementation(async (image) => image)
+  mocks.revision.mockImplementation(async (image) => image)
   mocks.settings.mockResolvedValue({
     prompt: 'Custom wizard prompt',
     isDefault: false,
@@ -477,7 +485,7 @@ it.each(['bulletin', 'poster'])(
 )
 
 it.each([false, true])(
-  'returns exact decoded flat artwork with saved overrides and a cropped poster reference (revision=%s)',
+  'returns template sheets with saved overrides while using only artwork as generation references (revision=%s)',
   async (revision) => {
     const frames = {
       bulletin: 'Custom purple campaign. Photograph an outdoor structure.',
@@ -493,6 +501,11 @@ it.each([false, true])(
       typeof import('@/lib/mockup/render')
     >('@/lib/mockup/render')
     mocks.render.mockImplementation(renderBillboard)
+    const { composeMockup, revisionArtwork } = await vi.importActual<
+      typeof import('@/lib/mockup/template')
+    >('@/lib/mockup/template')
+    mocks.compose.mockImplementation(composeMockup)
+    mocks.revision.mockImplementation(revisionArtwork)
     mocks.crop.mockResolvedValue({ object: { top: 80 } })
     const canvases = await Promise.all([
       sharp(
@@ -527,11 +540,15 @@ it.each([false, true])(
       }),
     )
     const id = '11111111-1111-4111-8111-111111111111'
+    const previousSheet = await composeMockup(
+      `data:image/png;base64,${canvases[0].toString('base64')}`,
+      'bulletin',
+    )
     const image = {
       id,
       advertiser: 'Alpine',
-      dataUrl: jpeg,
-      receipt: await receipt('image', jpeg, 'Alpine', id),
+      dataUrl: previousSheet,
+      receipt: await receipt('image', previousSheet, 'Alpine', id),
     }
     mocks.streamText.mockImplementationOnce(
       streams(async ({ tools, system }) => {
@@ -562,17 +579,17 @@ it.each([false, true])(
       'base64',
     )
     expect(await sharp(bulletin).metadata()).toMatchObject({
-      width: 2304,
-      height: 672,
+      width: 1224,
+      height: 1584,
     })
     expect(await sharp(poster).metadata()).toMatchObject({
-      width: 2496,
-      height: 1152,
+      width: 1224,
+      height: 1584,
     })
     expect(data.image!.dataUrl.length).toBeLessThanOrEqual(1_000_000)
     expect(data.image!.posterDataUrl!.length).toBeLessThanOrEqual(1_000_000)
     const pixel = await sharp(bulletin)
-      .extract({ left: 128, top: 16, width: 1, height: 1 })
+      .extract({ left: 180, top: 546, width: 1, height: 1 })
       .raw()
       .toBuffer()
     expect(pixel[0]).toBeGreaterThan(250)
@@ -580,7 +597,7 @@ it.each([false, true])(
     expect(pixel[2]).toBeLessThan(5)
     expect(sent).toHaveLength(2)
     const bulletinPrompt = revision
-      ? (await sent[0].formData()).get('prompt')
+      ? (await sent[0].clone().formData()).get('prompt')
       : (await sent[0].json()).prompt
     expect(bulletinPrompt).toContain(
       revision ? frames.revision : frames.bulletin,
@@ -593,7 +610,23 @@ it.each([false, true])(
       'Mandatory application output contract',
     )
     const reference = (posterRequest.getAll('image[]') as File[])[0]
-    expect(Buffer.from(await reference.arrayBuffer())).toEqual(bulletin)
+    const referenceBytes = Buffer.from(await reference.arrayBuffer())
+    expect(await sharp(referenceBytes).metadata()).toMatchObject({
+      width: 2304,
+      height: 672,
+    })
+    expect(referenceBytes).toEqual(
+      await sharp(canvases[0])
+        .extract({ left: 0, top: 80, width: 2304, height: 672 })
+        .jpeg({ quality: 80 })
+        .toBuffer(),
+    )
+    if (revision) {
+      const previous = (await sent[0].formData()).getAll('image[]')[0] as File
+      expect(
+        await sharp(Buffer.from(await previous.arrayBuffer())).metadata(),
+      ).toMatchObject({ width: 968, height: 283 })
+    }
     // The complete pair's real receipt is accepted on the next request.
     mocks.streamText.mockImplementationOnce(replies('Ready for changes.'))
     expect(

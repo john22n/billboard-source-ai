@@ -151,7 +151,7 @@ function SelectedMockup({
               width={file.dimensions.width}
               height={file.dimensions.height}
               unoptimized
-              className="h-auto w-full rounded-lg border"
+              className="mx-auto h-auto max-h-[30vh] w-auto max-w-full rounded-lg border"
             />
             <Button asChild variant="outline">
               <a href={file.dataUrl} download={file.name}>

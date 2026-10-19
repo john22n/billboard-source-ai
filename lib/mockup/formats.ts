@@ -5,3 +5,6 @@ export const artworkFormats = {
 } as const
 
 export type ArtworkFormat = keyof typeof artworkFormats
+
+/** Letter-size presentation sheets rasterized from the supplied PDFs at 144 DPI. */
+export const mockupPage = { width: 1224, height: 1584 } as const
