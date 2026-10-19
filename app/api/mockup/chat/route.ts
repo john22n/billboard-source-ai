@@ -22,7 +22,8 @@ import {
   toolInstructions,
   type ImagePrompts,
 } from '@/lib/mockup/instructions'
-import { renderBackdrop, renderBillboard } from '@/lib/mockup/render'
+import { renderBillboard } from '@/lib/mockup/render'
+import { composeMockup, revisionArtwork } from '@/lib/mockup/template'
 import {
   signArtifact,
   verifyArtifact,
@@ -109,13 +110,11 @@ async function renderMockup(
 ): Promise<MockupImage> {
   const { previous, attachments } = job
   const logo = previous ? null : job.logo
-  const backdropDataUrl =
-    previous?.backdropDataUrl ?? (await renderBackdrop(job.prompt))
   const references = [
-    previous?.dataUrl ?? logo,
+    previous ? await revisionArtwork(previous.dataUrl) : logo,
     ...attachments.map((file) => file.dataUrl),
   ].filter((value): value is string => !!value)
-  const dataUrl = await renderBillboard(
+  const bulletinArtwork = await renderBillboard(
     billboardImagePrompt(
       job.prompt,
       {
@@ -126,15 +125,16 @@ async function renderMockup(
       job.imagePrompts,
     ),
     references,
-    'bulletin',
-    backdropDataUrl,
   )
-  const posterDataUrl = await renderBillboard(
+  const posterArtwork = await renderBillboard(
     job.imagePrompts.poster,
-    [dataUrl, ...attachments.map((file) => file.dataUrl)],
+    [bulletinArtwork, ...attachments.map((file) => file.dataUrl)],
     'poster',
-    backdropDataUrl,
   )
+  const [dataUrl, posterDataUrl] = await Promise.all([
+    composeMockup(bulletinArtwork, 'bulletin'),
+    composeMockup(posterArtwork, 'poster'),
+  ])
   const id = randomUUID()
   const name = previous?.advertiser || job.advertiser.trim()
   return {
@@ -142,11 +142,10 @@ async function renderMockup(
     advertiser: name,
     dataUrl,
     posterDataUrl,
-    backdropDataUrl,
     receipt: await signArtifact(
       session,
       'image',
-      imageReceiptData({ dataUrl, posterDataUrl, backdropDataUrl }),
+      imageReceiptData({ dataUrl, posterDataUrl }),
       name,
       id,
     ),

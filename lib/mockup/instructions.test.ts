@@ -1,13 +1,12 @@
 import { expect, it } from 'vitest'
-import { billboardImagePrompt, toolInstructions } from './instructions'
+import {
+  billboardImagePrompt,
+  defaultImagePrompts,
+  flatArtworkPrompt,
+  toolInstructions,
+} from './instructions'
 
-it('carries the target city into one shared backdrop for both formats', () => {
-  expect(toolInstructions).toContain(
-    'Include the target city or location from intake in the creative brief',
-  )
-  expect(toolInstructions).toContain(
-    'reuses the exact same city/sky pixels for BOTH bulletin and poster',
-  )
+it('keeps campaign location without requiring outdoor staging in any default prompt', () => {
   const prompt = billboardImagePrompt(
     'Alpine Dental in Denver. Headline "Smile Bigger".',
     {
@@ -16,21 +15,26 @@ it('carries the target city into one shared backdrop for both formats', () => {
       labels: [],
     },
   )
-  expect(prompt).toContain('consistent sky and single-pole presentation')
   expect(prompt).toContain('Alpine Dental in Denver')
-  expect(prompt).not.toContain('target location’s skyline')
+  for (const frame of [
+    ...Object.values(defaultImagePrompts),
+    toolInstructions,
+  ]) {
+    expect(frame).not.toContain('clean blue sky')
+    expect(frame).not.toContain('realistic structure')
+    expect(frame).not.toContain('not flat artwork')
+  }
+  expect(toolInstructions).toContain('Mandatory application output contract')
 })
 
-it('uses uploaded backgrounds inside the advertisement, not as presentation overrides', () => {
+it('preserves uploaded background overrides and does not restage unrelated revisions', () => {
   expect(
     billboardImagePrompt('Denver', {
       revision: false,
       logo: false,
       labels: ['mountains.jpg'],
     }),
-  ).toContain(
-    'Uploaded backgrounds never replace the fixed presentation sky or structure',
-  )
+  ).toContain('Use supplied imagery inside the advertisement')
   const revision = billboardImagePrompt('Make text larger', {
     revision: true,
     logo: false,
@@ -41,3 +45,25 @@ it('uses uploaded backgrounds inside the advertisement, not as presentation over
   )
   expect(revision).not.toContain('skyline')
 })
+
+it.each(['bulletin', 'poster'] as const)(
+  'keeps saved %s preferences verbatim but overrides conflicting staging at runtime',
+  (format) => {
+    const saved =
+      'Use our purple logo, exact copy "Visit Alpine", and mountains. Show a realistic outdoor structure against a clean blue sky; not flat artwork.'
+    const prompt = flatArtworkPrompt(saved, format)
+    expect(prompt).toContain(saved)
+    expect(
+      prompt.indexOf('Mandatory application output contract'),
+    ).toBeGreaterThan(prompt.indexOf(saved))
+    expect(prompt).toContain(
+      'override conflicting staging or output instructions in saved admin prompts',
+    )
+    expect(prompt).toContain(
+      'Background imagery that belongs to the advertisement',
+    )
+    expect(prompt).toContain(
+      format === 'bulletin' ? 'crop it to 2304×672' : 'directly at 2496×1152',
+    )
+  },
+)

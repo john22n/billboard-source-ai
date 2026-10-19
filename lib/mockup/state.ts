@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { CreativeAttachment } from './attachments'
+import { mockupPage } from './formats'
 
 export const MAX_MESSAGES = 80
 export const chatMessageSchema = z.object({
@@ -27,7 +28,7 @@ export const imageSchema = z.object({
     .max(1_500_000)
     .startsWith('data:image/jpeg;base64,')
     .optional(),
-  // Retained to reuse the same city pixels when revising either format.
+  // Retained so receipts from older city-backdrop sessions still verify.
   backdropDataUrl: z
     .string()
     .max(200_000)
@@ -45,11 +46,13 @@ export function mockupFiles(image: MockupImage) {
           label: 'Bulletin',
           dataUrl: image.dataUrl,
           name: `billboard-bulletin-${image.id}.jpg`,
+          dimensions: mockupPage,
         },
         {
           label: 'Poster',
           dataUrl: image.posterDataUrl,
           name: `billboard-poster-${image.id}.jpg`,
+          dimensions: mockupPage,
         },
       ]
     : [
@@ -57,6 +60,7 @@ export function mockupFiles(image: MockupImage) {
           label: 'Selected mockup',
           dataUrl: image.dataUrl,
           name: `billboard-concept-${image.id}.jpg`,
+          dimensions: { width: 1536, height: 1024 },
         },
       ]
 }

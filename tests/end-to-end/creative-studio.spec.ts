@@ -8,6 +8,7 @@ import {
   type TestInfo,
 } from 'playwright/test'
 import { baseUrl, jwtSecret, userId } from './environment'
+import { composeMockup } from '../../lib/mockup/template'
 
 const questions = [
   'What is the advertiser’s name?',
@@ -34,13 +35,26 @@ const image = {
   id: '11111111-1111-4111-8111-111111111111',
   advertiser: 'Example AI',
   receipt: 'test-receipt',
-  dataUrl: `data:image/jpeg;base64,${readFileSync(new URL('./fixtures/billboard.jpg', import.meta.url)).toString('base64')}`,
-  posterDataUrl: `data:image/jpeg;base64,${readFileSync(new URL('./fixtures/revised-billboard.jpg', import.meta.url)).toString('base64')}`,
+  dataUrl: await composeMockup(
+    `data:image/jpeg;base64,${readFileSync(new URL('./fixtures/billboard.jpg', import.meta.url)).toString('base64')}`,
+    'bulletin',
+  ),
+  posterDataUrl: await composeMockup(
+    `data:image/jpeg;base64,${readFileSync(new URL('./fixtures/poster.jpg', import.meta.url)).toString('base64')}`,
+    'poster',
+  ),
 }
 const revisedImage = {
   ...image,
   id: '22222222-2222-4222-8222-222222222222',
-  dataUrl: `data:image/jpeg;base64,${readFileSync(new URL('./fixtures/revised-billboard.jpg', import.meta.url)).toString('base64')}`,
+  dataUrl: await composeMockup(
+    `data:image/jpeg;base64,${readFileSync(new URL('./fixtures/revised-billboard.jpg', import.meta.url)).toString('base64')}`,
+    'bulletin',
+  ),
+  posterDataUrl: await composeMockup(
+    `data:image/jpeg;base64,${readFileSync(new URL('./fixtures/revised-poster.jpg', import.meta.url)).toString('base64')}`,
+    'poster',
+  ),
 }
 const postSubmissionImage = {
   ...image,
@@ -142,6 +156,42 @@ async function expectResponsiveToolLabels(page: Page, testInfo: TestInfo) {
     })
   }
   await page.setViewportSize({ width: 1440, height: 1000 })
+}
+
+async function expectArtworkSize(
+  image: Locator,
+  width: number,
+  height: number,
+) {
+  await expect(image).toHaveJSProperty('naturalWidth', width)
+  await expect(image).toHaveJSProperty('naturalHeight', height)
+  const renderedRatio = await image.evaluate((element) => {
+    const style = getComputedStyle(element)
+    // Exclude the preview border from the actual artwork's rendered box.
+    return (
+      (element.clientWidth -
+        parseFloat(style.paddingLeft) -
+        parseFloat(style.paddingRight)) /
+      (element.clientHeight -
+        parseFloat(style.paddingTop) -
+        parseFloat(style.paddingBottom))
+    )
+  })
+  expect(renderedRatio).toBeCloseTo(width / height, 1)
+}
+
+/** The narrow Lead tools pane scrolls individual images; capture the full view. */
+async function captureArtwork(
+  artwork: Locator,
+  placement: string,
+  testInfo: TestInfo,
+  name: string,
+) {
+  if (placement === 'Form views')
+    await artwork.screenshot({
+      path: testInfo.outputPath(name),
+      animations: 'disabled',
+    })
 }
 
 /** Answers each remaining wizard question from the shared script, one turn at a time. */
@@ -672,11 +722,11 @@ for (const placement of ['Form views', 'Lead tools']) {
       studio.getByText('Here is your billboard mockup.', { exact: false }),
     ).toBeVisible()
     const selected = studio.getByRole('img', {
-      name: 'Bulletin outdoor billboard concept for Example AI',
+      name: 'Bulletin advertisement for Example AI',
     })
     await expect(selected).toBeVisible()
     const poster = studio.getByRole('img', {
-      name: 'Poster outdoor billboard concept for Example AI',
+      name: 'Poster advertisement for Example AI',
     })
     await expect(poster).toHaveAttribute('src', image.posterDataUrl)
     await expect(
@@ -723,7 +773,10 @@ for (const placement of ['Form views', 'Lead tools']) {
       name: 'Download bulletin',
     })
     await expect(download).toHaveAttribute('href', image.dataUrl)
-    await expect(selected).toHaveJSProperty('naturalWidth', 32)
+    await expectArtworkSize(selected, 1224, 1584)
+    await expectArtworkSize(poster, 1224, 1584)
+    const artwork = studio.getByRole('group', { name: 'Selected artwork' })
+    await captureArtwork(artwork, placement, testInfo, 'flat-art-generated.png')
     const downloadEvent = page.waitForEvent('download')
     await download.click()
     const downloaded = await downloadEvent
@@ -770,7 +823,10 @@ for (const placement of ['Form views', 'Lead tools']) {
     )
     await expect(studio.getByRole('alert')).toHaveCount(0)
     await expect(selected).toHaveAttribute('src', revisedImage.dataUrl)
-    await expect(selected).toHaveJSProperty('naturalWidth', 24)
+    await expect(poster).toHaveAttribute('src', revisedImage.posterDataUrl)
+    await expectArtworkSize(selected, 1224, 1584)
+    await expectArtworkSize(poster, 1224, 1584)
+    await captureArtwork(artwork, placement, testInfo, 'flat-art-revised.png')
     expect(chats.at(-1)).toMatchObject({
       image,
       brand,
@@ -956,6 +1012,25 @@ for (const placement of ['Form views', 'Lead tools']) {
       await expect(dialog).toBeHidden()
       await page.setViewportSize({ width: 1440, height: 1000 })
     }
+    // Inspect each format in the mobile scroll viewport, not a clipped capture
+    // of a group taller than that viewport. PDF reference behavior is checked above.
+    await studio.getByRole('button', { name: 'Remove scene.pdf' }).click()
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expectArtworkSize(selected, 1224, 1584)
+    await expectArtworkSize(poster, 1224, 1584)
+    await captureArtwork(
+      studio.getByRole('figure').filter({ hasText: 'Bulletin' }),
+      placement,
+      testInfo,
+      'flat-art-mobile-bulletin.png',
+    )
+    await captureArtwork(
+      studio.getByRole('figure').filter({ hasText: 'Poster' }),
+      placement,
+      testInfo,
+      'flat-art-mobile-poster.png',
+    )
+    await page.setViewportSize({ width: 1440, height: 1000 })
     await studio
       .getByRole('button', { name: 'Start Mockup', exact: true })
       .click()

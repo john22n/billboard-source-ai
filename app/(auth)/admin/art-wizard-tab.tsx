@@ -342,17 +342,16 @@ function ImagePromptEditor({ initial }: { initial: ImagePrompts }) {
       <div className="space-y-2">
         <h3 className="font-semibold">Image generation prompts</h3>
         <p id="image-prompts-help" className="text-sm text-muted-foreground">
-          The bulletin is generated first. The poster uses it as a visual
-          reference and rearranges the same design. Defaults request a 24:7
-          bulletin face (48′ × 14′) and a 13:6 poster face (22′9″ × 10′6″),
-          placed over one shared blue-sky backdrop with the target city’s
-          skyline and a centered single-pole structure, without a presentation
-          logo or footer. Both formats and revisions reuse the same backdrop; no
-          city supplied means clean sky without an invented city. Edit
-          advertisement design rules here, not separate surroundings for each
-          format. The bulletin trims 32 pixels from each vertical edge before
-          placement, so keep essential copy inside the safe area. These are
-          concepts, not print-ready files. Maximum 8,000 characters each.
+          Edit creative direction here. The application requires flat artwork: a
+          2304×672 bulletin at 24:7 (48′ × 14′), cropped from 2304×768 at an
+          AI-selected vertical position, and a 2496×1152 poster at 13:6 (22′9″ ×
+          10′6″), reflowed from the finished bulletin. These output rules
+          override conflicting outdoor staging or proportions in saved prompts;
+          saved custom text is not automatically changed. Background imagery
+          within the advertisement is allowed. The artwork is inserted into the
+          supplied Billboard Source templates, preserving their branding, sky,
+          structure and footer. Downloads are JPEG presentation sheets, not
+          print-ready artwork or PDFs. Maximum 8,000 characters each.
         </p>
       </div>
       {keys.map((key) => (

@@ -78,8 +78,13 @@ test('admin edits the wizard system prompt and restores the original in one clic
   })
   await expect(bulletin).toHaveValue(/24:7/)
   await expect(poster).toHaveValue(/13:6/)
+  await expect(
+    page.getByText('saved custom text is not automatically changed.', {
+      exact: false,
+    }),
+  ).toBeVisible()
   const customPoster =
-    'Rearrange the same bulletin design onto a 13:6 poster face. Preserve its exact copy and logo.'
+    'Keep my custom purple campaign and exact copy. Show an outdoor poster structure and skyline.'
   await poster.fill(customPoster)
   await page
     .getByRole('button', { name: 'Save image prompts', exact: true })
@@ -106,6 +111,16 @@ test('admin edits the wizard system prompt and restores the original in one clic
   await expect(editor).toHaveValue(custom)
   await expect(poster).toHaveValue(customPoster)
   await expect(page.getByText('Using a customized prompt.')).toBeVisible()
+  await page.getByText('Image output contract', { exact: true }).click()
+  await expect(
+    page.getByText(original.instructions[3].text, { exact: true }),
+  ).toBeVisible()
+  await page
+    .getByRole('form', { name: 'Image generation prompts' })
+    .screenshot({
+      path: testInfo.outputPath('flat-art-admin-overrides.png'),
+      animations: 'disabled',
+    })
   await page.getByText('Tool instructions', { exact: true }).click()
   await page.screenshot({
     path: testInfo.outputPath('admin-prompt-desktop.png'),

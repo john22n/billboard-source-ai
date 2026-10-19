@@ -1,6 +1,7 @@
-import { beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
 import { SignJWT } from 'jose'
+import sharp from 'sharp'
 import {
   createUIMessageStream,
   createUIMessageStreamResponse,
@@ -23,8 +24,10 @@ const secret = 'test-secret-that-is-long-enough-for-hs256-signing'
 const session = { userId: 'rep', sessionStartedAt: 123, email: 'rep@x.test' }
 const mocks = vi.hoisted(() => ({
   streamText: vi.fn(),
+  crop: vi.fn(),
   render: vi.fn(),
-  backdrop: vi.fn(),
+  compose: vi.fn(),
+  revision: vi.fn(),
   review: vi.fn(),
   rateLimit: vi.fn(),
   session: vi.fn(),
@@ -38,9 +41,10 @@ vi.mock('@/lib/config', () => ({
   },
 }))
 vi.mock('@/lib/rate-limit', () => ({ rateLimit: mocks.rateLimit }))
-vi.mock('@/lib/mockup/render', () => ({
-  renderBillboard: mocks.render,
-  renderBackdrop: mocks.backdrop,
+vi.mock('@/lib/mockup/render', () => ({ renderBillboard: mocks.render }))
+vi.mock('@/lib/mockup/template', () => ({
+  composeMockup: mocks.compose,
+  revisionArtwork: mocks.revision,
 }))
 vi.mock('@/lib/mockup/website', () => ({ reviewWebsite: mocks.review }))
 vi.mock('@/lib/mockup/system-prompt', async (importOriginal) => ({
@@ -51,6 +55,7 @@ vi.mock('@/db', () => ({ db: {} }))
 vi.mock('ai', async (importOriginal) => ({
   ...(await importOriginal<typeof import('ai')>()),
   streamText: mocks.streamText,
+  generateObject: mocks.crop,
 }))
 import { POST } from './route'
 
@@ -137,13 +142,16 @@ beforeEach(() => {
   mocks.session.mockResolvedValue(session)
   mocks.rateLimit.mockResolvedValue({ allowed: true })
   mocks.render.mockResolvedValue(jpeg)
-  mocks.backdrop.mockResolvedValue(jpeg)
+  mocks.compose.mockImplementation(async (image) => image)
+  mocks.revision.mockImplementation(async (image) => image)
   mocks.settings.mockResolvedValue({
     prompt: 'Custom wizard prompt',
     isDefault: false,
     imagePrompts: defaultImagePrompts,
   })
 })
+
+afterEach(() => vi.unstubAllGlobals())
 
 it('requires a signed-in rep, a user message last, and respects the rate limit', async () => {
   mocks.session.mockResolvedValueOnce(null)
@@ -294,8 +302,6 @@ it('captures the website logo out of band and signs it for later turns', async (
   expect(mocks.render).toHaveBeenCalledWith(
     expect.stringContaining('website logo; reproduce it faithfully'),
     [png],
-    'bulletin',
-    jpeg,
   )
   expect(mocks.render.mock.calls[0][0]).toContain(
     'Creative brief: Headline "Smile Bigger"',
@@ -364,20 +370,16 @@ it('returns a signed bulletin and matching poster, using the bulletin as the pos
   expect(mocks.render).toHaveBeenCalledWith(
     expect.stringContaining('do NOT invent a logo'),
     [png],
-    'bulletin',
-    jpeg,
   )
   expect(mocks.render.mock.calls[0][0]).toContain('["logo.png"]')
   expect(mocks.render.mock.calls[0][0]).toContain('24:7')
   expect(mocks.render.mock.calls[1][0]).toContain('13:6')
   expect(mocks.render.mock.calls[1][1]).toEqual([jpeg, png])
   expect(mocks.render.mock.calls[1][2]).toBe('poster')
-  expect(mocks.render.mock.calls[1][3]).toBe(jpeg)
   expect(data.image).toMatchObject({
     advertiser: 'Alpine Dental',
     dataUrl: jpeg,
     posterDataUrl: poster,
-    backdropDataUrl: jpeg,
   })
   expect(data.image?.id).toMatch(/^[0-9a-f-]{36}$/)
   // An image with no words: the client supplies the ready message.
@@ -387,8 +389,6 @@ it('returns a signed bulletin and matching poster, using the bulletin as the pos
     { ...data.image, posterDataUrl: jpeg },
     { ...data.image, posterDataUrl: undefined },
     { ...data.image, dataUrl: poster },
-    { ...data.image, backdropDataUrl: poster },
-    { ...data.image, backdropDataUrl: undefined },
   ]) {
     expect(
       (
@@ -401,17 +401,9 @@ it('returns a signed bulletin and matching poster, using the bulletin as the pos
       ).status,
     ).toBe(400)
   }
-  // Revisions keep the original city pixels, even if another generation would differ.
-  mocks.backdrop.mockResolvedValueOnce(poster)
+  // The complete pair must verify against the same session.
   mocks.streamText.mockImplementationOnce(
-    streams(async ({ tools }) => {
-      await tools.generate_billboard.execute({
-        advertiser: 'Alpine Dental',
-        prompt: 'Bigger headline',
-        revision: true,
-      })
-      return 'Updated.'
-    }),
+    replies('What would you like changed?'),
   )
   const followUp = await POST(
     request({
@@ -420,7 +412,6 @@ it('returns a signed bulletin and matching poster, using the bulletin as the pos
     }),
   )
   expect(followUp.status).not.toBe(400)
-  expect((await readTurn(followUp)).image?.backdropDataUrl).toBe(jpeg)
 })
 
 it('edits the current image for revisions and keeps its advertiser', async () => {
@@ -456,10 +447,8 @@ it('edits the current image for revisions and keeps its advertiser', async () =>
     ),
   )
   expect(mocks.render).toHaveBeenCalledWith(
-    expect.stringContaining('CURRENT selected billboard'),
+    expect.stringMatching(/^Edit the supplied CURRENT selected/),
     [jpeg],
-    'bulletin',
-    jpeg,
   )
   expect(data.image).toMatchObject({
     advertiser: 'Alpine',
@@ -496,36 +485,87 @@ it.each(['bulletin', 'poster'])(
 )
 
 it.each([false, true])(
-  'uses saved image prompts for generation and revisions (revision=%s)',
+  'returns template sheets with saved overrides while using only artwork as generation references (revision=%s)',
   async (revision) => {
     const frames = {
-      bulletin: 'Custom bulletin staging.',
-      revision: 'Custom revision staging.',
-      poster: 'Custom poster rearrangement.',
+      bulletin: 'Custom purple campaign. Photograph an outdoor structure.',
+      revision: 'Keep purple. Preserve the outdoor structure.',
+      poster: 'Custom poster rearrangement. Keep the outdoor skyline.',
     }
     mocks.settings.mockResolvedValue({
-      prompt: 'Custom wizard prompt',
+      prompt: 'Custom wizard prompt: show outdoor structures and a blue sky.',
       isDefault: false,
       imagePrompts: frames,
     })
+    const { renderBillboard } = await vi.importActual<
+      typeof import('@/lib/mockup/render')
+    >('@/lib/mockup/render')
+    mocks.render.mockImplementation(renderBillboard)
+    const { composeMockup, revisionArtwork } = await vi.importActual<
+      typeof import('@/lib/mockup/template')
+    >('@/lib/mockup/template')
+    mocks.compose.mockImplementation(composeMockup)
+    mocks.revision.mockImplementation(revisionArtwork)
+    mocks.crop.mockResolvedValue({ object: { top: 80 } })
+    const canvases = await Promise.all([
+      sharp(
+        Buffer.from(
+          `<svg width="2304" height="768"><rect width="2304" height="768" fill="white"/><rect y="80" width="2304" height="32" fill="red"/><rect y="704" width="2304" height="48" fill="blue"/></svg>`,
+        ),
+      )
+        .png()
+        .toBuffer(),
+      sharp({
+        create: {
+          width: 2496,
+          height: 1152,
+          channels: 3,
+          background: '#604080',
+        },
+      })
+        .jpeg()
+        .toBuffer(),
+    ])
+    const sent: Request[] = []
+    const localFetch = globalThis.fetch
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>(async (input, init) => {
+        const request = new Request(input, init)
+        if (request.url.startsWith('data:')) return localFetch(request)
+        sent.push(request)
+        return Response.json({
+          data: [{ b64_json: canvases[sent.length - 1].toString('base64') }],
+        })
+      }),
+    )
     const id = '11111111-1111-4111-8111-111111111111'
+    const previousSheet = await composeMockup(
+      `data:image/png;base64,${canvases[0].toString('base64')}`,
+      'bulletin',
+    )
     const image = {
       id,
       advertiser: 'Alpine',
-      dataUrl: jpeg,
-      receipt: await receipt('image', jpeg, 'Alpine', id),
+      dataUrl: previousSheet,
+      receipt: await receipt('image', previousSheet, 'Alpine', id),
     }
     mocks.streamText.mockImplementationOnce(
-      streams(async ({ tools }) => {
-        await tools.generate_billboard.execute({
+      streams(async ({ tools, system }) => {
+        expect(system).toContain(
+          'Custom wizard prompt: show outdoor structures',
+        )
+        expect(system).toContain('Mandatory application output contract')
+        const result = await tools.generate_billboard.execute({
           advertiser: 'Alpine',
           prompt: 'Headline "Smile"',
           revision,
         })
+        expect(result).toMatchObject({ ok: true })
         return 'Ready.'
       }),
     )
-    await readTurn(
+    const data = await readTurn(
       await POST(
         request({
           messages: [{ role: 'user', text: 'Generate' }],
@@ -533,10 +573,72 @@ it.each([false, true])(
         }),
       ),
     )
-    expect(mocks.render.mock.calls[0][0]).toContain(
+    const bulletin = Buffer.from(data.image!.dataUrl.split(',')[1], 'base64')
+    const poster = Buffer.from(
+      data.image!.posterDataUrl!.split(',')[1],
+      'base64',
+    )
+    expect(await sharp(bulletin).metadata()).toMatchObject({
+      width: 1224,
+      height: 1584,
+    })
+    expect(await sharp(poster).metadata()).toMatchObject({
+      width: 1224,
+      height: 1584,
+    })
+    expect(data.image!.dataUrl.length).toBeLessThanOrEqual(1_000_000)
+    expect(data.image!.posterDataUrl!.length).toBeLessThanOrEqual(1_000_000)
+    const pixel = await sharp(bulletin)
+      .extract({ left: 180, top: 546, width: 1, height: 1 })
+      .raw()
+      .toBuffer()
+    expect(pixel[0]).toBeGreaterThan(250)
+    expect(pixel[1]).toBeLessThan(5)
+    expect(pixel[2]).toBeLessThan(5)
+    expect(sent).toHaveLength(2)
+    const bulletinPrompt = revision
+      ? (await sent[0].clone().formData()).get('prompt')
+      : (await sent[0].json()).prompt
+    expect(bulletinPrompt).toContain(
       revision ? frames.revision : frames.bulletin,
     )
-    expect(mocks.render.mock.calls[1][0]).toBe(frames.poster)
+    expect(bulletinPrompt).toContain('Mandatory application output contract')
+    const posterRequest = await sent[1].formData()
+    expect(posterRequest.get('size')).toBe('2496x1152')
+    expect(posterRequest.get('prompt')).toContain(frames.poster)
+    expect(posterRequest.get('prompt')).toContain(
+      'Mandatory application output contract',
+    )
+    const reference = (posterRequest.getAll('image[]') as File[])[0]
+    const referenceBytes = Buffer.from(await reference.arrayBuffer())
+    expect(await sharp(referenceBytes).metadata()).toMatchObject({
+      width: 2304,
+      height: 672,
+    })
+    expect(referenceBytes).toEqual(
+      await sharp(canvases[0])
+        .extract({ left: 0, top: 80, width: 2304, height: 672 })
+        .jpeg({ quality: 80 })
+        .toBuffer(),
+    )
+    if (revision) {
+      const previous = (await sent[0].formData()).getAll('image[]')[0] as File
+      expect(
+        await sharp(Buffer.from(await previous.arrayBuffer())).metadata(),
+      ).toMatchObject({ width: 968, height: 283 })
+    }
+    // The complete pair's real receipt is accepted on the next request.
+    mocks.streamText.mockImplementationOnce(replies('Ready for changes.'))
+    expect(
+      (
+        await POST(
+          request({
+            messages: [{ role: 'user', text: 'Continue' }],
+            image: data.image,
+          }),
+        )
+      ).status,
+    ).toBe(200)
   },
 )
 
