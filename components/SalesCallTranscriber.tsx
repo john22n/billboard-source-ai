@@ -2,7 +2,7 @@
 
 import { useRef, useState, useEffect, useMemo, useCallback } from 'react'
 import dynamic from 'next/dynamic'
-import { ChevronDown, Mic, MicOff, type LucideIcon } from 'lucide-react'
+import { Mic, MicOff, type LucideIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -15,13 +15,6 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import { useBillboardFormExtraction } from '@/hooks/useBillboardFormExtraction'
 import {
   useTwilioContext,
@@ -229,21 +222,6 @@ const GoogleMapPanel = dynamic(
     loading: () => (
       <div className="h-full flex items-center justify-center text-gray-500">
         Loading Google Maps...
-      </div>
-    ),
-  },
-)
-
-const ArcGISMapPanel = dynamic(
-  () =>
-    import('@/components/sales-call/ArcGISMapPanel').then(
-      (mod) => mod.ArcGISMapPanel,
-    ),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="h-full flex items-center justify-center text-gray-500">
-        Loading ArcGIS Map...
       </div>
     ),
   },
@@ -644,55 +622,12 @@ function LeadActions({
 const leadToolTabClass =
   'h-9 min-w-0 rounded-none border-x-0 border-t-0 border-b-2 border-transparent bg-transparent px-1 text-[10px] font-semibold tracking-wide text-slate-500 shadow-none transition-colors hover:text-slate-900 data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent sm:text-xs'
 
-function MapToolTab({
-  active,
-  provider,
-  onSelect,
-}: {
-  active: boolean
-  provider: string
-  onSelect: (provider: string) => void
-}) {
-  return (
-    <div
-      className={`flex h-9 min-w-0 items-center border-b-2 ${active ? 'border-primary' : 'border-transparent'}`}
-    >
-      <TabsTrigger value="maps" className={`${leadToolTabClass} border-b-0`}>
-        Maps
-      </TabsTrigger>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Choose map"
-            className="size-7 shrink-0 rounded-none text-slate-500"
-          >
-            <ChevronDown className="size-3" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start">
-          <DropdownMenuRadioGroup value={provider} onValueChange={onSelect}>
-            <DropdownMenuRadioItem value="google-map">
-              Google Map
-            </DropdownMenuRadioItem>
-            <DropdownMenuRadioItem value="bsi-map">
-              BSI Map
-            </DropdownMenuRadioItem>
-          </DropdownMenuRadioGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
-  )
-}
-
 function TabbedBody(props: TabbedBodyProps) {
   const activeTab = useDashboardStore((state) => state.activeTab)
   const setActiveTab = useDashboardStore((state) => state.setActiveTab)
   const [sidePanel, setSidePanel] = useState<
-    'pricing' | 'maps' | 'inventory' | 'mockup'
+    'pricing' | 'google-map' | 'inventory' | 'mockup'
   >('pricing')
-  const [mapProvider, setMapProvider] = useState('google-map')
   const [studioOpened, setStudioOpened] = useState(false)
   const {
     resetTrigger,
@@ -742,18 +677,17 @@ function TabbedBody(props: TabbedBodyProps) {
             <span className="sm:hidden">Map</span>
           </TabsTrigger>
           <TabsTrigger
-            value="arcgis"
-            className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs"
-          >
-            <span className="hidden sm:inline">BSI Map</span>
-            <span className="sm:hidden">BSI</span>
-          </TabsTrigger>
-          <TabsTrigger
             value="inventory"
             className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs"
           >
-            <span className="hidden sm:inline">Inventory Map</span>
-            <span className="sm:hidden">Inv</span>
+            <span className="hidden sm:inline">Inventory Explorer</span>
+            <span className="sm:hidden">Inventory</span>
+          </TabsTrigger>
+          <TabsTrigger
+            value="proposal"
+            className="data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold text-[10px] sm:text-xs"
+          >
+            Proposals
           </TabsTrigger>
           <TabsTrigger
             value="mockup"
@@ -816,16 +750,11 @@ function TabbedBody(props: TabbedBodyProps) {
                 <TabsTrigger value="pricing" className={leadToolTabClass}>
                   Pricing
                 </TabsTrigger>
-                <MapToolTab
-                  active={sidePanel === 'maps'}
-                  provider={mapProvider}
-                  onSelect={(value) => {
-                    setMapProvider(value)
-                    setSidePanel('maps')
-                  }}
-                />
+                <TabsTrigger value="google-map" className={leadToolTabClass}>
+                  Google Map
+                </TabsTrigger>
                 <TabsTrigger value="inventory" className={leadToolTabClass}>
-                  Inventory
+                  Inventory Explorer
                 </TabsTrigger>
                 <TabsTrigger value="mockup" className={leadToolTabClass}>
                   Creative Studio
@@ -845,28 +774,19 @@ function TabbedBody(props: TabbedBodyProps) {
                 />
               </TabsContent>
               <TabsContent
-                value="maps"
+                value="google-map"
                 className="mt-0 min-h-0 overflow-hidden data-[state=active]:block"
               >
-                <h2 className="px-2 pb-1 text-xs font-semibold text-muted-foreground">
-                  {mapProvider === 'google-map' ? 'Google Map' : 'BSI Map'}
-                </h2>
-                {mapProvider === 'google-map' ? (
-                  <GoogleMapPanel
-                    key={`google-map-${resetTrigger}`}
-                    initialLocation={currentMarketLocation.query}
-                    exclusiveView
-                  />
-                ) : (
-                  <ArcGISMapPanel
-                    key={`arcgis-map-${resetTrigger}`}
-                    initialLocation={currentMarketLocation.query}
-                  />
-                )}
+                <GoogleMapPanel
+                  key={`google-map-${resetTrigger}`}
+                  initialLocation={currentMarketLocation.query}
+                  exclusiveView
+                />
               </TabsContent>
               <TabsContent
                 value="inventory"
-                className="mt-0 min-h-0 overflow-hidden data-[state=active]:block"
+                forceMount
+                className="mt-0 min-h-0 overflow-hidden data-[state=inactive]:hidden data-[state=active]:block"
               >
                 <InventoryExplorerPanel
                   city={currentMarketLocation.city}
@@ -905,19 +825,9 @@ function TabbedBody(props: TabbedBodyProps) {
           </div>
         </TabsContent>
         <TabsContent
-          value="arcgis"
-          className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col"
-        >
-          <div className="h-full overflow-hidden">
-            <ArcGISMapPanel
-              key={`arcgis-map-${resetTrigger}`}
-              initialLocation={currentMarketLocation.query}
-            />
-          </div>
-        </TabsContent>
-        <TabsContent
           value="inventory"
-          className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col"
+          forceMount
+          className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=inactive]:hidden data-[state=active]:flex data-[state=active]:flex-col"
         >
           <div className="h-full overflow-hidden">
             <InventoryExplorerPanel
@@ -925,6 +835,17 @@ function TabbedBody(props: TabbedBodyProps) {
               state={currentMarketLocation.state}
             />
           </div>
+        </TabsContent>
+        <TabsContent
+          value="proposal"
+          forceMount
+          className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=inactive]:hidden data-[state=active]:flex data-[state=active]:flex-col"
+        >
+          <iframe
+            src="https://geopoepoe.com/gpp/v3/proposals"
+            title="Proposals"
+            className="h-full min-h-[300px] w-full rounded-lg border-0"
+          />
         </TabsContent>
         <TabsContent
           value="transcript"

@@ -250,6 +250,26 @@ for (const placement of ['Form views', 'Lead tools']) {
     await page.setViewportSize({ width: 1440, height: 1000 })
     await expect(page.getByText('GPP3', { exact: true })).toBeVisible()
     await expect(page.getByText('Billboard Lead Form')).toHaveCount(0)
+    const formViews = page.getByRole('tablist', { name: 'Form views' })
+    await expect(formViews.getByRole('tab')).toHaveText([
+      'Lead Form & PricingForm',
+      'Google MapMap',
+      'Inventory ExplorerInventory',
+      'Proposals',
+      'Creative StudioCreative Studio',
+    ])
+    await expect(page.getByRole('tab', { name: /BSI/ })).toHaveCount(0)
+    await formViews.getByRole('tab', { name: 'Proposals' }).click()
+    await expect(page.getByTitle('Proposals')).toBeVisible()
+    await expect(page.getByTitle('Proposals')).toHaveAttribute(
+      'src',
+      'https://geopoepoe.com/gpp/v3/proposals',
+    )
+    await page.screenshot({
+      path: testInfo.outputPath('combined-proposals.png'),
+      animations: 'disabled',
+    })
+    await formViews.getByRole('tab', { name: 'Lead Form & Pricing' }).click()
     await page.getByRole('button', { name: 'Toggle Sidebar' }).click()
     await expect(
       page.getByRole('link', { name: 'Billboard Source AI.', exact: true }),
@@ -344,23 +364,10 @@ for (const placement of ['Form views', 'Lead tools']) {
       await views.getByRole('tab', { name: 'Lead Form & Pricing' }).click()
       await tab.click()
       await expect(draft).toHaveValue('Edited in full Studio')
-      await tools.getByRole('button', { name: 'Choose map' }).click()
+      await tools.getByRole('tab', { name: 'Google Map', exact: true }).click()
       await expect(
-        page.getByRole('menuitemradio', { name: 'Google Map', exact: true }),
-      ).toBeChecked()
-      await page.screenshot({
-        path: testInfo.outputPath('studio-maps-menu.png'),
-        animations: 'disabled',
-      })
-      await page
-        .getByRole('menuitemradio', { name: 'BSI Map', exact: true })
-        .click()
-      await expect(
-        tools.getByRole('tab', { name: 'Maps', exact: true }),
+        tools.getByRole('tab', { name: 'Google Map', exact: true }),
       ).toHaveAttribute('aria-selected', 'true')
-      await expect(
-        page.getByRole('heading', { name: 'BSI Map', exact: true }),
-      ).toBeVisible()
       await tab.click()
       await expect(draft).toHaveValue('Edited in full Studio')
       await draft.fill('')

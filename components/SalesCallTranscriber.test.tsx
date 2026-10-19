@@ -90,7 +90,7 @@ import { useDashboardStore } from '@/stores/dashboardStore'
 import { useFormStore } from '@/stores/formStore'
 import { useMockupStore } from '@/stores/mockupStore'
 
-it('keeps the lead and Nutshell submission beside Studio with grouped map navigation', async () => {
+it('keeps the lead and Nutshell submission beside Studio with Google Map and Inventory Explorer', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   const fetcher = vi
     .fn()
@@ -117,8 +117,8 @@ it('keeps the lead and Nutshell submission beside Studio with grouped map naviga
     )
     expect(tabs.map((tab) => tab.textContent)).toEqual([
       'Pricing',
-      'Maps',
-      'Inventory',
+      'Google Map',
+      'Inventory Explorer',
       'Creative Studio',
     ])
     const studio = tabs.find((tab) => tab.textContent === 'Creative Studio')!
