@@ -620,7 +620,7 @@ function LeadActions({
 }
 
 const leadToolTabClass =
-  'h-9 min-w-0 rounded-none border-x-0 border-t-0 border-b-2 border-transparent bg-transparent px-1 text-[10px] font-semibold tracking-wide text-slate-500 shadow-none transition-colors hover:text-slate-900 data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent sm:text-xs'
+  'h-10 min-w-0 whitespace-normal rounded-none border-x-0 border-t-0 border-b-2 border-transparent bg-transparent px-1 text-[10px] leading-tight font-semibold tracking-wide text-slate-500 shadow-none transition-colors hover:text-slate-900 data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent sm:text-xs'
 
 function TabbedBody(props: TabbedBodyProps) {
   const activeTab = useDashboardStore((state) => state.activeTab)
@@ -745,7 +745,7 @@ function TabbedBody(props: TabbedBodyProps) {
             >
               <TabsList
                 aria-label="Lead tools"
-                className="mx-auto mb-1 grid h-9 w-full grid-cols-4 shrink-0 rounded-none border-b border-slate-200 bg-transparent p-0"
+                className="mx-auto mb-1 grid h-10 w-full grid-cols-4 shrink-0 rounded-none border-b border-slate-200 bg-transparent p-0"
               >
                 <TabsTrigger value="pricing" className={leadToolTabClass}>
                   Pricing

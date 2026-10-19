@@ -1,6 +1,12 @@
 import { readFileSync } from 'node:fs'
 import { SignJWT } from 'jose'
-import { expect, test, type Locator } from 'playwright/test'
+import {
+  expect,
+  test,
+  type Locator,
+  type Page,
+  type TestInfo,
+} from 'playwright/test'
 import { baseUrl, jwtSecret, userId } from './environment'
 
 const questions = [
@@ -107,6 +113,35 @@ function expectPageTwoColors(colors: number[][]) {
 function expectCompactImage(file: { dataUrl: string }) {
   expect(file.dataUrl).toMatch(/^data:image\/(png|jpeg);base64,/)
   expect(file.dataUrl.length).toBeLessThanOrEqual(400_000)
+}
+
+async function expectResponsiveToolLabels(page: Page, testInfo: TestInfo) {
+  const tools = page.getByRole('tablist', { name: 'Lead tools' })
+  for (const width of [1440, 1280, 390, 320]) {
+    await page.setViewportSize({ width, height: 1000 })
+    await expect(tools).toBeVisible()
+    await expect(async () => {
+      for (const button of await tools.getByRole('tab').all()) {
+        const fits = await button.evaluate((element) => {
+          const bounds = element.getBoundingClientRect()
+          const text = document.createRange()
+          text.selectNodeContents(element)
+          return Array.from(text.getClientRects()).every(
+            (rect) =>
+              rect.left >= bounds.left &&
+              rect.right <= bounds.right &&
+              rect.top >= bounds.top &&
+              rect.bottom <= bounds.bottom,
+          )
+        })
+        expect(fits, `${width}px: ${await button.textContent()}`).toBe(true)
+      }
+    }).toPass({ timeout: 5000 })
+    await tools.screenshot({
+      path: testInfo.outputPath(`lead-tools-${width}.png`),
+    })
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 })
 }
 
 /** Answers each remaining wizard question from the shared script, one turn at a time. */
@@ -282,6 +317,7 @@ for (const placement of ['Form views', 'Lead tools']) {
       .getByRole('button', { name: 'Close sidebar', exact: true })
       .click()
     if (placement === 'Lead tools') {
+      await expectResponsiveToolLabels(page, testInfo)
       await page
         .getByPlaceholder('Company Name', { exact: true })
         .fill('Example AI')
