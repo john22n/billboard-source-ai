@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { CreativeAttachment } from './attachments'
-import { artworkFormats } from './formats'
+import { mockupPage } from './formats'
 
 export const MAX_MESSAGES = 80
 export const chatMessageSchema = z.object({
@@ -40,13 +40,13 @@ export function mockupFiles(image: MockupImage) {
           label: 'Bulletin',
           dataUrl: image.dataUrl,
           name: `billboard-bulletin-${image.id}.jpg`,
-          dimensions: artworkFormats.bulletin,
+          dimensions: mockupPage,
         },
         {
           label: 'Poster',
           dataUrl: image.posterDataUrl,
           name: `billboard-poster-${image.id}.jpg`,
-          dimensions: artworkFormats.poster,
+          dimensions: mockupPage,
         },
       ]
     : [

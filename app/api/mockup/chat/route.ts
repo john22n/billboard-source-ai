@@ -23,6 +23,7 @@ import {
   type ImagePrompts,
 } from '@/lib/mockup/instructions'
 import { renderBillboard } from '@/lib/mockup/render'
+import { composeMockup, revisionArtwork } from '@/lib/mockup/template'
 import {
   signArtifact,
   verifyArtifact,
@@ -110,10 +111,10 @@ async function renderMockup(
   const { previous, attachments } = job
   const logo = previous ? null : job.logo
   const references = [
-    previous?.dataUrl ?? logo,
+    previous ? await revisionArtwork(previous.dataUrl) : logo,
     ...attachments.map((file) => file.dataUrl),
   ].filter((value): value is string => !!value)
-  const dataUrl = await renderBillboard(
+  const bulletinArtwork = await renderBillboard(
     billboardImagePrompt(
       job.prompt,
       {
@@ -125,11 +126,15 @@ async function renderMockup(
     ),
     references,
   )
-  const posterDataUrl = await renderBillboard(
+  const posterArtwork = await renderBillboard(
     job.imagePrompts.poster,
-    [dataUrl, ...attachments.map((file) => file.dataUrl)],
+    [bulletinArtwork, ...attachments.map((file) => file.dataUrl)],
     'poster',
   )
+  const [dataUrl, posterDataUrl] = await Promise.all([
+    composeMockup(bulletinArtwork, 'bulletin'),
+    composeMockup(posterArtwork, 'poster'),
+  ])
   const id = randomUUID()
   const name = previous?.advertiser || job.advertiser.trim()
   return {

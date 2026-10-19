@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { SignJWT } from 'jose'
 import { expect, test, type Locator, type TestInfo } from 'playwright/test'
 import { baseUrl, jwtSecret, userId } from './environment'
+import { composeMockup } from '../../lib/mockup/template'
 
 const questions = [
   'What is the advertiser’s name?',
@@ -28,14 +29,26 @@ const image = {
   id: '11111111-1111-4111-8111-111111111111',
   advertiser: 'Example AI',
   receipt: 'test-receipt',
-  dataUrl: `data:image/jpeg;base64,${readFileSync(new URL('./fixtures/billboard.jpg', import.meta.url)).toString('base64')}`,
-  posterDataUrl: `data:image/jpeg;base64,${readFileSync(new URL('./fixtures/poster.jpg', import.meta.url)).toString('base64')}`,
+  dataUrl: await composeMockup(
+    `data:image/jpeg;base64,${readFileSync(new URL('./fixtures/billboard.jpg', import.meta.url)).toString('base64')}`,
+    'bulletin',
+  ),
+  posterDataUrl: await composeMockup(
+    `data:image/jpeg;base64,${readFileSync(new URL('./fixtures/poster.jpg', import.meta.url)).toString('base64')}`,
+    'poster',
+  ),
 }
 const revisedImage = {
   ...image,
   id: '22222222-2222-4222-8222-222222222222',
-  dataUrl: `data:image/jpeg;base64,${readFileSync(new URL('./fixtures/revised-billboard.jpg', import.meta.url)).toString('base64')}`,
-  posterDataUrl: `data:image/jpeg;base64,${readFileSync(new URL('./fixtures/revised-poster.jpg', import.meta.url)).toString('base64')}`,
+  dataUrl: await composeMockup(
+    `data:image/jpeg;base64,${readFileSync(new URL('./fixtures/revised-billboard.jpg', import.meta.url)).toString('base64')}`,
+    'bulletin',
+  ),
+  posterDataUrl: await composeMockup(
+    `data:image/jpeg;base64,${readFileSync(new URL('./fixtures/revised-poster.jpg', import.meta.url)).toString('base64')}`,
+    'poster',
+  ),
 }
 const postSubmissionImage = {
   ...image,
@@ -717,8 +730,8 @@ for (const placement of ['Form views', 'Lead tools']) {
       name: 'Download bulletin',
     })
     await expect(download).toHaveAttribute('href', image.dataUrl)
-    await expectArtworkSize(selected, 2304, 672)
-    await expectArtworkSize(poster, 2496, 1152)
+    await expectArtworkSize(selected, 1224, 1584)
+    await expectArtworkSize(poster, 1224, 1584)
     const artwork = studio.getByRole('group', { name: 'Selected artwork' })
     await captureArtwork(artwork, placement, testInfo, 'flat-art-generated.png')
     const downloadEvent = page.waitForEvent('download')
@@ -768,8 +781,8 @@ for (const placement of ['Form views', 'Lead tools']) {
     await expect(studio.getByRole('alert')).toHaveCount(0)
     await expect(selected).toHaveAttribute('src', revisedImage.dataUrl)
     await expect(poster).toHaveAttribute('src', revisedImage.posterDataUrl)
-    await expectArtworkSize(selected, 2304, 672)
-    await expectArtworkSize(poster, 2496, 1152)
+    await expectArtworkSize(selected, 1224, 1584)
+    await expectArtworkSize(poster, 1224, 1584)
     await captureArtwork(artwork, placement, testInfo, 'flat-art-revised.png')
     expect(chats.at(-1)).toMatchObject({
       image,
@@ -960,8 +973,8 @@ for (const placement of ['Form views', 'Lead tools']) {
     // of a group taller than that viewport. PDF reference behavior is checked above.
     await studio.getByRole('button', { name: 'Remove scene.pdf' }).click()
     await page.setViewportSize({ width: 390, height: 844 })
-    await expectArtworkSize(selected, 2304, 672)
-    await expectArtworkSize(poster, 2496, 1152)
+    await expectArtworkSize(selected, 1224, 1584)
+    await expectArtworkSize(poster, 1224, 1584)
     await captureArtwork(
       studio.getByRole('figure').filter({ hasText: 'Bulletin' }),
       placement,

@@ -348,8 +348,10 @@ function ImagePromptEditor({ initial }: { initial: ImagePrompts }) {
           10′6″), reflowed from the finished bulletin. These output rules
           override conflicting outdoor staging or proportions in saved prompts;
           saved custom text is not automatically changed. Background imagery
-          within the advertisement is allowed. Exact ratios do not make the
-          images print-ready. Maximum 8,000 characters each.
+          within the advertisement is allowed. The artwork is inserted into the
+          supplied Billboard Source templates, preserving their branding, sky,
+          structure and footer. Downloads are JPEG presentation sheets, not
+          print-ready artwork or PDFs. Maximum 8,000 characters each.
         </p>
       </div>
       {keys.map((key) => (
