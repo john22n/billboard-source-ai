@@ -1,4 +1,5 @@
 import { InferSelectModel } from 'drizzle-orm'
+import type { ImagePrompts } from '@/lib/mockup/instructions'
 import {
   pgTable,
   serial,
@@ -156,6 +157,13 @@ export const appMetrics = pgTable('app_metrics', {
 })
 
 export type AppMetrics = InferSelectModel<typeof appMetrics>
+
+// Global administrator-managed instructions, separate from advertiser content.
+export const artWizardSettings = pgTable('art_wizard_settings', {
+  id: integer('id').primaryKey().default(1),
+  systemPrompt: text('system_prompt').notNull(),
+  imagePrompts: jsonb('image_prompts').$type<ImagePrompts>(),
+})
 
 // Fixed-size buckets used for serverless-safe abuse controls. A key is reused
 // across windows so this table grows only with the number of identities/scopes.

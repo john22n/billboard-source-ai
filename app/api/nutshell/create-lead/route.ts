@@ -1,6 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { upsertNutshellLead } from '@/lib/dal'
+import { nutshellRequest } from '@/lib/nutshell'
+import {
+  imageReceiptData,
+  imageSchema,
+  sameAdvertiser,
+  type MockupImage,
+} from '@/lib/mockup/state'
+import {
+  signArtifact,
+  verifyImage,
+  type MockupSession,
+} from '@/lib/mockup/receipts'
+import { attachMockup } from '@/lib/mockup/nutshell'
 import {
   configErrorResponseBody,
   isMissingConfig,
@@ -15,6 +28,7 @@ interface ContactInfo {
 }
 
 interface NutshellLeadRequest {
+  mockupImage?: MockupImage
   // Primary contact info (for backwards compatibility)
   name: string
   position: string
@@ -71,28 +85,6 @@ interface NutshellLeadRequest {
 
   // Transcript
   transcript: string
-}
-
-async function nutshellRequest(
-  method: string,
-  params: Record<string, unknown>,
-  credentials: string,
-) {
-  const response = await fetch('https://app.nutshell.com/api/v1/json', {
-    method: 'POST',
-    headers: {
-      Authorization: `Basic ${credentials}`,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      method,
-      params,
-      id: `${method}-${Date.now()}`,
-    }),
-  })
-  return response.json()
 }
 
 // Retry wrapper — retries up to `retries` times with exponential backoff
@@ -488,9 +480,10 @@ async function createLeadAndPersist(options: {
   noteParts: string[]
   credentials: string
   userEmail: string
-  createdByUserId: string
+  session: MockupSession
   contactIds: number[]
   accountId: number | null
+  mockupImage?: MockupImage
 }) {
   const {
     lead,
@@ -498,7 +491,7 @@ async function createLeadAndPersist(options: {
     noteParts,
     credentials,
     userEmail,
-    createdByUserId,
+    session,
     contactIds,
     accountId,
   } = options
@@ -540,11 +533,28 @@ async function createLeadAndPersist(options: {
         description,
         status: 0,
         assigneeEmail: userEmail,
-        createdByUserId,
+        createdByUserId: session.userId,
         nutshellCreatedAt: new Date(),
       })
     } catch (dbError) {
       console.error('Failed to save lead to local DB:', dbError)
+    }
+  }
+  let imageAttachmentFailed = false
+  let imageAttachmentReceipt: string | undefined
+  if (leadId && options.mockupImage) {
+    try {
+      imageAttachmentReceipt = await signArtifact(
+        session,
+        'attachment',
+        imageReceiptData(options.mockupImage),
+        options.mockupImage.advertiser,
+        `${Number(leadId)}:${options.mockupImage.id}`,
+      )
+      await attachMockup(Number(leadId), options.mockupImage, credentials)
+    } catch {
+      // Lead creation succeeded. Retry only the image against this exact lead.
+      imageAttachmentFailed = true
     }
   }
   return NextResponse.json({
@@ -552,7 +562,11 @@ async function createLeadAndPersist(options: {
     leadId,
     contactIds,
     accountId,
-    message: 'Lead created successfully in Nutshell',
+    imageAttachmentFailed,
+    imageAttachmentReceipt,
+    message: imageAttachmentFailed
+      ? 'Lead created; one or more images could not be attached'
+      : 'Lead created successfully in Nutshell',
   })
 }
 
@@ -565,10 +579,38 @@ export async function POST(req: NextRequest) {
     const data: NutshellLeadRequest = await req.json()
     const invalid = validationError(data)
     if (invalid) return invalid
+    if (data.mockupImage) {
+      const image = imageSchema.safeParse(data.mockupImage)
+      if (
+        !image.success ||
+        !sameAdvertiser(data.entityName, image.data.advertiser)
+      )
+        return NextResponse.json(
+          {
+            error:
+              'The selected mockup belongs to a different advertiser. Restart the Art Mockup Wizard before submitting.',
+          },
+          { status: 400 },
+        )
+      try {
+        await verifyImage(session, image.data)
+      } catch {
+        return NextResponse.json(
+          {
+            error:
+              'This mockup is no longer valid for this session. Download it, then restart the wizard.',
+          },
+          { status: 400 },
+        )
+      }
+    }
 
     console.log('Nutshell form submitted:', {
       submittedBy: userEmail,
-      formData: data,
+      formData: {
+        ...data,
+        mockupImage: data.mockupImage ? '[selected mockup]' : undefined,
+      },
     })
     let apiKey: string
     try {
@@ -604,9 +646,10 @@ export async function POST(req: NextRequest) {
       noteParts,
       credentials,
       userEmail,
-      createdByUserId: session.userId,
+      session,
       contactIds,
       accountId,
+      mockupImage: data.mockupImage,
     })
   } catch (error) {
     console.error('Error creating Nutshell lead:', error)

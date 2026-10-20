@@ -23,8 +23,7 @@ These defaults are optimized for AI coding agents (and humans) working on apps t
 - If Enable Deployment Protection is enabled, use a bypass secret to directly access them
 - Add OpenTelemetry via `@vercel/otel` on Node; don't expect OTEL support on the Edge runtime
 - Enable Web Analytics + Speed Insights early
-- Use AI Gateway for model routing, set AI_GATEWAY_API_KEY, using a model string (e.g. 'anthropic/claude-sonnet-4.6'), Gateway is already default in AI SDK
-  needed. Always curl https://ai-gateway.vercel.sh/v1/models first; never trust model IDs from memory
+- Call OpenAI directly using `OPENAI_API_KEY`. With AI SDK, pass a model instance from `@ai-sdk/openai` instead of a plain model string. Verify model IDs against OpenAI's model catalog.
 - For durable agent loops or untrusted code: use Workflow (pause/resume/state) + Sandbox; use Vercel MCP for secure infra access
 
 ## Shadscan
@@ -32,3 +31,23 @@ These defaults are optimized for AI coding agents (and humans) working on apps t
 Before creating any commit, use $shadscan-pre-commit. Establish the current score when work begins, run Shadscan immediately before each commit, and do not commit if the score is unassessed or below the task floor.
 
 <!-- VERCEL BEST PRACTICES END -->
+
+## Playwright
+
+How tests get written
+
+Write a failing test before the implementation. Commit the test first.
+Unit tests live next to the file under test as <name>.test.ts and run with Vitest.
+End-to-end tests live in tests/end-to-end/ and run with Playwright.
+The starter Playwright suite is intentionally small. Later course labs add storage state, HAR replay, dossiers, accessibility, and visual coverage.
+Playwright locator rules
+
+getByRole first. getByLabel or getByText second. data-testid only when semantics genuinely don't exist.
+Never use raw CSS or XPath selectors in specs.
+Never use page.waitForTimeout or page.waitForLoadState('networkidle'). Use expect(locator).toBeVisible(), page.waitForResponse, or page.waitForRequest.
+Do not fix a failing Playwright test by changing the assertion to match broken UI.
+
+## testing
+
+always close the app process when youre done testing
+use Playwright to run UI validation instead of the chrome MCP

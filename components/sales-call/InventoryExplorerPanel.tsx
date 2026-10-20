@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react'
 
-const INVENTORY_EXPLORER_URL = 'https://geopoepoe.com/a/inventory_explorer.html'
+const INVENTORY_EXPLORER_URL = 'https://geopoepoe.com/gpp/v3/inventory-explorer'
 
 interface InventoryExplorerPanelProps {
   city?: string
@@ -31,7 +31,7 @@ export function InventoryExplorerPanel({
     <iframe
       src={src}
       className="h-full min-h-[300px] w-full rounded-lg border-0"
-      title="Inventory Map"
+      title="Inventory Explorer"
     />
   )
 }

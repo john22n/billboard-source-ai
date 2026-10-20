@@ -54,6 +54,7 @@ import {
 } from '@/lib/error-handling'
 import { useAutoLogout } from '@/hooks/useAutoLogout'
 import VoicemailAITab from './voicemail-ai-tab'
+import ArtWizardTab from './art-wizard-tab'
 
 interface OpenAIUsage {
   totalCost: number
@@ -1358,12 +1359,13 @@ export default function AdminClient({
       />
       <Tabs defaultValue="users" className="min-w-0 w-full">
         <TabsList
-          className={`grid h-auto w-full min-w-0 grid-cols-2 mb-6 ${showLeadsTab ? 'sm:grid-cols-5' : 'sm:grid-cols-4'}`}
+          className={`grid h-auto w-full min-w-0 grid-cols-2 mb-6 ${showLeadsTab ? 'sm:grid-cols-6' : 'sm:grid-cols-5'}`}
         >
           <TabsTrigger value="users">User Accounts</TabsTrigger>
           <TabsTrigger value="costs">User Costs</TabsTrigger>
           <TabsTrigger value="issues">Reported Issues</TabsTrigger>
           <TabsTrigger value="voicemail-ai">Voicemail AI</TabsTrigger>
+          <TabsTrigger value="art-wizard">Creative Studio</TabsTrigger>
           {showLeadsTab && <TabsTrigger value="leads">CRM Leads</TabsTrigger>}
         </TabsList>
 
@@ -1410,6 +1412,10 @@ export default function AdminClient({
 
         <TabsContent value="voicemail-ai">
           <VoicemailAITab />
+        </TabsContent>
+
+        <TabsContent value="art-wizard">
+          <ArtWizardTab />
         </TabsContent>
 
         <LeadsTab
