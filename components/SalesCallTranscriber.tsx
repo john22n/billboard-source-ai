@@ -629,6 +629,15 @@ function TabbedBody(props: TabbedBodyProps) {
     'pricing' | 'google-map' | 'inventory' | 'mockup'
   >('pricing')
   const [studioOpened, setStudioOpened] = useState(false)
+  const [openedViews, setOpenedViews] = useState<Partial<Record<string, true>>>(
+    {},
+  )
+  const activeView = activeTab === 'form' ? `form:${sidePanel}` : activeTab
+  // Hidden frames must not start competing GPP login redirects. Once visited,
+  // keep them mounted so switching tabs preserves drafts and map selections.
+  if (!openedViews[activeView]) {
+    setOpenedViews({ ...openedViews, [activeView]: true })
+  }
   const {
     resetTrigger,
     callerPhone,
@@ -785,7 +794,7 @@ function TabbedBody(props: TabbedBodyProps) {
               </TabsContent>
               <TabsContent
                 value="inventory"
-                forceMount
+                forceMount={openedViews['form:inventory']}
                 className="mt-0 min-h-0 overflow-hidden data-[state=inactive]:hidden data-[state=active]:block"
               >
                 <InventoryExplorerPanel
@@ -826,7 +835,7 @@ function TabbedBody(props: TabbedBodyProps) {
         </TabsContent>
         <TabsContent
           value="inventory"
-          forceMount
+          forceMount={openedViews.inventory}
           className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=inactive]:hidden data-[state=active]:flex data-[state=active]:flex-col"
         >
           <div className="h-full overflow-hidden">
@@ -838,7 +847,7 @@ function TabbedBody(props: TabbedBodyProps) {
         </TabsContent>
         <TabsContent
           value="proposal"
-          forceMount
+          forceMount={openedViews.proposal}
           className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=inactive]:hidden data-[state=active]:flex data-[state=active]:flex-col"
         >
           <iframe
