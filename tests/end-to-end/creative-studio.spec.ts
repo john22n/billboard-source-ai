@@ -219,8 +219,9 @@ for (const placement of ['Form views', 'Lead tools']) {
     page,
     context,
   }, testInfo) => {
-    // The first dashboard navigation also compiles Next's client bundle on CI.
-    test.setTimeout(60_000)
+    // Cold dashboard compilation can take 35s on CI, before the full workflow.
+    // Keep assertion timeouts unchanged while allowing time for both phases.
+    test.setTimeout(120_000)
     const token = await new SignJWT({ userId })
       .setProtectedHeader({ alg: 'HS256' })
       .setIssuedAt()
