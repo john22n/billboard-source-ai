@@ -1,0 +1,26 @@
+{
+  "amp.remoteThreadCreation.enabled": true,
+  "amp.skills.path": "/Users/johnnoriega/.config/agents/skills:/Users/johnnoriega/.agents/skills:/Users/johnnoriega/.config/amp/skills:/Users/johnnoriega/.claude/skills:/Users/johnnoriega/.claude/plugins/cache",
+  "amp.mcpServers": {
+    "chrome-devtools": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "chrome-devtools-mcp@latest",
+        "--wsEndpoint=ws://host.docker.internal:9222/devtools/browser",
+        "--wsHeaders={\"Host\":\"localhost\"}"
+      ]
+    },
+    "pipecat": {
+      "url": "https://daily-docs.mcp.kapa.ai"
+    },
+    "ads-mcp": {
+      "command": "npx",
+      "args": ["-y", "@atlaskit/ads-mcp"],
+      "env": {
+        "PUPPETEER_SKIP_CHROMIUM_DOWNLOAD": "true"
+      }
+    }
+  },
+  "amp.gauge": "tokens"
+}

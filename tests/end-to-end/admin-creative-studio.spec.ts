@@ -33,7 +33,13 @@ test('admin edits the wizard system prompt and restores the original in one clic
   })
   await page.setViewportSize({ width: 1440, height: 1100 })
   await page.goto('/admin')
+  const instructionsResponse = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === '/api/admin/art-wizard' &&
+      response.request().method() === 'GET',
+  )
   await page.getByRole('tab', { name: 'Creative Studio' }).click()
+  expect((await instructionsResponse).ok()).toBe(true)
   const editor = page.getByRole('textbox', {
     name: 'Mockup Wizard system prompt',
   })
@@ -55,7 +61,13 @@ test('admin edits the wizard system prompt and restores the original in one clic
     'You are the Billboard Source Mockup Wizard. Ask only three questions, then generate the billboard.'
   await editor.fill(custom)
   await expect(page.getByText('Unsaved changes')).toBeVisible()
+  const saveResponse = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === '/api/admin/art-wizard' &&
+      response.request().method() === 'PUT',
+  )
   await page.getByRole('button', { name: 'Save prompt', exact: true }).click()
+  expect((await saveResponse).ok()).toBe(true)
   await expect(
     page.getByText(
       'Prompt saved. New wizard conversations will use these instructions.',
@@ -127,9 +139,15 @@ test('admin edits the wizard system prompt and restores the original in one clic
     fullPage: true,
   })
 
+  const resetResponse = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === '/api/admin/art-wizard' &&
+      response.request().method() === 'DELETE',
+  )
   await page
     .getByRole('button', { name: 'Reset to original prompt', exact: true })
     .click()
+  expect((await resetResponse).ok()).toBe(true)
   await expect(
     page.getByText(
       'Original prompt restored. New wizard conversations will use it.',
