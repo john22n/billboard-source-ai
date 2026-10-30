@@ -2,54 +2,56 @@ import { SignJWT } from 'jose'
 import { expect, test } from 'playwright/test'
 import { baseUrl, jwtSecret, userId } from './environment'
 
-for (const firstTab of ['Proposals', 'Inventory Explorer']) {
-  test(`GPP loads only visited views and preserves drafts (${firstTab} first)`, async ({
-    page,
-    context,
-  }) => {
-    // The first navigation compiles the dashboard on a cold dev server.
-    test.setTimeout(120_000)
-    const token = await new SignJWT({ userId })
-      .setProtectedHeader({ alg: 'HS256' })
-      .setIssuedAt()
-      .setExpirationTime('1h')
-      .sign(new TextEncoder().encode(jwtSecret))
-    await context.addCookies([
-      {
-        name: 'auth_token',
-        value: token,
-        url: baseUrl,
-        httpOnly: true,
-        sameSite: 'Lax',
-      },
-    ])
-    await page.route(
-      (url) => /^https?:$/.test(url.protocol) && url.origin !== baseUrl,
-      async (route) => {
-        const url = new URL(route.request().url())
-        if (url.origin !== 'https://geopoepoe.com') return route.abort()
-        const title = url.pathname.endsWith('/proposals')
-          ? 'My Proposals & Contracts'
-          : url.searchParams.get('sidebar') === '0'
-            ? 'Lead Inventory'
-            : 'Inventory Explorer'
-        await route.fulfill({
-          contentType: 'text/html',
-          body: `<h1>${title}</h1><label>Draft<input></label>
+test.beforeEach(async ({ page, context }) => {
+  // The first navigation compiles the dashboard on a cold dev server.
+  test.setTimeout(120_000)
+  const token = await new SignJWT({ userId })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime('1h')
+    .sign(new TextEncoder().encode(jwtSecret))
+  await context.addCookies([
+    {
+      name: 'auth_token',
+      value: token,
+      url: baseUrl,
+      httpOnly: true,
+      sameSite: 'Lax',
+    },
+  ])
+  await page.route(
+    (url) => /^https?:$/.test(url.protocol) && url.origin !== baseUrl,
+    async (route) => {
+      const url = new URL(route.request().url())
+      if (url.origin !== 'https://geopoepoe.com') return route.abort()
+      const title = url.pathname.endsWith('/proposals')
+        ? 'My Proposals & Contracts'
+        : url.searchParams.get('sidebar') === '0'
+          ? 'Lead Inventory'
+          : 'Inventory Explorer'
+      await route.fulfill({
+        contentType: 'text/html',
+        body: `<h1>${title}</h1><label>Draft<input></label>
             <button onclick="window.top.postMessage({type:'gpp:create-typical',version:1,generatorUrl:'https://geopoepoe.com/gpp/v3/proposal-generator',boardIds:[12,1],count:2}, '*')">Create Typical</button>
             <output aria-label="Acknowledgement"></output>
             <script>window.addEventListener('message', event => {
               if (event.data?.type === 'gpp:create-typical-ack' && event.data.version === 1)
                 document.querySelector('output').textContent = 'Received';
             });</script>`,
-        })
-      },
-    )
-    await page.addLocatorHandler(
-      page.getByRole('button', { name: 'Dismiss announcement' }),
-      (button) => button.click(),
-    )
-    await page.goto('/dashboard', { waitUntil: 'domcontentloaded' })
+      })
+    },
+  )
+  await page.addLocatorHandler(
+    page.getByRole('button', { name: 'Dismiss announcement' }),
+    (button) => button.click(),
+  )
+  await page.goto('/dashboard')
+})
+
+for (const firstTab of ['Proposals', 'Inventory Explorer']) {
+  test(`GPP loads only visited views and preserves drafts (${firstTab} first)`, async ({
+    page,
+  }) => {
     const views = page.getByRole('tablist', { name: 'Form views' })
     await expect(views).toBeVisible()
     await expect(page.getByTitle('Proposals', { exact: true })).toHaveCount(0)
@@ -145,23 +147,26 @@ for (const firstTab of ['Proposals', 'Inventory Explorer']) {
         'Received',
       )
     }
-
-    // Also handle the lazy Proposals frame that has never been opened.
-    await page.reload({ waitUntil: 'domcontentloaded' })
-    await views.getByRole('tab', { name: 'Inventory Explorer' }).click()
-    await expect(page.getByTitle('Proposals', { exact: true })).toHaveCount(0)
-    await page
-      .getByTitle('Inventory Explorer', { exact: true })
-      .contentFrame()
-      .getByRole('button', { name: 'Create Typical' })
-      .click()
-    await expect(views.getByRole('tab', { name: 'Proposals' })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    )
-    await expect(page.getByTitle('Proposals', { exact: true })).toHaveAttribute(
-      'src',
-      'https://geopoepoe.com/gpp/v3/proposal-generator',
-    )
   })
 }
+
+test('Create Typical opens the Proposals frame before its first visit', async ({
+  page,
+}) => {
+  const views = page.getByRole('tablist', { name: 'Form views' })
+  await views.getByRole('tab', { name: 'Inventory Explorer' }).click()
+  await expect(page.getByTitle('Proposals', { exact: true })).toHaveCount(0)
+  await page
+    .getByTitle('Inventory Explorer', { exact: true })
+    .contentFrame()
+    .getByRole('button', { name: 'Create Typical' })
+    .click()
+  await expect(views.getByRole('tab', { name: 'Proposals' })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+  await expect(page.getByTitle('Proposals', { exact: true })).toHaveAttribute(
+    'src',
+    'https://geopoepoe.com/gpp/v3/proposal-generator',
+  )
+})
