@@ -622,9 +622,27 @@ function LeadActions({
 const leadToolTabClass =
   'h-10 min-w-0 whitespace-normal rounded-none border-x-0 border-t-0 border-b-2 border-transparent bg-transparent px-1 text-[10px] leading-tight font-semibold tracking-wide text-slate-500 shadow-none transition-colors hover:text-slate-900 data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent sm:text-xs'
 
+function useProposalNavigation() {
+  const setActiveTab = useDashboardStore((state) => state.setActiveTab)
+  const [proposal, setProposal] = useState({
+    url: 'https://geopoepoe.com/gpp/v3/proposals',
+    revision: 0,
+  })
+  const handleCreateTypical = useCallback(
+    (url: string) => {
+      // Reload even when the URL is unchanged: GPP's session has new boards.
+      setProposal((previous) => ({ url, revision: previous.revision + 1 }))
+      setActiveTab('proposal')
+    },
+    [setActiveTab],
+  )
+  return { proposal, handleCreateTypical, setActiveTab }
+}
+
 function TabbedBody(props: TabbedBodyProps) {
   const activeTab = useDashboardStore((state) => state.activeTab)
-  const setActiveTab = useDashboardStore((state) => state.setActiveTab)
+  const { proposal, handleCreateTypical, setActiveTab } =
+    useProposalNavigation()
   const [sidePanel, setSidePanel] = useState<
     'pricing' | 'google-map' | 'inventory' | 'mockup'
   >('pricing')
@@ -801,6 +819,7 @@ function TabbedBody(props: TabbedBodyProps) {
                   city={currentMarketLocation.city}
                   state={currentMarketLocation.state}
                   collapseFilters
+                  onCreateTypical={handleCreateTypical}
                 />
               </TabsContent>
 
@@ -842,6 +861,7 @@ function TabbedBody(props: TabbedBodyProps) {
             <InventoryExplorerPanel
               city={currentMarketLocation.city}
               state={currentMarketLocation.state}
+              onCreateTypical={handleCreateTypical}
             />
           </div>
         </TabsContent>
@@ -851,7 +871,8 @@ function TabbedBody(props: TabbedBodyProps) {
           className="mt-0 flex-1 min-h-0 overflow-hidden data-[state=inactive]:hidden data-[state=active]:flex data-[state=active]:flex-col"
         >
           <iframe
-            src="https://geopoepoe.com/gpp/v3/proposals"
+            key={proposal.revision}
+            src={proposal.url}
             title="Proposals"
             className="h-full min-h-[300px] w-full rounded-lg border-0"
           />
