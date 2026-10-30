@@ -53,6 +53,10 @@ export default async function setup() {
       await pool.query(`CREATE TABLE openai_logs (
         user_id text, cost numeric(10,6), created_at timestamp
       )`)
+      await pool.query(`CREATE TABLE rate_limit_buckets (
+        key varchar(160) PRIMARY KEY, count integer NOT NULL,
+        reset_at timestamp with time zone NOT NULL
+      )`)
       await pool.query(
         'INSERT INTO "User" (id, email, role) VALUES ($1, $2, $3)',
         [userId, 'creative-studio@example.test', 'user'],
