@@ -35,7 +35,13 @@ for (const firstTab of ['Proposals', 'Inventory Explorer']) {
             : 'Inventory Explorer'
         await route.fulfill({
           contentType: 'text/html',
-          body: `<h1>${title}</h1><label>Draft<input></label>`,
+          body: `<h1>${title}</h1><label>Draft<input></label>
+            <button onclick="window.top.postMessage({type:'gpp:create-typical',version:1,generatorUrl:'https://geopoepoe.com/gpp/v3/proposal-generator',boardIds:[12,1],count:2}, '*')">Create Typical</button>
+            <output aria-label="Acknowledgement"></output>
+            <script>window.addEventListener('message', event => {
+              if (event.data?.type === 'gpp:create-typical-ack' && event.data.version === 1)
+                document.querySelector('output').textContent = 'Received';
+            });</script>`,
         })
       },
     )
@@ -87,7 +93,10 @@ for (const firstTab of ['Proposals', 'Inventory Explorer']) {
       .getByRole('tab', { name: 'Inventory Explorer' })
       .click()
     const leadFrame = page
-      .getByRole('tabpanel', { name: 'Lead Form & Pricing' })
+      .getByRole('tabpanel', {
+        name: 'Lead Form & Pricing',
+        includeHidden: true,
+      })
       .getByTitle('Inventory Explorer', { exact: true })
       .contentFrame()
     await expect(leadFrame.getByRole('heading')).toHaveText('Lead Inventory')
@@ -99,5 +108,60 @@ for (const firstTab of ['Proposals', 'Inventory Explorer']) {
       .getByRole('tab', { name: 'Inventory Explorer' })
       .click()
     await expect(leadFrame.getByLabel('Draft')).toHaveValue('Keep lead filters')
+
+    // Both embedded explorers must open the generator in the outer Proposals tab.
+    for (const inventory of [
+      leadFrame,
+      page
+        .getByRole('tabpanel', {
+          name: 'Inventory Explorer',
+          exact: true,
+        })
+        .getByTitle('Inventory Explorer', { exact: true })
+        .contentFrame(),
+    ]) {
+      if (inventory !== leadFrame)
+        await views.getByRole('tab', { name: 'Inventory Explorer' }).click()
+      await inventory.getByRole('button', { name: 'Create Typical' }).click()
+      await expect(
+        views.getByRole('tab', { name: 'Proposals' }),
+      ).toHaveAttribute('aria-selected', 'true')
+      const proposals = page.getByTitle('Proposals', { exact: true })
+      await expect(proposals).toHaveAttribute(
+        'src',
+        'https://geopoepoe.com/gpp/v3/proposal-generator',
+      )
+      await expect(proposals.contentFrame().getByLabel('Draft')).toHaveValue('')
+      await proposals.contentFrame().getByLabel('Draft').fill('Previous boards')
+      await views
+        .getByRole('tab', {
+          name:
+            inventory === leadFrame
+              ? 'Lead Form & Pricing'
+              : 'Inventory Explorer',
+        })
+        .click()
+      await expect(inventory.getByLabel('Acknowledgement')).toHaveText(
+        'Received',
+      )
+    }
+
+    // Also handle the lazy Proposals frame that has never been opened.
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await views.getByRole('tab', { name: 'Inventory Explorer' }).click()
+    await expect(page.getByTitle('Proposals', { exact: true })).toHaveCount(0)
+    await page
+      .getByTitle('Inventory Explorer', { exact: true })
+      .contentFrame()
+      .getByRole('button', { name: 'Create Typical' })
+      .click()
+    await expect(views.getByRole('tab', { name: 'Proposals' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    await expect(page.getByTitle('Proposals', { exact: true })).toHaveAttribute(
+      'src',
+      'https://geopoepoe.com/gpp/v3/proposal-generator',
+    )
   })
 }
