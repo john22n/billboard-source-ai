@@ -274,6 +274,9 @@ export async function chatCompletion(
     }
     const { text } = await generateText({
       model: getOpenAIProvider()('gpt-4o-mini'),
+      // This generic chat action already accepts caller-supplied system roles;
+      // preserve their ordering. It has no privileged server prompt or tools.
+      allowSystemInMessages: true,
       messages: input.map((msg) => ({
         role: msg.role,
         content: msg.content,
