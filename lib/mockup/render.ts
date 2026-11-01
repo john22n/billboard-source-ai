@@ -4,6 +4,7 @@ import { generateObject } from 'ai'
 import sharp, { type Sharp } from 'sharp'
 import { z } from 'zod'
 import { serverConfig } from '@/lib/config'
+import { aiModels } from '@/lib/ai-models'
 import { artworkFormats, type ArtworkFormat } from './formats'
 import { cropInstructions, flatArtworkPrompt } from './instructions'
 
@@ -12,7 +13,7 @@ const cropSchema = z.object({ top: z.number().int().min(0).max(96) }).strict()
 async function selectBulletinCrop(source: Buffer) {
   const provider = createOpenAI({ apiKey: serverConfig.openai.requireApiKey() })
   const result = await generateObject({
-    model: provider('gpt-5.4-mini'),
+    model: provider(aiModels.mockup),
     schema: cropSchema,
     providerOptions: { openai: { strictJsonSchema: true } },
     maxRetries: 0,
@@ -53,7 +54,7 @@ export async function renderBillboard(
   })
   const { width, height, canvasHeight } = artworkFormats[format]
   const options = {
-    model: 'gpt-image-2.5-sunburst',
+    model: aiModels.image,
     prompt: flatArtworkPrompt(prompt, format),
     n: 1,
     // Sunburst supports custom dimensions; openai@5's size union predates it.

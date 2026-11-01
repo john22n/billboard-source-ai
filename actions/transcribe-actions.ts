@@ -5,6 +5,7 @@ import { serverConfig } from '@/lib/config'
 import { getSession } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { z } from 'zod'
+import { aiModels } from '@/lib/ai-models'
 
 const MAX_TEXT = 100_000
 const MAX_BASE64_AUDIO = Math.ceil((25 * 1024 * 1024 * 4) / 3) + 4
@@ -60,7 +61,7 @@ function getOpenAIClient() {
 
 /**
  * Create a Realtime transcription session for sales calls
- * Uses gpt-4o-transcribe model for high-accuracy transcription
+ * Uses the configured transcription model for high-accuracy transcription
  */
 export async function createTranscriptionSession(options?: {
   language?: string
@@ -85,7 +86,7 @@ export async function createTranscriptionSession(options?: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'gpt-4o-transcribe',
+          model: aiModels.transcription,
           voice: 'alloy', // Required but not used for transcription-only
           modalities: ['text'], // Transcription only, no audio output
           instructions:
@@ -93,7 +94,7 @@ export async function createTranscriptionSession(options?: {
             'Transcribe the sales call accurately. Identify different speakers. Include timestamps.',
           input_audio_format: 'pcm16',
           input_audio_transcription: {
-            model: 'whisper-1',
+            model: aiModels.fileTranscription,
           },
           turn_detection: null, // Disable turn detection for continuous transcription
         }),
@@ -139,7 +140,7 @@ export async function transcribeAudioFile(
 
     const transcription = await getOpenAIClient().audio.transcriptions.create({
       file: prepared.file,
-      model: 'whisper-1',
+      model: aiModels.fileTranscription,
       language: 'en',
       response_format: 'verbose_json',
       timestamp_granularities: ['word', 'segment'],
@@ -168,7 +169,7 @@ export async function transcribeAudioFile(
 }
 
 /**
- * Analyze transcribed sales call with GPT-4
+ * Analyze transcribed sales call with the configured sales analysis model
  * Extract key insights, action items, and sentiment
  */
 export async function analyzeSalesCall(transcript: string) {
@@ -180,7 +181,7 @@ export async function analyzeSalesCall(transcript: string) {
       return { success: false, error: 'Input too large' }
     }
     const completion = await getOpenAIClient().chat.completions.create({
-      model: 'gpt-4o',
+      model: aiModels.salesAnalysis,
       messages: [
         {
           role: 'system',

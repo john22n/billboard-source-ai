@@ -12,6 +12,7 @@ import { z } from 'zod'
 import { getSession } from '@/lib/auth'
 import { serverConfig } from '@/lib/config'
 import { rateLimit } from '@/lib/rate-limit'
+import { aiModels } from '@/lib/ai-models'
 import {
   attachmentLabel,
   attachmentsSchema,
@@ -272,7 +273,7 @@ export async function POST(request: Request) {
     const { tools, captured } = wizardTools(session, input.data, imagePrompts)
     stage = 'conversation'
     const result = streamText({
-      model: provider('gpt-5.4-mini'),
+      model: provider(aiModels.mockup),
       system: `${prompt}\n\n${toolInstructions}`,
       messages: conversation(input.data),
       tools,

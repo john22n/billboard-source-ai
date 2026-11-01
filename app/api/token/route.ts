@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { createPendingLog } from '@/lib/dal'
 import { REALTIME_TRANSCRIPTION_MODEL } from '@/lib/openai-pricing'
+import { aiModels } from '@/lib/ai-models'
 import {
   configErrorResponseBody,
   isMissingConfig,
@@ -57,7 +58,7 @@ Your tasks:
               input: {
                 transcription: {
                   language: 'en',
-                  model: 'gpt-4o-transcribe',
+                  model: aiModels.transcription,
                   prompt: instructions,
                 },
                 noise_reduction: {

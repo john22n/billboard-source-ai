@@ -13,6 +13,7 @@ import {
   serverConfig,
 } from '@/lib/config'
 import { rateLimit } from '@/lib/rate-limit'
+import { aiModels } from '@/lib/ai-models'
 
 export const dynamic = 'force-dynamic'
 
@@ -62,7 +63,7 @@ export async function POST(req: NextRequest) {
 
     // Extract location information from transcript using AI
     const locationResult = await generateText({
-      model: openaiProvider('gpt-4o-mini'),
+      model: openaiProvider(aiModels.text),
       prompt: `Extract the geographic location from this conversation transcript.
 
 IMPORTANT formatting rules:
@@ -82,7 +83,7 @@ Transcript: ${transcript}`,
     })
     await logOpenAITokenUsage({
       userId: session.userId,
-      model: 'gpt-4o-mini',
+      model: aiModels.text,
       usage: locationResult.usage,
       sessionId: 'billboard-pricing:location',
     })
@@ -100,7 +101,7 @@ Transcript: ${transcript}`,
 
     // ⭐ Generate 512-dimension embedding using OpenAI SDK directly
     const embeddingResponse = await getOpenAIClient().embeddings.create({
-      model: 'text-embedding-3-small',
+      model: aiModels.embedding,
       input: extractedLocation,
       dimensions: 512,
     })
