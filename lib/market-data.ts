@@ -5,9 +5,9 @@ import { sql } from 'drizzle-orm'
 import OpenAI from 'openai'
 import { db } from '@/db'
 import { billboardLocations, type NewBillboardLocation } from '@/db/schema'
+import { aiModels } from '@/lib/ai-models'
 
 const MARKET_DATA_URL = 'https://geopoepoe.com/api-get-market-data?format=csv'
-const EMBEDDING_MODEL = 'text-embedding-3-small'
 const EMBEDDING_DIMENSIONS = 512
 const EMBEDDING_BATCH_SIZE = 500
 const EMBEDDING_BATCH_CHARACTER_LIMIT = 500_000
@@ -112,7 +112,7 @@ function createEmbeddingGenerator(apiKey: string): EmbeddingGenerator {
 
   return async (texts) => {
     const response = await openai.embeddings.create({
-      model: EMBEDDING_MODEL,
+      model: aiModels.embedding,
       input: texts,
       dimensions: EMBEDDING_DIMENSIONS,
     })

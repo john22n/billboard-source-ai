@@ -12,6 +12,7 @@ import {
   serverConfig,
 } from '@/lib/config'
 import { rateLimit } from '@/lib/rate-limit'
+import { aiModels } from '@/lib/ai-models'
 
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024
 
@@ -123,7 +124,7 @@ export async function POST(req: NextRequest) {
     // Step 1: Transcribe the audio file using OpenAI Whisper
     const transcription = await getOpenAIClient().audio.transcriptions.create({
       file: file,
-      model: 'whisper-1',
+      model: aiModels.fileTranscription,
       language: 'en',
       prompt:
         'Billboard, billboard advertising, bulletin, poster, digital billboard, static bulletin, out-of-home, OOH, CPM, impressions, DEC, daily effective circulation, vinyl, trivision, LED, Nutshell, Billboard Source',
@@ -134,7 +135,7 @@ export async function POST(req: NextRequest) {
     const transcript = transcription.text
     await logOpenAIDurationUsage({
       userId: session.userId,
-      model: 'whisper-1',
+      model: aiModels.fileTranscription,
       durationSeconds: transcription.usage?.seconds ?? transcription.duration,
       sessionId: 'transcribe-file:audio',
     })
@@ -142,7 +143,7 @@ export async function POST(req: NextRequest) {
 
     // Step 2: Single LLM call for all analysis (4x more efficient than parallel calls)
     const analysisResult = await generateObject({
-      model: openaiProvider('gpt-4o-mini'),
+      model: openaiProvider(aiModels.text),
       schema: fullAnalysisSchema,
       system: `You are a sales call analyst. Analyze this sales call transcript and extract all relevant information.
 Be thorough and only include information that was explicitly mentioned. Use null for missing fields.`,
@@ -151,7 +152,7 @@ Be thorough and only include information that was explicitly mentioned. Use null
     })
     await logOpenAITokenUsage({
       userId: session.userId,
-      model: 'gpt-4o-mini',
+      model: aiModels.text,
       usage: analysisResult.usage,
       sessionId: 'transcribe-file:analysis',
     })

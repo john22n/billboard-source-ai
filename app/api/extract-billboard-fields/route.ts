@@ -6,6 +6,7 @@ import { getSession } from '@/lib/auth'
 import { logOpenAITokenUsage } from '@/lib/dal'
 import { LeadSentiment, LeadType, BillboardPurpose } from '@/types/sales-call'
 import { rateLimit } from '@/lib/rate-limit'
+import { aiModels } from '@/lib/ai-models'
 
 // ============================================================================
 // SCHEMA - Descriptions are the primary source of truth for the AI
@@ -294,7 +295,7 @@ ${transcript}
 Extract all fields according to the schema. Be thorough but accurate.`
 
     const result = await streamObject({
-      model: openai('gpt-4o-mini'),
+      model: openai(aiModels.text),
       schema: billboardLeadSchema,
       system: SYSTEM_PROMPT,
       prompt,
@@ -303,7 +304,7 @@ Extract all fields according to the schema. Be thorough but accurate.`
         try {
           await logOpenAITokenUsage({
             userId: session.userId,
-            model: 'gpt-4o-mini',
+            model: aiModels.text,
             usage,
             sessionId: 'extract-billboard-fields',
           })

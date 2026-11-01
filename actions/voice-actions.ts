@@ -7,6 +7,7 @@ import OpenAI from 'openai'
 import { serverConfig } from '@/lib/config'
 import { getSession } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
+import { aiModels } from '@/lib/ai-models'
 
 const MAX_TEXT = 100_000
 const MAX_BASE64_AUDIO = Math.ceil((25 * 1024 * 1024 * 4) / 3) + 4
@@ -91,7 +92,7 @@ export async function createRealtimeSession() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'gpt-4o-realtime-preview-2024-12-17',
+          model: aiModels.realtimeVoice,
           voice: 'alloy',
         }),
       },
@@ -128,7 +129,7 @@ export async function generateTextResponse(prompt: string) {
     const input = textSchema.safeParse(prompt)
     if (!input.success) return { success: false, error: 'Input too large' }
     const { text } = await generateText({
-      model: getOpenAIProvider()('gpt-4o-mini'),
+      model: getOpenAIProvider()(aiModels.text),
       prompt: input.data,
     })
 
@@ -153,7 +154,7 @@ export async function streamTextResponse(prompt: string) {
     const input = textSchema.safeParse(prompt)
     if (!input.success) return { success: false, error: 'Input too large' }
     const result = await streamText({
-      model: getOpenAIProvider()('gpt-4o-mini'),
+      model: getOpenAIProvider()(aiModels.text),
       prompt: input.data,
     })
 
@@ -172,7 +173,7 @@ export async function generateStructuredResponse(prompt: string) {
     const input = textSchema.safeParse(prompt)
     if (!input.success) return { success: false, error: 'Input too large' }
     const { object } = await generateObject({
-      model: getOpenAIProvider()('gpt-4o-mini'),
+      model: getOpenAIProvider()(aiModels.text),
       schema: z.object({
         summary: z.string().describe('A brief summary of the response'),
         keyPoints: z
@@ -212,7 +213,7 @@ export async function transcribeAudio(
 
     const transcription = await getOpenAIClient().audio.transcriptions.create({
       file: prepared.file,
-      model: 'whisper-1',
+      model: aiModels.fileTranscription,
       language: 'en',
     })
 
@@ -240,7 +241,7 @@ export async function generateSpeech(
     const input = textSchema.safeParse(text)
     if (!input.success) return { success: false, error: 'Input too large' }
     const mp3 = await getOpenAIClient().audio.speech.create({
-      model: 'tts-1',
+      model: aiModels.speech,
       voice: voice,
       input: input.data,
       response_format: 'mp3',
@@ -273,7 +274,10 @@ export async function chatCompletion(
       return { success: false, error: 'Input too large' }
     }
     const { text } = await generateText({
-      model: getOpenAIProvider()('gpt-4o-mini'),
+      model: getOpenAIProvider()(aiModels.text),
+      // This generic chat action already accepts caller-supplied system roles;
+      // preserve their ordering. It has no privileged server prompt or tools.
+      allowSystemInMessages: true,
       messages: input.map((msg) => ({
         role: msg.role,
         content: msg.content,

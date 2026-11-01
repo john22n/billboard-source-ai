@@ -4,6 +4,7 @@ import { useRef, useState, useCallback } from 'react'
 import { Call } from '@twilio/voice-sdk'
 import type { TranscriptItem } from '@/types/sales-call'
 import { REALTIME_TRANSCRIPTION_MODEL } from '@/lib/openai-pricing'
+import { aiModels } from '@/lib/ai-models'
 
 interface UseOpenAITranscriptionOptions {
   onStatusChange?: (status: string) => void
@@ -125,7 +126,7 @@ export function useOpenAITranscription(
                 input: {
                   format: { type: 'audio/pcm', rate: 24000 },
                   transcription: {
-                    model: 'whisper-1',
+                    model: aiModels.fileTranscription,
                     language: 'en',
                     prompt:
                       'Billboard, billboard advertising, bulletin, poster, digital billboard, static bulletin, out-of-home, OOH, CPM, impressions, DEC, daily effective circulation, vinyl, trivision, LED, Nutshell, Billboard Source',

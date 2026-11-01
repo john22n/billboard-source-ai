@@ -6,6 +6,7 @@ import twilio from 'twilio'
 import { z } from 'zod'
 import { isConfigError, serverConfig } from '@/lib/config'
 import { logOpenAITokenUsage } from '@/lib/dal'
+import { aiModels } from '@/lib/ai-models'
 import type {
   IssueDiagnosis,
   IssueReportInput,
@@ -13,7 +14,6 @@ import type {
   IssueTwilioCallContext,
 } from '@/lib/issue-report-schema'
 
-const DIAGNOSTIC_MODEL = 'gpt-4o-mini'
 const MAX_TWILIO_RECORDS = 40
 const MAX_VERCEL_LOGS = 80
 const VERCEL_LOG_TIMEOUT_MS = 6_000
@@ -736,7 +736,7 @@ async function analyzeDiagnostics(
       JSON.stringify(bundle, null, 2),
     )
     const result = await generateObject({
-      model: openai(DIAGNOSTIC_MODEL),
+      model: openai(aiModels.text),
       schema: diagnosisSchema,
       abortSignal: AbortSignal.timeout(35_000),
       system: `You are a production incident triage assistant for a Next.js application that uses Twilio Voice and TaskRouter on Vercel.
@@ -751,7 +751,7 @@ Set twilioCallInfoRequested to true only when the employee asks to identify or r
     try {
       await logOpenAITokenUsage({
         userId: reporterId,
-        model: DIAGNOSTIC_MODEL,
+        model: aiModels.text,
         usage: result.usage,
         sessionId: 'issue-report',
       })

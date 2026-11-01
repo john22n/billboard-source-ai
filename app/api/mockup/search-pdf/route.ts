@@ -4,6 +4,7 @@ import { generateObject } from 'ai'
 import { getSession } from '@/lib/auth'
 import { serverConfig } from '@/lib/config'
 import { rateLimit } from '@/lib/rate-limit'
+import { aiModels } from '@/lib/ai-models'
 import { pdfSearchInstructions } from '@/lib/mockup/instructions'
 import {
   pdfSearchSchema,
@@ -42,7 +43,7 @@ export async function POST(request: Request) {
       apiKey: serverConfig.openai.requireApiKey(),
     })
     const result = await generateObject({
-      model: provider('gpt-5.4-mini'),
+      model: provider(aiModels.mockup),
       schema: pdfSearchResultSchema,
       providerOptions: { openai: { strictJsonSchema: true } },
       maxRetries: 0,
