@@ -334,7 +334,8 @@ function validateReplacementChains(
       )
       if (
         predecessors.length !== 1 ||
-        predecessors[0].event.createdTime >= current.event.createdTime
+        // Explicit predecessor links order assignments within the same second.
+        predecessors[0].event.createdTime > current.event.createdTime
       )
         throw new PendingEvidence('assignment_chain_invalid')
       current = predecessors[0]

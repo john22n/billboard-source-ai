@@ -253,25 +253,31 @@ const replacement = {
   ],
 }
 
-it('keeps the unique original user when later assignment replaces it', async () => {
-  const fetcher = vi
-    .fn<typeof fetch>()
-    .mockResolvedValueOnce(Response.json(lead))
-    .mockResolvedValueOnce(Response.json(replacement))
-  expect(
-    await hydrateLead('101-leads', {
-      cutoff: new Date('2026-01-01Z'),
-      email: 'sky@example.test',
-      apiKey: 'key',
-      fetcher,
-    }),
-  ).toMatchObject({
-    status: 'eligible',
-    assigneeId: '301-users',
-    assignmentEventId: '502-events',
-  })
-  expect(fetcher).toHaveBeenCalledTimes(2)
-})
+it.each([1800000001, 1800000002])(
+  'keeps the original user when its replacement has timestamp %i',
+  async (createdTime) => {
+    const page = structuredClone(replacement)
+    page.events[2].createdTime = createdTime
+    page.events.reverse()
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json(lead))
+      .mockResolvedValueOnce(Response.json(page))
+    expect(
+      await hydrateLead('101-leads', {
+        cutoff: new Date('2026-01-01Z'),
+        email: 'sky@example.test',
+        apiKey: 'key',
+        fetcher,
+      }),
+    ).toMatchObject({
+      status: 'eligible',
+      assigneeId: '301-users',
+      assignmentEventId: '502-events',
+    })
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  },
+)
 
 it.each([
   olderCursor.replace('app.nutshell.com', 'evil.test'),
@@ -427,6 +433,39 @@ it('caps older traversal at five pages even when every page makes progress', asy
 })
 
 it.each([
+  [
+    'replacement timestamp before its predecessor',
+    {
+      ...replacement,
+      events: replacement.events.map((event) =>
+        event.id === '503-events'
+          ? { ...event, createdTime: 1800000000 }
+          : event,
+      ),
+    },
+  ],
+  [
+    'same-second replacement cycle',
+    {
+      ...replacement,
+      events: replacement.events.map((event) =>
+        event.id === '503-events'
+          ? { ...event, createdTime: 1800000001 }
+          : event,
+      ),
+      payloads: replacement.payloads.map((payload) =>
+        payload.id === '202-assignments'
+          ? {
+              ...payload,
+              links: {
+                ...payload.links,
+                replacedEntityAssignment: '202-assignments',
+              },
+            }
+          : payload,
+      ),
+    },
+  ],
   [
     'multiple roots',
     {

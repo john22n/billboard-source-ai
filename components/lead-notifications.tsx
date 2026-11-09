@@ -3,6 +3,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { Bell, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import {
+  createDesktopAlerts,
+  desktopState,
+  type DesktopState,
+} from '@/lib/lead-notifications/desktop'
 
 interface LeadNotification {
   id: string
@@ -34,28 +39,7 @@ function elapsedTime(age: number) {
     : `${Math.floor(minutes / 60)}h ${minutes % 60}m`
 }
 
-type DesktopState = 'unsupported' | 'default' | 'denied' | 'enabled'
 type Connection = 'loading' | 'connected' | 'disconnected' | 'signed-out'
-
-function supportsDesktopAlerts() {
-  return 'Notification' in window && Boolean(navigator.locks)
-}
-
-function desktopState(preferenceKey: string): DesktopState {
-  if (!supportsDesktopAlerts()) return 'unsupported'
-  if (Notification.permission !== 'granted') return Notification.permission
-  return localStorage.getItem(preferenceKey) === 'true' ? 'enabled' : 'default'
-}
-
-// Called under the account's Web Lock so only one tab claims each banner.
-function claimDesktopAlert(userId: string, preferenceKey: string, id: string) {
-  if (desktopState(preferenceKey) !== 'enabled') return false
-  const key = `lead-alerts:${userId}:shown`
-  const shown: string[] = JSON.parse(localStorage.getItem(key) || '[]')
-  if (shown.includes(id)) return false
-  localStorage.setItem(key, JSON.stringify([...shown.slice(-499), id]))
-  return true
-}
 
 async function readInbox(userId: string, signal: AbortSignal) {
   const response = await fetch('/api/lead-notifications', {
@@ -156,7 +140,9 @@ function useLeadNotifications(userId: string) {
     let hasSnapshot = false
     let lastSuccess = 0
     let known = new Set<string>()
-    const banners = new Set<Notification>()
+    const desktopAlerts = createDesktopAlerts(userId, (id) =>
+      cleared.current.has(id),
+    )
     const controller = new AbortController()
     const syncPermission = () => {
       try {
@@ -166,32 +152,11 @@ function useLeadNotifications(userId: string) {
       }
     }
     syncPermission()
-    async function alertOnce(item: LeadNotification) {
-      try {
-        if (!supportsDesktopAlerts()) return
-        await navigator.locks.request(`lead-alerts:${userId}`, () => {
-          if (disposed || cleared.current.has(item.id)) return
-          if (!claimDesktopAlert(userId, preferenceKey, item.id)) return
-          const banner = new Notification(item.companyName, {
-            body: 'New Contact Us lead assigned to you',
-            tag: `lead:${userId}:${item.id}`,
-          })
-          banners.add(banner)
-          banner.onclose = () => banners.delete(banner)
-          banner.onclick = () => {
-            window.open(item.leadUrl, '_blank', 'noopener,noreferrer')
-            banner.close()
-          }
-        })
-      } catch {
-        // Browser/storage restrictions must never interrupt the in-app inbox.
-      }
-    }
     function acceptSnapshot(data: Awaited<ReturnType<typeof readInbox>>) {
       if (disposed) return
       if (data === null) {
         hasSnapshot = false
-        for (const banner of banners) banner.close()
+        desktopAlerts.reset()
         setNotifications([])
         setConnection('signed-out')
         return
@@ -210,7 +175,7 @@ function useLeadNotifications(userId: string) {
       const arrivals = items.filter((item) => !known.has(item.id))
       if (hasSnapshot && Date.now() - lastSuccess < 45_000) {
         arrivals.forEach((item) => {
-          void alertOnce(item)
+          void desktopAlerts.show(item)
         })
       }
       known = new Set(items.map((item) => item.id))
@@ -257,7 +222,7 @@ function useLeadNotifications(userId: string) {
       controller.abort()
       clearInterval(polling)
       clearInterval(clock)
-      for (const banner of banners) banner.close()
+      desktopAlerts.reset()
       window.removeEventListener('online', resume)
       window.removeEventListener('offline', offline)
       window.removeEventListener('focus', resume)

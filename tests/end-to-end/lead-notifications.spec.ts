@@ -227,6 +227,114 @@ test('desktop alerts require opt-in, deduplicate tabs, and do not replay on relo
   expect(alerts).toEqual(['Company 2'])
 })
 
+for (const identityLoss of ['sign-out', 'account-switch'] as const) {
+  test(`queued desktop alerts are discarded after ${identityLoss}, even if the original account returns`, async ({
+    page,
+    context,
+  }) => {
+    await signIn(context)
+    await context.addInitScript((accountId) => {
+      localStorage.setItem(`lead-alerts:${accountId}:enabled`, 'true')
+      class TestNotification {
+        static permission = 'granted'
+        constructor(title: string) {
+          const titles = JSON.parse(localStorage.getItem('test-alerts') || '[]')
+          localStorage.setItem(
+            'test-alerts',
+            JSON.stringify([...titles, title]),
+          )
+        }
+        close() {}
+      }
+      Object.defineProperty(window, 'Notification', { value: TestNotification })
+    }, userId)
+    const item = (id: string) => ({
+      id,
+      companyName: `Company ${id}`,
+      leadUrl: `https://app.nutshell.com/lead/${id}`,
+      leadCreatedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    })
+    const notifications = [item('1')]
+    let lostIdentity = false
+    await page.route('**/api/lead-notifications', (route) =>
+      lostIdentity && identityLoss === 'sign-out'
+        ? route.fulfill({ status: 401, json: { error: 'Unauthorized' } })
+        : route.fulfill({
+            json: {
+              notifications,
+              userId: lostIdentity ? 'another-account' : userId,
+              serverTime: new Date().toISOString(),
+            },
+          }),
+    )
+    await page.goto('/issues')
+    const panel = page.getByRole('region', { name: 'Contact Us leads' })
+    await expect(panel.getByRole('listitem')).toHaveCount(1)
+    const lockName = `lead-alerts:${userId}`
+    await page.evaluate((name) => {
+      void navigator.locks.request(
+        name,
+        () =>
+          new Promise<void>((resolve) => {
+            window.addEventListener('release-alert-lock', () => resolve(), {
+              once: true,
+            })
+          }),
+      )
+    }, lockName)
+    await expect
+      .poll(() =>
+        page.evaluate(
+          async (name) =>
+            (await navigator.locks.query()).held?.some(
+              (lock) => lock.name === name,
+            ),
+          lockName,
+        ),
+      )
+      .toBe(true)
+    notifications.push(item('2'))
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await expect(panel.getByRole('listitem')).toHaveCount(2)
+    await expect
+      .poll(() =>
+        page.evaluate(
+          async (name) =>
+            (await navigator.locks.query()).pending?.some(
+              (lock) => lock.name === name,
+            ),
+          lockName,
+        ),
+      )
+      .toBe(true)
+    lostIdentity = true
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await expect(panel).toHaveCount(0)
+    lostIdentity = false
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await expect(panel.getByRole('listitem')).toHaveCount(2)
+    await page.evaluate(async (name) => {
+      window.dispatchEvent(new Event('release-alert-lock'))
+      await navigator.locks.request(name, () => {})
+    }, lockName)
+    expect(
+      await page.evaluate(() =>
+        JSON.parse(localStorage.getItem('test-alerts') || '[]'),
+      ),
+    ).toEqual([])
+    notifications.push(item('3'))
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          JSON.parse(localStorage.getItem('test-alerts') || '[]'),
+        ),
+      )
+      .toEqual(['Company 3'])
+  })
+}
+
 test('urgency boundaries tick without refresh and the inbox handles denied permission and disconnection', async ({
   page,
   context,
@@ -371,6 +479,9 @@ test('real processor delivers only to the initial recipient and Clear survives r
     const assignee = secondRep
       ? { id: '302-users', emails: ['BETA@example.test'] }
       : { id: '301-users', emails: ['ALPHA@example.test'] }
+    const replacementAssignee = secondRep
+      ? { id: '301-users', emails: ['ALPHA@example.test'] }
+      : { id: '302-users', emails: ['BETA@example.test'] }
     const created = leadId === '77004-leads' ? 1700000000 : 1794225600
     if (url.pathname.startsWith('/rest/leads/'))
       return Response.json({
@@ -406,6 +517,14 @@ test('real processor delivers only to the initial recipient and Clear survives r
         },
         ...(assignmentReady
           ? [
+              // The API can list a same-second replacement before its predecessor.
+              {
+                id: `${number}3-events`,
+                createdTime: created + 1,
+                payloadType: 'assignments',
+                action: 'create',
+                links: { payloads: [`${number}9-assignments`] },
+              },
               {
                 id: `${number}2-events`,
                 createdTime: created + 1,
@@ -426,10 +545,23 @@ test('real processor delivers only to the initial recipient and Clear survives r
             replacedEntityAssignment: null,
           },
         },
+        {
+          id: `${number}9-assignments`,
+          type: 'assignments',
+          links: {
+            assignmentEntity: leadId,
+            assigneeEntity: replacementAssignee.id,
+            replacedEntityAssignment: `${number}-assignments`,
+          },
+        },
       ],
       assigneeEntity: [
         {
           ...assignee,
+          type: 'users',
+        },
+        {
+          ...replacementAssignee,
           type: 'users',
         },
       ],
