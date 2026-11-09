@@ -1,16 +1,8 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Bell, CheckCheck, ExternalLink } from 'lucide-react'
+import { Bell, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from '@/components/ui/sheet'
 
 interface LeadNotification {
   id: string
@@ -95,31 +87,33 @@ function LeadNotificationItem({
   const urgency = urgencyLevels[age < 3_600_000 ? 0 : age <= 14_400_000 ? 1 : 2]
   return (
     <li
-      className={`rounded-lg border border-l-4 bg-card p-4 ${urgency.colors}`}
+      className={`rounded-xl border border-l-4 bg-card/85 p-3 shadow-md backdrop-blur-md ${urgency.colors}`}
     >
-      <div className="mb-2 flex items-center justify-between gap-2 text-xs font-semibold">
-        <span>{urgency.label}</span>
+      <div className="mb-1.5 flex items-center justify-between gap-2 text-xs font-medium">
+        <span className="flex items-center gap-1.5">
+          <Bell className="size-3.5" aria-hidden="true" />
+          {urgency.label}
+        </span>
         <span className="tabular-nums">{elapsedTime(age)} elapsed</span>
       </div>
       <a
         href={item.leadUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className="flex items-start justify-between gap-3 rounded-sm font-semibold text-foreground underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-4"
+        className="flex items-start justify-between gap-3 rounded-sm text-sm font-semibold text-foreground underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-4"
       >
         <span className="break-words [overflow-wrap:anywhere]">
           {item.companyName}
         </span>
         <ExternalLink
-          className="mt-1 size-4 shrink-0 text-muted-foreground"
+          className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
           aria-hidden="true"
         />
         <span className="sr-only">Open in Nutshell (new tab)</span>
       </a>
-      <div className="mt-3 flex items-end justify-between gap-3">
+      <div className="mt-1.5 flex items-center justify-between gap-3">
         <p className="text-xs text-muted-foreground">
-          Created
-          <br />
+          Created{' '}
           <time dateTime={item.leadCreatedAt}>
             {new Date(item.leadCreatedAt).toLocaleString(undefined, {
               month: 'short',
@@ -132,6 +126,7 @@ function LeadNotificationItem({
         <Button
           variant="outline"
           size="sm"
+          className="h-7 px-2 text-xs"
           aria-label={`Clear ${item.companyName}`}
           disabled={clearing !== null}
           onClick={() => onClear(item)}
@@ -333,79 +328,42 @@ export function LeadNotifications({ userId }: { userId: string }) {
   if (connection === 'signed-out') return null
 
   return (
-    <div className="flex h-11 shrink-0 items-center justify-between border-b bg-background px-4 text-sm">
-      <span className="text-muted-foreground">
-        Contact Us <span className="hidden sm:inline">· Assigned to you</span>
-      </span>
-      <Sheet>
-        <SheetTrigger asChild>
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-label={`Lead notifications, ${notifications.length} active`}
+    <section
+      aria-label="Contact Us leads"
+      className="pointer-events-none fixed right-3 top-16 z-40 w-[calc(100%-1.5rem)] max-w-xs sm:right-4"
+    >
+      <div className="pointer-events-auto max-h-[calc(100dvh-9rem)] space-y-2 overflow-y-auto rounded-2xl">
+        <InboxStatus connection={connection} />
+        {error && (
+          <p
+            role="alert"
+            className="rounded-xl border bg-card p-3 text-sm text-destructive shadow-lg"
           >
-            <Bell aria-hidden="true" />
-            <span>Leads</span>
-            <span className="min-w-5 rounded-full bg-primary px-1.5 text-center text-xs text-primary-foreground">
-              {notifications.length}
-            </span>
-            {connection === 'disconnected' && (
-              <span className="text-amber-700 dark:text-amber-400">
-                Offline
-              </span>
-            )}
-          </Button>
-        </SheetTrigger>
-        <SheetContent className="w-full sm:max-w-md">
-          <SheetHeader className="border-b px-6 pb-5 pt-7">
-            <SheetTitle className="text-xl">Contact Us leads</SheetTitle>
-            <SheetDescription>
-              Assigned to you. Oldest first. Leads stay here until you select
-              Clear—even after signing out.
-            </SheetDescription>
-          </SheetHeader>
-          <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">
-            <InboxStatus connection={connection} />
-            {error && (
-              <p role="alert" className="mb-4 text-sm text-destructive">
-                {error}
-              </p>
-            )}
-            <LeadNotificationList
-              connection={connection}
-              notifications={notifications}
-              now={now}
-              clearing={clearing}
-              onClear={clear}
-            />
-          </div>
-          <div className="space-y-3 border-t px-6 py-4 text-xs text-muted-foreground">
-            <DesktopPermission
-              desktop={desktop}
-              enableDesktop={enableDesktop}
-            />
-            <p>
-              Keep the app open for desktop alerts. Chrome and your operating
-              system control banner duration.
-            </p>
-            <p>
-              Elapsed time includes nights and weekends. Clear acknowledges the
-              notification; it does not update Nutshell.
-            </p>
-          </div>
-        </SheetContent>
-      </Sheet>
-    </div>
+            {error}
+          </p>
+        )}
+        <LeadNotificationList
+          notifications={notifications}
+          now={now}
+          clearing={clearing}
+          onClear={clear}
+        />
+      </div>
+      <details className="pointer-events-auto mt-2 ml-auto w-fit max-w-full rounded-xl bg-card/85 text-xs text-muted-foreground shadow-sm backdrop-blur-md">
+        <summary className="cursor-pointer px-3 py-2">Desktop alerts</summary>
+        <div className="space-y-2 px-3 pb-3">
+          <DesktopPermission desktop={desktop} enableDesktop={enableDesktop} />
+          <p>
+            Keep the app open. Chrome and your operating system control desktop
+            banner duration.
+          </p>
+        </div>
+      </details>
+    </section>
   )
 }
 
 function InboxStatus({ connection }: { connection: Connection }) {
-  if (connection === 'loading')
-    return (
-      <p role="status" className="py-6 text-sm text-muted-foreground">
-        Loading your leads…
-      </p>
-    )
   if (connection === 'disconnected')
     return (
       <div
@@ -420,33 +378,19 @@ function InboxStatus({ connection }: { connection: Connection }) {
 }
 
 function LeadNotificationList({
-  connection,
   notifications,
   now,
   clearing,
   onClear,
 }: {
-  connection: Connection
   notifications: LeadNotification[]
   now: number
   clearing: string | null
   onClear: (item: LeadNotification) => void
 }) {
-  if (connection === 'connected' && notifications.length === 0)
-    return (
-      <div className="py-14 text-center">
-        <CheckCheck
-          className="mx-auto mb-3 size-8 text-muted-foreground"
-          aria-hidden="true"
-        />
-        <p className="font-medium">You’re all caught up</p>
-        <p className="mt-1 text-sm text-muted-foreground">
-          New Contact Us assignments will appear here.
-        </p>
-      </div>
-    )
+  if (notifications.length === 0) return null
   return (
-    <ul className="space-y-3" aria-label="Active lead notifications">
+    <ul className="space-y-2" aria-label="Active lead notifications">
       {notifications.map((item) => (
         <LeadNotificationItem
           key={item.id}

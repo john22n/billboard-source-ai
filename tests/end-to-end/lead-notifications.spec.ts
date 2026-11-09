@@ -71,10 +71,17 @@ test('lead inbox shows ages, opens without clearing, and retains failed clears',
     return route.fulfill({ json: { success: true } })
   })
   await page.goto('/issues')
-  await page
-    .getByRole('button', { name: 'Lead notifications, 3 active' })
-    .click()
-  const panel = page.getByRole('dialog', { name: 'Contact Us leads' })
+  const panel = page.getByRole('region', { name: 'Contact Us leads' })
+  await expect(panel.getByRole('listitem')).toHaveCount(3)
+  await expect(
+    page.getByRole('button', { name: /Lead notifications,/ }),
+  ).toHaveCount(0)
+  await expect(
+    page.getByRole('dialog', { name: 'Contact Us leads' }),
+  ).toHaveCount(0)
+  const first = await panel.getByRole('listitem').nth(0).boundingBox()
+  const second = await panel.getByRole('listitem').nth(1).boundingBox()
+  expect(second!.y).toBeGreaterThanOrEqual(first!.y + first!.height)
   await expect(panel.getByText('Over 4 hours', { exact: true })).toBeVisible()
   await expect(panel.getByText('1–4 hours', { exact: true })).toBeVisible()
   await expect(panel.getByText('Under 1 hour', { exact: true })).toBeVisible()
@@ -91,20 +98,24 @@ test('lead inbox shows ages, opens without clearing, and retains failed clears',
   await panel.getByRole('button', { name: 'Clear Northstar Outdoor' }).click()
   await expect(lead).toHaveCount(0)
   await page.reload()
-  await expect(
-    page.getByRole('button', { name: 'Lead notifications, 2 active' }),
-  ).toBeVisible()
+  await expect(panel.getByRole('listitem')).toHaveCount(2)
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.goto('/dashboard')
-  await expect(
-    page.getByRole('button', { name: 'Lead notifications, 2 active' }),
-  ).toBeVisible()
+  await expect(panel.getByRole('listitem')).toHaveCount(2)
   const main = page.getByRole('main')
   await expect(main).toBeVisible()
   const bounds = await main.boundingBox()
+  expect(bounds!.y).toBe(0)
   expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(900)
   await page.screenshot({
     path: testInfo.outputPath('dashboard-inbox.png'),
+    animations: 'disabled',
+  })
+  notifications = notifications.slice(0, 1)
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(panel.getByRole('listitem')).toHaveCount(1)
+  await page.screenshot({
+    path: testInfo.outputPath('single.png'),
     animations: 'disabled',
   })
 })
@@ -166,21 +177,20 @@ test('desktop alerts require opt-in, deduplicate tabs, and do not replay on relo
         }),
   )
   await page.goto('/issues')
-  await page
-    .getByRole('button', { name: 'Lead notifications, 1 active' })
-    .click()
+  const cards = (p: typeof page) =>
+    p.getByRole('region', { name: 'Contact Us leads' }).getByRole('listitem')
+  await expect(cards(page)).toHaveCount(1)
   expect(permissionRequests).toBe(0)
   expect(alerts).toEqual([])
+  await page.getByText('Desktop alerts', { exact: true }).click()
   await page.getByRole('button', { name: 'Enable desktop alerts' }).click()
   await expect(
     page.getByText('Desktop alerts enabled in this browser.'),
   ).toBeVisible()
-  await page.getByRole('button', { name: 'Close', exact: true }).click()
+  await page.getByText('Desktop alerts', { exact: true }).click()
   const second = await context.newPage()
   await second.goto('/issues')
-  await expect(
-    second.getByRole('button', { name: 'Lead notifications, 1 active' }),
-  ).toBeVisible()
+  await expect(cards(second)).toHaveCount(1)
   await second.evaluate(() => {
     Object.defineProperty(Notification, 'permission', {
       value: 'granted',
@@ -199,26 +209,21 @@ test('desktop alerts require opt-in, deduplicate tabs, and do not replay on relo
     ),
   )
   await expect.poll(() => alerts).toEqual(['Company 2'])
-  for (const p of [page, second])
-    await expect(
-      p.getByRole('button', { name: 'Lead notifications, 2 active' }),
-    ).toBeAttached()
+  for (const p of [page, second]) await expect(cards(p)).toHaveCount(2)
   await page.reload()
-  await expect(
-    page.getByRole('button', { name: 'Lead notifications, 2 active' }),
-  ).toBeVisible()
+  await expect(cards(page)).toHaveCount(2)
   expect(alerts).toEqual(['Company 2'])
   await second.close()
   disconnected = true
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
-  await expect(page.getByText('Offline', { exact: true })).toBeVisible()
+  await expect(
+    page.getByRole('region', { name: 'Contact Us leads' }).getByRole('status'),
+  ).toContainText('Updates unavailable')
   time += 1000
   notifications.push(item('3'))
   disconnected = false
   await page.evaluate(() => window.dispatchEvent(new Event('online')))
-  await expect(
-    page.getByRole('button', { name: 'Lead notifications, 3 active' }),
-  ).toBeVisible()
+  await expect(cards(page)).toHaveCount(3)
   expect(alerts).toEqual(['Company 2'])
 })
 
@@ -278,10 +283,8 @@ test('urgency boundaries tick without refresh and the inbox handles denied permi
         }),
   )
   await page.goto('/issues')
-  await page
-    .getByRole('button', { name: 'Lead notifications, 4 active' })
-    .click()
-  const panel = page.getByRole('dialog', { name: 'Contact Us leads' })
+  const panel = page.getByRole('region', { name: 'Contact Us leads' })
+  await expect(panel.getByRole('listitem')).toHaveCount(4)
   const row = (name: string) =>
     panel
       .getByRole('listitem')
@@ -296,7 +299,9 @@ test('urgency boundaries tick without refresh and the inbox handles denied permi
     row('Just under one hour').getByText('Under 1 hour', { exact: true }),
   ).toBeVisible()
   await expect(row('Weekend assignment')).toContainText('72h 0m elapsed')
+  await panel.getByText('Desktop alerts', { exact: true }).click()
   await expect(panel.getByText(/Desktop alerts are blocked/)).toBeVisible()
+  await panel.getByText('Desktop alerts', { exact: true }).click()
   await page.screenshot({
     path: testInfo.outputPath('active-denied.png'),
     animations: 'disabled',
@@ -310,6 +315,11 @@ test('urgency boundaries tick without refresh and the inbox handles denied permi
   ).toBeVisible()
   await page.setViewportSize({ width: 375, height: 900 })
   await expect(panel).toBeVisible()
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true)
   await page.screenshot({
     path: testInfo.outputPath('mobile-active.png'),
     animations: 'disabled',
@@ -324,7 +334,8 @@ test('urgency boundaries tick without refresh and the inbox handles denied permi
   notifications = []
   disconnected = false
   await page.evaluate(() => window.dispatchEvent(new Event('online')))
-  await expect(panel.getByText('You’re all caught up')).toBeVisible()
+  await expect(panel.getByRole('listitem')).toHaveCount(0)
+  await expect(panel.getByRole('status')).toHaveCount(0)
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.screenshot({
     path: testInfo.outputPath('empty.png'),
@@ -504,18 +515,14 @@ test('real processor delivers only to the initial recipient and Clear survives r
       ).status(),
     ).toBe(404)
     await page.goto('/issues')
-    await page
-      .getByRole('button', { name: 'Lead notifications, 1 active' })
-      .click()
     await expect(
       page.getByRole('link', { name: /Northstar Outdoor/ }),
     ).toBeVisible()
     await page.reload()
-    await page
-      .getByRole('button', { name: 'Lead notifications, 1 active' })
-      .click()
     await page.getByRole('button', { name: 'Clear Northstar Outdoor' }).click()
-    await expect(page.getByText('You’re all caught up')).toBeVisible()
+    await expect(
+      page.getByRole('link', { name: /Northstar Outdoor/ }),
+    ).toHaveCount(0)
     await pool.query(
       "INSERT INTO nutshell_webhook_inbox(event_id,lead_id) VALUES ('770019-events','77001-leads')",
     )
@@ -535,10 +542,11 @@ test('real processor delivers only to the initial recipient and Clear survives r
         .notifications,
     ).toEqual([])
     await page.reload()
-    await page
-      .getByRole('button', { name: 'Lead notifications, 0 active' })
-      .click()
-    await expect(page.getByText('You’re all caught up')).toBeVisible()
+    await expect(
+      page
+        .getByRole('region', { name: 'Contact Us leads' })
+        .getByRole('listitem'),
+    ).toHaveCount(0)
     // Clearing one account never clears another account's backlog.
     await other.clearCookies()
     expect((await other.request.get('/api/lead-notifications')).status()).toBe(

@@ -15,13 +15,9 @@ export default async function AuthenticatedLayout({
   return (
     <WorkerStatusProvider>
       <TwilioProvider>
-        {showNotifications ? (
-          <div className="flex h-dvh flex-col [--app-height:calc(100dvh-2.75rem)]">
-            <LeadNotifications key={session.userId} userId={session.userId} />
-            <div className="min-h-0 flex-1 overflow-auto">{children}</div>
-          </div>
-        ) : (
-          children
+        {children}
+        {showNotifications && (
+          <LeadNotifications key={session.userId} userId={session.userId} />
         )}
       </TwilioProvider>
     </WorkerStatusProvider>
