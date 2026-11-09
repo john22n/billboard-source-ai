@@ -1,18 +1,32 @@
-export type DesktopState = 'unsupported' | 'default' | 'denied' | 'enabled'
+const permissionPromptKey = 'lead-alerts:permission-prompted'
 
 function supportsDesktopAlerts() {
   return 'Notification' in window && Boolean(navigator.locks)
 }
 
-export function desktopState(preferenceKey: string): DesktopState {
-  if (!supportsDesktopAlerts()) return 'unsupported'
-  if (Notification.permission !== 'granted') return Notification.permission
-  return localStorage.getItem(preferenceKey) === 'true' ? 'enabled' : 'default'
+export function shouldPromptForNotifications() {
+  try {
+    return (
+      supportsDesktopAlerts() &&
+      Notification.permission === 'default' &&
+      localStorage.getItem(permissionPromptKey) !== 'true'
+    )
+  } catch {
+    return false
+  }
+}
+
+export function dismissNotificationPrompt() {
+  try {
+    localStorage.setItem(permissionPromptKey, 'true')
+  } catch {
+    // Storage restrictions must not prevent dismissing the current prompt.
+  }
 }
 
 // Called under the account's Web Lock so only one tab claims each banner.
-function claimDesktopAlert(userId: string, preferenceKey: string, id: string) {
-  if (desktopState(preferenceKey) !== 'enabled') return false
+function claimDesktopAlert(userId: string, id: string) {
+  if (Notification.permission !== 'granted') return false
   const key = `lead-alerts:${userId}:shown`
   const shown: string[] = JSON.parse(localStorage.getItem(key) || '[]')
   if (shown.includes(id)) return false
@@ -26,7 +40,6 @@ export function createDesktopAlerts(
 ) {
   let generation = 0
   const banners = new Set<Notification>()
-  const preferenceKey = `lead-alerts:${userId}:enabled`
 
   async function show(item: {
     id: string
@@ -38,7 +51,7 @@ export function createDesktopAlerts(
       if (!supportsDesktopAlerts()) return
       await navigator.locks.request(`lead-alerts:${userId}`, () => {
         if (queuedGeneration !== generation || isCleared(item.id)) return
-        if (!claimDesktopAlert(userId, preferenceKey, item.id)) return
+        if (!claimDesktopAlert(userId, item.id)) return
         const banner = new Notification(item.companyName, {
           body: 'New Contact Us lead assigned to you',
           tag: `lead:${userId}:${item.id}`,

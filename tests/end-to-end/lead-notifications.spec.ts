@@ -123,7 +123,7 @@ test('lead inbox shows ages, opens without clearing, and retains failed clears',
 test('desktop alerts require opt-in, deduplicate tabs, and do not replay on reload or reconnect', async ({
   page,
   context,
-}) => {
+}, testInfo) => {
   await signIn(context)
   const alerts: string[] = []
   let permissionRequests = 0
@@ -179,15 +179,21 @@ test('desktop alerts require opt-in, deduplicate tabs, and do not replay on relo
   await page.goto('/issues')
   const cards = (p: typeof page) =>
     p.getByRole('region', { name: 'Contact Us leads' }).getByRole('listitem')
-  await expect(cards(page)).toHaveCount(1)
+  const prompt = page.getByRole('dialog', {
+    name: 'Enable lead notifications?',
+  })
+  await expect(prompt).toBeVisible()
+  await page.screenshot({
+    path: testInfo.outputPath('permission-prompt.png'),
+    animations: 'disabled',
+  })
   expect(permissionRequests).toBe(0)
   expect(alerts).toEqual([])
-  await page.getByText('Desktop alerts', { exact: true }).click()
-  await page.getByRole('button', { name: 'Enable desktop alerts' }).click()
-  await expect(
-    page.getByText('Desktop alerts enabled in this browser.'),
-  ).toBeVisible()
-  await page.getByText('Desktop alerts', { exact: true }).click()
+  await prompt.getByRole('button', { name: 'Enable notifications' }).click()
+  await expect(prompt).toHaveCount(0)
+  await expect(cards(page)).toHaveCount(1)
+  await expect(page.getByText('Desktop alerts', { exact: true })).toHaveCount(0)
+  await expect.poll(() => permissionRequests).toBe(1)
   const second = await context.newPage()
   await second.goto('/issues')
   await expect(cards(second)).toHaveCount(1)
@@ -212,6 +218,8 @@ test('desktop alerts require opt-in, deduplicate tabs, and do not replay on relo
   for (const p of [page, second]) await expect(cards(p)).toHaveCount(2)
   await page.reload()
   await expect(cards(page)).toHaveCount(2)
+  await expect(prompt).toHaveCount(0)
+  expect(permissionRequests).toBe(1)
   expect(alerts).toEqual(['Company 2'])
   await second.close()
   disconnected = true
@@ -227,14 +235,86 @@ test('desktop alerts require opt-in, deduplicate tabs, and do not replay on relo
   expect(alerts).toEqual(['Company 2'])
 })
 
+for (const choice of ['Not now', 'denied', 'default'] as const) {
+  test(`notification onboarding does not repeat after ${choice}`, async ({
+    page,
+    context,
+  }) => {
+    await signIn(context)
+    let requests = 0
+    await context.exposeBinding('permissionRequested', () => {
+      requests++
+    })
+    await context.addInitScript(
+      (result) => {
+        class TestNotification {
+          static permission = 'default'
+          static async requestPermission() {
+            await (
+              window as unknown as { permissionRequested: () => Promise<void> }
+            ).permissionRequested()
+            this.permission = result
+            return result
+          }
+        }
+        Object.defineProperty(window, 'Notification', {
+          value: TestNotification,
+        })
+      },
+      choice === 'denied' ? 'denied' : 'default',
+    )
+    await context.route('**/api/lead-notifications', (route) =>
+      route.fulfill({
+        json: {
+          userId,
+          notifications: [
+            {
+              id: '10',
+              companyName: 'In-app lead remains available',
+              leadUrl: 'https://app.nutshell.com/lead/10',
+              leadCreatedAt: new Date().toISOString(),
+              createdAt: new Date().toISOString(),
+            },
+          ],
+          serverTime: new Date().toISOString(),
+        },
+      }),
+    )
+    await page.goto('/issues')
+    const prompt = page.getByRole('dialog', {
+      name: 'Enable lead notifications?',
+    })
+    await expect(prompt).toBeVisible()
+    const second = await context.newPage()
+    await second.goto('/issues')
+    await expect(
+      second.getByRole('dialog', { name: 'Enable lead notifications?' }),
+    ).toBeVisible()
+    await prompt
+      .getByRole('button', {
+        name: choice === 'Not now' ? 'Not now' : 'Enable notifications',
+      })
+      .click()
+    await expect(prompt).toHaveCount(0)
+    await expect(second.getByRole('dialog')).toHaveCount(0)
+    await page.reload()
+    await expect(
+      page.getByRole('link', { name: /In-app lead remains available/ }),
+    ).toBeVisible()
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await expect(prompt).toHaveCount(0)
+    expect(requests).toBe(choice === 'Not now' ? 0 : 1)
+    await second.close()
+  })
+}
+
 for (const identityLoss of ['sign-out', 'account-switch'] as const) {
   test(`queued desktop alerts are discarded after ${identityLoss}, even if the original account returns`, async ({
     page,
     context,
   }) => {
     await signIn(context)
-    await context.addInitScript((accountId) => {
-      localStorage.setItem(`lead-alerts:${accountId}:enabled`, 'true')
+    await context.addInitScript(() => {
       class TestNotification {
         static permission = 'granted'
         constructor(title: string) {
@@ -247,7 +327,7 @@ for (const identityLoss of ['sign-out', 'account-switch'] as const) {
         close() {}
       }
       Object.defineProperty(window, 'Notification', { value: TestNotification })
-    }, userId)
+    })
     const item = (id: string) => ({
       id,
       companyName: `Company ${id}`,
@@ -407,9 +487,10 @@ test('urgency boundaries tick without refresh and the inbox handles denied permi
     row('Just under one hour').getByText('Under 1 hour', { exact: true }),
   ).toBeVisible()
   await expect(row('Weekend assignment')).toContainText('72h 0m elapsed')
-  await panel.getByText('Desktop alerts', { exact: true }).click()
-  await expect(panel.getByText(/Desktop alerts are blocked/)).toBeVisible()
-  await panel.getByText('Desktop alerts', { exact: true }).click()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(panel.getByText('Desktop alerts', { exact: true })).toHaveCount(
+    0,
+  )
   await page.screenshot({
     path: testInfo.outputPath('active-denied.png'),
     animations: 'disabled',

@@ -4,9 +4,17 @@ import { useEffect, useRef, useState } from 'react'
 import { Bell, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
   createDesktopAlerts,
-  desktopState,
-  type DesktopState,
+  dismissNotificationPrompt,
+  shouldPromptForNotifications,
 } from '@/lib/lead-notifications/desktop'
 
 interface LeadNotification {
@@ -128,8 +136,8 @@ function useLeadNotifications(userId: string) {
   const [now, setNow] = useState(0)
   const [clearing, setClearing] = useState<string | null>(null)
   const [error, setError] = useState('')
-  const [desktop, setDesktop] = useState<DesktopState>('unsupported')
-  const preferenceKey = `lead-alerts:${userId}:enabled`
+  const [permissionPrompt, setPermissionPrompt] = useState(false)
+  const promptDismissed = useRef(false)
   const cleared = useRef(new Set<string>())
   const refresh = useRef<() => void>(() => {})
 
@@ -145,13 +153,10 @@ function useLeadNotifications(userId: string) {
     )
     const controller = new AbortController()
     const syncPermission = () => {
-      try {
-        setDesktop(desktopState(preferenceKey))
-      } catch {
-        setDesktop('unsupported')
-      }
+      setPermissionPrompt(
+        !promptDismissed.current && shouldPromptForNotifications(),
+      )
     }
-    syncPermission()
     function acceptSnapshot(data: Awaited<ReturnType<typeof readInbox>>) {
       if (disposed) return
       if (data === null) {
@@ -229,17 +234,20 @@ function useLeadNotifications(userId: string) {
       window.removeEventListener('storage', syncPermission)
       document.removeEventListener('visibilitychange', resume)
     }
-  }, [userId, preferenceKey])
+  }, [userId])
+
+  function dismissPermission() {
+    promptDismissed.current = true
+    dismissNotificationPrompt()
+    setPermissionPrompt(false)
+  }
 
   async function enableDesktop() {
+    dismissPermission()
     try {
-      const permission = await Notification.requestPermission()
-      if (permission === 'granted') {
-        localStorage.setItem(preferenceKey, 'true')
-        setDesktop('enabled')
-      } else setDesktop(permission === 'denied' ? 'denied' : 'default')
+      await Notification.requestPermission()
     } catch {
-      setDesktop('unsupported')
+      // Permission can be managed in browser settings; never repeatedly prompt.
     }
   }
 
@@ -273,7 +281,8 @@ function useLeadNotifications(userId: string) {
     now,
     clearing,
     error,
-    desktop,
+    permissionPrompt,
+    dismissPermission,
     enableDesktop,
     clear,
   }
@@ -286,7 +295,8 @@ export function LeadNotifications({ userId }: { userId: string }) {
     now,
     clearing,
     error,
-    desktop,
+    permissionPrompt,
+    dismissPermission,
     enableDesktop,
     clear,
   } = useLeadNotifications(userId)
@@ -314,16 +324,35 @@ export function LeadNotifications({ userId }: { userId: string }) {
           onClear={clear}
         />
       </div>
-      <details className="pointer-events-auto mt-2 ml-auto w-fit max-w-full rounded-xl bg-card/85 text-xs text-muted-foreground shadow-sm backdrop-blur-md">
-        <summary className="cursor-pointer px-3 py-2">Desktop alerts</summary>
-        <div className="space-y-2 px-3 pb-3">
-          <DesktopPermission desktop={desktop} enableDesktop={enableDesktop} />
-          <p>
-            Keep the app open. Chrome and your operating system control desktop
-            banner duration.
+      <Dialog
+        open={permissionPrompt && connection === 'connected'}
+        onOpenChange={(open) => {
+          if (!open) dismissPermission()
+        }}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Enable lead notifications?</DialogTitle>
+            <DialogDescription>
+              Get desktop alerts for new Contact Us leads assigned to you while
+              the app is open. Your browser will ask for permission next. In-app
+              notifications work either way.
+            </DialogDescription>
+          </DialogHeader>
+          <p className="text-xs text-muted-foreground">
+            We’ll only ask once in this browser. You can change notification
+            permission later in your browser’s site settings.
           </p>
-        </div>
-      </details>
+          <DialogFooter>
+            <Button variant="outline" onClick={dismissPermission}>
+              Not now
+            </Button>
+            <Button onClick={() => void enableDesktop()}>
+              Enable notifications
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   )
 }
@@ -366,28 +395,5 @@ function LeadNotificationList({
         />
       ))}
     </ul>
-  )
-}
-
-function DesktopPermission({
-  desktop,
-  enableDesktop,
-}: {
-  desktop: DesktopState
-  enableDesktop: () => Promise<void>
-}) {
-  const messages = {
-    enabled: 'Desktop alerts enabled in this browser.',
-    denied:
-      'Desktop alerts are blocked. In Chrome, open this site’s settings → Notifications → Allow. Your in-app leads still appear here.',
-    unsupported:
-      'Desktop alerts are unavailable in this browser. Your in-app leads still appear here.',
-  }
-  if (desktop !== 'default') return <p>{messages[desktop]}</p>
-  return (
-    <Button variant="outline" size="sm" onClick={() => void enableDesktop()}>
-      <Bell aria-hidden="true" />
-      Enable desktop alerts
-    </Button>
   )
 }

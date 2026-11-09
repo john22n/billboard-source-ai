@@ -52,6 +52,8 @@ export default defineConfig({
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
     baseURL: baseUrl,
+    // Most suites use an existing permission decision; onboarding tests mock it.
+    permissions: ['notifications'],
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },
