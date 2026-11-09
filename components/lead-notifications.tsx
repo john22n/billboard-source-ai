@@ -11,11 +11,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import {
-  createDesktopAlerts,
-  dismissNotificationPrompt,
-  shouldPromptForNotifications,
-} from '@/lib/lead-notifications/desktop'
+import { createDesktopAlerts } from '@/lib/lead-notifications/desktop'
+import { useNotificationPermission } from '@/hooks/useNotificationPermission'
 
 interface LeadNotification {
   id: string
@@ -136,8 +133,6 @@ function useLeadNotifications(userId: string) {
   const [now, setNow] = useState(0)
   const [clearing, setClearing] = useState<string | null>(null)
   const [error, setError] = useState('')
-  const [permissionPrompt, setPermissionPrompt] = useState(false)
-  const promptDismissed = useRef(false)
   const cleared = useRef(new Set<string>())
   const refresh = useRef<() => void>(() => {})
 
@@ -152,11 +147,6 @@ function useLeadNotifications(userId: string) {
       cleared.current.has(id),
     )
     const controller = new AbortController()
-    const syncPermission = () => {
-      setPermissionPrompt(
-        !promptDismissed.current && shouldPromptForNotifications(),
-      )
-    }
     function acceptSnapshot(data: Awaited<ReturnType<typeof readInbox>>) {
       if (disposed) return
       if (data === null) {
@@ -173,7 +163,6 @@ function useLeadNotifications(userId: string) {
         data.notifications.filter((item) => !cleared.current.has(item.id)),
       )
       setConnection('connected')
-      syncPermission()
     }
     function announceArrivals(items: LeadNotification[]) {
       // First/recovery snapshots are silent, including after a suspended tab.
@@ -220,7 +209,6 @@ function useLeadNotifications(userId: string) {
     window.addEventListener('online', resume)
     window.addEventListener('offline', offline)
     window.addEventListener('focus', resume)
-    window.addEventListener('storage', syncPermission)
     document.addEventListener('visibilitychange', resume)
     return () => {
       disposed = true
@@ -231,25 +219,9 @@ function useLeadNotifications(userId: string) {
       window.removeEventListener('online', resume)
       window.removeEventListener('offline', offline)
       window.removeEventListener('focus', resume)
-      window.removeEventListener('storage', syncPermission)
       document.removeEventListener('visibilitychange', resume)
     }
   }, [userId])
-
-  function dismissPermission() {
-    promptDismissed.current = true
-    dismissNotificationPrompt()
-    setPermissionPrompt(false)
-  }
-
-  async function enableDesktop() {
-    dismissPermission()
-    try {
-      await Notification.requestPermission()
-    } catch {
-      // Permission can be managed in browser settings; never repeatedly prompt.
-    }
-  }
 
   async function clear(item: LeadNotification) {
     setClearing(item.id)
@@ -281,25 +253,15 @@ function useLeadNotifications(userId: string) {
     now,
     clearing,
     error,
-    permissionPrompt,
-    dismissPermission,
-    enableDesktop,
     clear,
   }
 }
 
 export function LeadNotifications({ userId }: { userId: string }) {
-  const {
-    notifications,
-    connection,
-    now,
-    clearing,
-    error,
-    permissionPrompt,
-    dismissPermission,
-    enableDesktop,
-    clear,
-  } = useLeadNotifications(userId)
+  const { notifications, connection, now, clearing, error, clear } =
+    useLeadNotifications(userId)
+  const { shouldPrompt, requestPermission, dismissPrompt } =
+    useNotificationPermission()
   if (connection === 'signed-out') return null
 
   return (
@@ -325,9 +287,9 @@ export function LeadNotifications({ userId }: { userId: string }) {
         />
       </div>
       <Dialog
-        open={permissionPrompt && connection === 'connected'}
+        open={shouldPrompt && connection === 'connected'}
         onOpenChange={(open) => {
-          if (!open) dismissPermission()
+          if (!open) dismissPrompt()
         }}
       >
         <DialogContent className="max-w-sm">
@@ -344,10 +306,10 @@ export function LeadNotifications({ userId }: { userId: string }) {
             permission later in your browser’s site settings.
           </p>
           <DialogFooter>
-            <Button variant="outline" onClick={dismissPermission}>
+            <Button variant="outline" onClick={dismissPrompt}>
               Not now
             </Button>
-            <Button onClick={() => void enableDesktop()}>
+            <Button onClick={() => void requestPermission()}>
               Enable notifications
             </Button>
           </DialogFooter>

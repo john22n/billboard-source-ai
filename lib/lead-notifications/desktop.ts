@@ -1,27 +1,5 @@
-const permissionPromptKey = 'lead-alerts:permission-prompted'
-
-function supportsDesktopAlerts() {
+export function supportsDesktopAlerts() {
   return 'Notification' in window && Boolean(navigator.locks)
-}
-
-export function shouldPromptForNotifications() {
-  try {
-    return (
-      supportsDesktopAlerts() &&
-      Notification.permission === 'default' &&
-      localStorage.getItem(permissionPromptKey) !== 'true'
-    )
-  } catch {
-    return false
-  }
-}
-
-export function dismissNotificationPrompt() {
-  try {
-    localStorage.setItem(permissionPromptKey, 'true')
-  } catch {
-    // Storage restrictions must not prevent dismissing the current prompt.
-  }
 }
 
 // Called under the account's Web Lock so only one tab claims each banner.
