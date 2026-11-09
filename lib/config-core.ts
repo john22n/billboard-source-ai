@@ -151,6 +151,14 @@ export interface ServerConfig {
   nutshell: {
     apiKey: string | null
     requireApiKey: () => string
+    webhookSecret: string | null
+    notificationsEnabled: boolean
+  }
+  leadNotifications: {
+    enabled: boolean
+    launchCutoff: Date | null
+    integrationEmail: string
+    recipientAllowlist: string[]
   }
   passkey: {
     rpName: string
@@ -420,8 +428,14 @@ export function createServerConfig(env: EnvSource): ServerConfig {
   }
 
   const nutshell = {
+    get notificationsEnabled() {
+      return optionalString(env, 'NUTSHELL_NOTIFICATIONS_ENABLED') === 'true'
+    },
     get apiKey() {
       return optionalString(env, 'NUTSHELL_API_KEY')
+    },
+    get webhookSecret() {
+      return optionalString(env, 'NUTSHELL_WEBHOOK_SECRET')
     },
     requireApiKey() {
       return requiredString(
@@ -553,6 +567,41 @@ export function createServerConfig(env: EnvSource): ServerConfig {
     email,
     voicemail,
     nutshell,
+    leadNotifications: {
+      get launchCutoff() {
+        const value = optionalString(env, 'LEAD_NOTIFICATIONS_LAUNCH_CUTOFF')
+        if (
+          !value ||
+          !/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(value)
+        )
+          return null
+        const date = new Date(value)
+        return Number.isFinite(date.getTime()) ? date : null
+      },
+      get integrationEmail() {
+        return (
+          optionalString(env, 'NUTSHELL_INTEGRATION_EMAIL') ??
+          'sky@billboardsource.com'
+        )
+      },
+      get recipientAllowlist() {
+        return (
+          optionalString(env, 'LEAD_NOTIFICATIONS_RECIPIENT_ALLOWLIST') ?? ''
+        )
+          .split(',')
+          .map((email) => email.trim().toLowerCase())
+          .filter(Boolean)
+      },
+      get enabled() {
+        return (
+          nutshell.notificationsEnabled &&
+          this.launchCutoff !== null &&
+          nutshell.apiKey !== null &&
+          /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(this.integrationEmail) &&
+          (isProductionDeployment || this.recipientAllowlist.length > 0)
+        )
+      },
+    },
     passkey,
     app,
     vercel,

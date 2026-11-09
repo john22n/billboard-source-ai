@@ -78,6 +78,20 @@
       "when": 1791540000000,
       "tag": "0010_art_wizard_image_prompts",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1794096000000,
+      "tag": "0011_nutshell_webhook_inbox",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1794182400000,
+      "tag": "0012_lead_notifications",
+      "breakpoints": true
     }
   ]
 }

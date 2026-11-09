@@ -39,6 +39,7 @@ export default async function Page() {
   return (
     <SidebarProvider
       defaultOpen={false}
+      className="min-h-0"
       style={
         {
           '--sidebar-width': 'calc(var(--spacing) * 72)',
@@ -56,7 +57,7 @@ export default async function Page() {
           role: session.role ?? undefined,
         }}
       />
-      <SidebarInset className="flex flex-col h-dvh min-h-0 overflow-hidden bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
+      <SidebarInset className="flex flex-col h-[var(--app-height,100dvh)] min-h-0 overflow-hidden bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
         <SiteHeader />
         <LaunchAnnouncement autoDismiss />
         <div className="flex-1 min-h-0 overflow-hidden p-0 m-0">

@@ -148,6 +148,67 @@ export const nutshellLeads = pgTable('nutshell_leads', {
 export type NutshellLead = InferSelectModel<typeof nutshellLeads>
 export type NewNutshellLead = typeof nutshellLeads.$inferInsert
 
+// Durable intake only. A processor must verify source and assignment via REST
+// before creating notifications; callback fields are not authoritative.
+export const nutshellWebhookInbox = pgTable(
+  'nutshell_webhook_inbox',
+  {
+    id: serial('id').primaryKey(),
+    eventId: varchar('event_id', { length: 80 }).notNull(),
+    leadId: varchar('lead_id', { length: 80 }).notNull(),
+    status: varchar('status', { length: 20 }).default('pending').notNull(),
+    attempts: integer('attempts').default(0).notNull(),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    lastReason: varchar('last_reason', { length: 80 }),
+    receivedAt: timestamp('received_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    eventLeadUnique: unique('nutshell_webhook_inbox_event_lead_unique').on(
+      table.eventId,
+      table.leadId,
+    ),
+    retryIndex: index('nutshell_webhook_inbox_retry_idx').on(
+      table.status,
+      table.nextAttemptAt,
+    ),
+  }),
+)
+
+// One immutable initial-assignment snapshot per lead, including unmatched
+// identities. Never delete cleared rows: they are the replay tombstone.
+export const leadNotifications = pgTable(
+  'lead_notifications',
+  {
+    id: varchar('id', { length: 80 }).primaryKey(),
+    recipientId: varchar('recipient_id', { length: 21 }).references(
+      () => user.id,
+    ),
+    assigneeId: varchar('assignee_id', { length: 80 }).notNull(),
+    assigneeEmail: text('assignee_email').notNull(),
+    assignmentEventId: varchar('assignment_event_id', { length: 80 }).notNull(),
+    companyName: text('company_name').notNull(),
+    leadUrl: text('lead_url').notNull(),
+    leadCreatedAt: timestamp('lead_created_at', {
+      withTimezone: true,
+    }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    clearedAt: timestamp('cleared_at', { withTimezone: true }),
+  },
+  (table) => ({
+    recipientIndex: index('lead_notifications_recipient_idx').on(
+      table.recipientId,
+      table.clearedAt,
+      table.leadCreatedAt,
+    ),
+  }),
+)
+
 // App-wide singleton metrics (Feature 2). One fixed row (id = 1), no unbounded
 // growth, so it stays within the Neon free tier. Currently tracks total inbound
 // calls to the Main Routing Number shown in the Admin Panel header.

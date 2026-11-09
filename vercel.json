@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/cron/process-lead-notifications",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cron/clear-openai-logs",
       "schedule": "0 0 * * *"
     },
