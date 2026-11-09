@@ -41,6 +41,12 @@ export default async function setup() {
     started = true
     const pool = new Pool({ connectionString: databaseUrl })
     try {
+      await pool.query(
+        readFileSync(
+          join(process.cwd(), 'drizzle/0011_nutshell_webhook_inbox.sql'),
+          'utf8',
+        ),
+      )
       // Local auth and admin reads; external AI/service APIs are mocked.
       await pool.query(`CREATE TABLE "User" (
         id varchar(21) PRIMARY KEY, email varchar(64) NOT NULL, role varchar(20),
@@ -50,6 +56,12 @@ export default async function setup() {
         calls_accepted integer DEFAULT 0, calls_rejected integer DEFAULT 0,
         calls_missed integer DEFAULT 0, last_attempt_sid varchar(48), last_reject_at timestamp
       )`)
+      await pool.query(
+        readFileSync(
+          join(process.cwd(), 'drizzle/0012_lead_notifications.sql'),
+          'utf8',
+        ),
+      )
       await pool.query(`CREATE TABLE openai_logs (
         user_id text, cost numeric(10,6), created_at timestamp
       )`)

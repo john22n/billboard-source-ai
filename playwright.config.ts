@@ -34,6 +34,8 @@ Object.assign(env, {
   VERCEL: '',
   DATABASE_URL: databaseUrl,
   JWT_SECRET: jwtSecret,
+  NUTSHELL_NOTIFICATIONS_ENABLED: 'true',
+  NUTSHELL_WEBHOOK_SECRET: 'playwright-nutshell-webhook-local-only',
   NEXT_PUBLIC_APP_URL: baseUrl,
   PASSKEY_RP_ID: 'localhost',
   PASSKEY_ORIGIN: baseUrl,
@@ -45,11 +47,13 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  // Bound local browser contention while Next compiles routes on demand.
-  workers: process.env.CI ? 1 : 2,
+  // Suites share one disposable database, including schema-failure scenarios.
+  workers: 1,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
     baseURL: baseUrl,
+    // Most suites use an existing permission decision; onboarding tests mock it.
+    permissions: ['notifications'],
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },
