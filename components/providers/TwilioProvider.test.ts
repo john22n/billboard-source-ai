@@ -1,8 +1,18 @@
+// @vitest-environment jsdom
 import { EventEmitter } from 'node:events'
+import { act, createElement } from 'react'
+import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { useWorkerStatus } from '@/hooks/useWorkerStatus'
 
-const { sendTwilioClientTelemetry } = vi.hoisted(() => ({
+const { sendTwilioClientTelemetry, MockDevice } = vi.hoisted(() => ({
   sendTwilioClientTelemetry: vi.fn(),
+  MockDevice: vi.fn(),
+}))
+
+vi.mock('@twilio/voice-sdk', async () => ({
+  ...(await vi.importActual('@twilio/voice-sdk')),
+  Device: MockDevice,
 }))
 
 vi.mock('@/hooks/useWorkerStatus', () => ({
@@ -25,6 +35,8 @@ import {
   prepareStandbyMicrophone,
   recoverTwilioDevice,
   refreshTwilioToken,
+  TwilioProvider,
+  useTwilioContext,
 } from './TwilioProvider'
 
 type RefreshRuntime = Parameters<typeof refreshTwilioToken>[0]
@@ -99,6 +111,94 @@ function createCredentialsResponse(
     }),
   )
 }
+
+describe('TwilioProvider connection recovery', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+    MockDevice.mockReset()
+    sendTwilioClientTelemetry.mockClear()
+  })
+
+  it('restores calling without reloading after the initial connection fails', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+    vi.mocked(useWorkerStatus).mockReturnValue({
+      status: 'available',
+    } as ReturnType<typeof useWorkerStatus>)
+    vi.stubGlobal('navigator', {
+      onLine: true,
+      locks: {
+        request: vi.fn((_name, _options, owner) => owner()),
+      },
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => createCredentialsResponse()),
+    )
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    vi.spyOn(console, 'info').mockImplementation(() => undefined)
+
+    let connectionAttempts = 0
+    MockDevice.mockImplementation(function () {
+      const device = Object.assign(new EventEmitter(), {
+        state: 'unregistered',
+        calls: [],
+        isBusy: false,
+        destroy: vi.fn(() => {
+          device.state = 'destroyed'
+        }),
+        register: vi.fn(async () => {
+          device.state = 'registering'
+          connectionAttempts += 1
+          if (connectionAttempts === 1) {
+            const error = Object.assign(new Error('Connection failed'), {
+              code: 31005,
+            })
+            device.emit('error', error)
+            device.state = 'unregistered'
+            device.emit('unregistered')
+            throw error
+          }
+          device.state = 'registered'
+          device.emit('registered')
+        }),
+      })
+      return device
+    })
+
+    function CallingStatus() {
+      const { status, twilioReady } = useTwilioContext()
+      return createElement(
+        'output',
+        { 'aria-label': 'Calling connection' },
+        twilioReady ? 'Ready to receive calls' : status,
+      )
+    }
+
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    try {
+      await act(async () => {
+        root.render(
+          createElement(TwilioProvider, null, createElement(CallingStatus)),
+        )
+      })
+      expect(container.textContent).toBe('Twilio initialization failed')
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000)
+      })
+
+      expect(container.textContent).toBe('Ready to receive calls')
+    } finally {
+      await act(async () => root.unmount())
+      container.remove()
+    }
+  })
+})
 
 describe('canShowIncomingNotification', () => {
   afterEach(() => {
