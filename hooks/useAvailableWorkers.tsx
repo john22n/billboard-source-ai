@@ -1,35 +1,65 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useRef,
+  type ReactNode,
+} from 'react'
+import type { CurrentCall } from '@/lib/taskrouter-call-state'
 
 export interface WorkerEntry {
   id: string
   name: string
-  status: 'available' | 'busy'
+  status: 'available' | 'ringing' | 'busy'
 }
 
 interface UseAvailableWorkersResult {
   workers: WorkerEntry[]
+  currentCall: CurrentCall | null
   isLoading: boolean
   error: string | null
 }
 
-const POLL_INTERVAL = 5_000 // 5 seconds
+const POLL_INTERVAL = 2_000
 
-async function requestWorkers(signal: AbortSignal): Promise<WorkerEntry[]> {
-  const response = await fetch('/api/workers/available', { signal })
+async function requestWorkers(signal: AbortSignal) {
+  const response = await fetch('/api/workers/available', {
+    signal,
+    cache: 'no-store',
+  })
   if (response.status === 401) throw new Error('Unauthorized')
 
   if (!response.ok) {
     throw new Error('Failed to fetch available workers')
   }
 
-  const data = (await response.json()) as { workers: WorkerEntry[] }
-  return data.workers
+  return (await response.json()) as {
+    workers: WorkerEntry[]
+    currentCall?: CurrentCall | null
+  }
 }
 
-export function useAvailableWorkers(): UseAvailableWorkersResult {
+const AvailableWorkersContext = createContext<UseAvailableWorkersResult>({
+  workers: [],
+  currentCall: null,
+  isLoading: true,
+  error: null,
+})
+
+export function useAvailableWorkers() {
+  return useContext(AvailableWorkersContext)
+}
+
+export function AvailableWorkersProvider({
+  children,
+}: {
+  children: ReactNode
+}) {
   const [workers, setWorkers] = useState<WorkerEntry[]>([])
+  const [currentCall, setCurrentCall] = useState<CurrentCall | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const authFailedRef = useRef(false)
@@ -38,13 +68,9 @@ export function useAvailableWorkers(): UseAvailableWorkersResult {
     let disposed = false
     let controller: AbortController | null = null
     let timeout: ReturnType<typeof setTimeout> | null = null
-    const desktopQuery = window.matchMedia('(min-width: 640px)')
 
     const canPoll = () =>
-      !disposed &&
-      !authFailedRef.current &&
-      !document.hidden &&
-      desktopQuery.matches
+      !disposed && !authFailedRef.current && !document.hidden
 
     const clearTimeoutIfScheduled = () => {
       if (timeout) clearTimeout(timeout)
@@ -65,7 +91,9 @@ export function useAvailableWorkers(): UseAvailableWorkersResult {
       controller = new AbortController()
       try {
         const nextWorkers = await requestWorkers(controller.signal)
-        setWorkers(nextWorkers)
+        if (disposed) return
+        setWorkers(nextWorkers.workers)
+        setCurrentCall(nextWorkers.currentCall ?? null)
         setError(null)
       } catch (err) {
         if ((err as Error).name === 'AbortError') return
@@ -73,6 +101,7 @@ export function useAvailableWorkers(): UseAvailableWorkersResult {
           authFailedRef.current = true
           clearTimeoutIfScheduled()
           setWorkers([])
+          setCurrentCall(null)
         }
         console.error('Failed to fetch available workers:', err)
         setError(err instanceof Error ? err.message : 'Unknown error')
@@ -93,7 +122,8 @@ export function useAvailableWorkers(): UseAvailableWorkersResult {
     }
 
     document.addEventListener('visibilitychange', handlePollingStateChange)
-    desktopQuery.addEventListener('change', handlePollingStateChange)
+    window.addEventListener('online', handlePollingStateChange)
+    window.addEventListener('focus', handlePollingStateChange)
     void fetchWorkers()
 
     return () => {
@@ -101,9 +131,16 @@ export function useAvailableWorkers(): UseAvailableWorkersResult {
       clearTimeoutIfScheduled()
       controller?.abort()
       document.removeEventListener('visibilitychange', handlePollingStateChange)
-      desktopQuery.removeEventListener('change', handlePollingStateChange)
+      window.removeEventListener('online', handlePollingStateChange)
+      window.removeEventListener('focus', handlePollingStateChange)
     }
   }, [])
 
-  return { workers, isLoading, error }
+  return (
+    <AvailableWorkersContext.Provider
+      value={{ workers, currentCall, isLoading, error }}
+    >
+      {children}
+    </AvailableWorkersContext.Provider>
+  )
 }

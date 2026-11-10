@@ -1,6 +1,7 @@
 'use client'
 import { TwilioProvider } from '@/components/providers/TwilioProvider'
 import { WorkerStatusProvider } from '@/hooks/useWorkerStatus'
+import { AvailableWorkersProvider } from '@/hooks/useAvailableWorkers'
 
 export default function AuthenticatedLayout({
   children,
@@ -9,7 +10,9 @@ export default function AuthenticatedLayout({
 }) {
   return (
     <WorkerStatusProvider>
-      <TwilioProvider>{children}</TwilioProvider>
+      <AvailableWorkersProvider>
+        <TwilioProvider>{children}</TwilioProvider>
+      </AvailableWorkersProvider>
     </WorkerStatusProvider>
   )
 }
