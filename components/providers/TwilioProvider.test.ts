@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { EventEmitter } from 'node:events'
 import { act, createElement } from 'react'
-import { createRoot } from 'react-dom/client'
+import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useWorkerStatus } from '@/hooks/useWorkerStatus'
 
@@ -113,13 +113,78 @@ function createCredentialsResponse(
 }
 
 describe('TwilioProvider connection recovery', () => {
-  afterEach(() => {
+  let renderedRoot: Root | undefined
+  let renderedContainer: HTMLDivElement | undefined
+
+  afterEach(async () => {
+    if (renderedRoot) await act(async () => renderedRoot?.unmount())
+    renderedContainer?.remove()
+    renderedRoot = undefined
+    renderedContainer = undefined
     vi.useRealTimers()
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
     MockDevice.mockReset()
     sendTwilioClientTelemetry.mockClear()
   })
+
+  async function renderCallingProvider() {
+    vi.useFakeTimers()
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+    vi.mocked(useWorkerStatus).mockReturnValue({
+      status: 'available',
+    } as ReturnType<typeof useWorkerStatus>)
+    vi.stubGlobal('navigator', {
+      onLine: true,
+      locks: { request: vi.fn((_name, _options, owner) => owner()) },
+    })
+    const fetchCredentials = vi.fn(async () => createCredentialsResponse())
+    vi.stubGlobal('fetch', fetchCredentials)
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    vi.spyOn(console, 'info').mockImplementation(() => undefined)
+
+    class BrowserDevice extends EventEmitter {
+      state = 'unregistered'
+      calls: EventEmitter[] = []
+      isBusy = false
+      destroy = vi.fn(() => {
+        this.state = 'destroyed'
+      })
+      register = vi.fn(async () => {
+        this.state = 'registering'
+        await Promise.resolve()
+        this.state = 'registered'
+        this.emit('registered')
+      })
+    }
+    const devices: BrowserDevice[] = []
+    MockDevice.mockImplementation(function () {
+      const device = new BrowserDevice()
+      devices.push(device)
+      return device
+    })
+    function CallingStatus() {
+      const { status, twilioReady, incomingCall, acceptCall, callActive } =
+        useTwilioContext()
+      return createElement(
+        'div',
+        null,
+        createElement('output', null, twilioReady ? 'Ready' : status),
+        incomingCall &&
+          createElement('button', { onClick: acceptCall }, 'Answer'),
+        callActive && 'Call active',
+      )
+    }
+    renderedContainer = document.createElement('div')
+    document.body.append(renderedContainer)
+    renderedRoot = createRoot(renderedContainer)
+    await act(async () => {
+      renderedRoot?.render(
+        createElement(TwilioProvider, null, createElement(CallingStatus)),
+      )
+    })
+    return { devices, container: renderedContainer, fetchCredentials }
+  }
 
   it('restores calling without reloading after the initial connection fails', async () => {
     vi.useFakeTimers()
@@ -197,6 +262,242 @@ describe('TwilioProvider connection recovery', () => {
       await act(async () => root.unmount())
       container.remove()
     }
+  })
+
+  it('restores ringing after a previously registered connection cannot re-register', async () => {
+    const { devices, container } = await renderCallingProvider()
+    expect(container.textContent).toBe('Ready')
+    const device = devices[0]
+    device.register.mockRejectedValue(new Error('Connection failed'))
+
+    await act(async () => {
+      device.state = 'unregistered'
+      device.emit('unregistered')
+      device.emit(
+        'error',
+        Object.assign(new Error('Connection failed'), { code: 31005 }),
+      )
+      await vi.advanceTimersByTimeAsync(30_000)
+    })
+
+    expect(container.textContent).toBe('Ready')
+    const call = Object.assign(new EventEmitter(), {
+      parameters: { From: '+15555550123' },
+      status: () => 'pending',
+    })
+    await act(async () => {
+      devices.at(-1)?.emit('incoming', call)
+    })
+    expect(container.textContent).toContain('Answer')
+  })
+
+  it('clears a pending call closed by transport loss and restores ringing', async () => {
+    const { devices, container, fetchCredentials } =
+      await renderCallingProvider()
+    const device = devices[0]
+    let status = 'pending'
+    const call = Object.assign(new EventEmitter(), {
+      parameters: { From: '+15555550123' },
+      status: () => status,
+    })
+    // SDK Device removes a pending call during transportClose, before Call
+    // changes its status to closed. No disconnect/cancel/error follows.
+    call.on('transportClose', () => {
+      device.calls = []
+    })
+    await act(async () => {
+      device.calls = [call]
+      device.emit('incoming', call)
+    })
+    expect(container.textContent).toContain('Answer')
+
+    await act(async () => {
+      device.state = 'unregistered'
+      device.emit('unregistered')
+      call.emit('transportClose')
+      status = 'closed'
+    })
+    expect(container.textContent).not.toContain('Answer')
+    expect(device.destroy).not.toHaveBeenCalled()
+
+    await act(async () => vi.advanceTimersByTimeAsync(10_000))
+    expect(device.destroy).toHaveBeenCalledTimes(1)
+    expect(fetchCredentials).toHaveBeenCalledTimes(2)
+    expect(container.textContent).toBe('Ready')
+
+    await act(async () => {
+      devices.at(-1)?.emit(
+        'incoming',
+        Object.assign(new EventEmitter(), {
+          parameters: { From: '+15555550456' },
+          status: () => 'pending',
+        }),
+      )
+    })
+    expect(container.textContent).toContain('Answer')
+  })
+
+  it('does not clear a newer incoming call when an older transport closes', async () => {
+    const { devices, container } = await renderCallingProvider()
+    let status = 'pending'
+    const oldCall = Object.assign(new EventEmitter(), {
+      parameters: { From: '+15555550123' },
+      status: () => status,
+    })
+    const newCall = Object.assign(new EventEmitter(), {
+      parameters: { From: '+15555550456' },
+      status: () => 'pending',
+    })
+    await act(async () => {
+      devices[0].emit('incoming', oldCall)
+      oldCall.emit('transportClose')
+      status = 'closed'
+      devices[0].emit('incoming', newCall)
+    })
+    expect(container.textContent).toContain('Answer')
+    expect(devices[0].destroy).not.toHaveBeenCalled()
+  })
+
+  it.each(['online', 'focus'])(
+    'checks calling immediately on browser %s restoration without retrying offline',
+    async (event) => {
+      const { devices, container, fetchCredentials } =
+        await renderCallingProvider()
+      await act(async () => {
+        Object.assign(navigator, { onLine: false })
+        devices[0].state = 'unregistered'
+        devices[0].emit('unregistered')
+        await vi.advanceTimersByTimeAsync(60_000)
+      })
+      expect(fetchCredentials).toHaveBeenCalledTimes(1)
+      expect(devices[0].destroy).not.toHaveBeenCalled()
+
+      await act(async () => {
+        Object.assign(navigator, { onLine: true })
+        window.dispatchEvent(new Event(event))
+      })
+
+      expect(container.textContent).toBe('Ready')
+      expect(fetchCredentials).toHaveBeenCalledTimes(2)
+    },
+  )
+
+  it.each([31005, 31009])(
+    'recovers an idle connection error %s even if the SDK has not emitted unregistered',
+    async (code) => {
+      const { devices, container } = await renderCallingProvider()
+      const error = Object.assign(new Error('Transport unavailable'), { code })
+      await act(async () => {
+        devices[0].emit('error', error)
+      })
+      expect(container.textContent).not.toBe('Ready')
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(8_000)
+        devices[0].emit('error', error)
+        await vi.advanceTimersByTimeAsync(4_000)
+      })
+      expect(container.textContent).toBe('Ready')
+      expect(devices).toHaveLength(2)
+    },
+  )
+
+  it('lets an in-flight SDK registration finish without replacing its device', async () => {
+    const { devices, container, fetchCredentials } =
+      await renderCallingProvider()
+    const device = devices[0]
+    await act(async () => {
+      device.state = 'registering'
+      device.emit(
+        'error',
+        Object.assign(new Error('Transport unavailable'), { code: 31009 }),
+      )
+      window.dispatchEvent(new Event('focus'))
+      window.dispatchEvent(new Event('online'))
+      await vi.advanceTimersByTimeAsync(30_000)
+    })
+    expect(device.destroy).not.toHaveBeenCalled()
+    expect(device.register).toHaveBeenCalledTimes(1)
+    expect(fetchCredentials).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      device.state = 'registered'
+      device.emit('registered')
+      await vi.advanceTimersByTimeAsync(30_000)
+    })
+    expect(container.textContent).toBe('Ready')
+    expect(device.destroy).not.toHaveBeenCalled()
+  })
+
+  it.each(['incoming', 'active', 'reconnecting'])(
+    'does not interrupt an %s call to recover its device',
+    async (phase) => {
+      const { devices, container, fetchCredentials } =
+        await renderCallingProvider()
+      const { call, events } = createMicrophoneCall()
+      let status = phase === 'incoming' ? 'pending' : 'open'
+      Object.assign(call, {
+        parameters: { From: '+15555550123' },
+        status: () => status,
+        accept: () => events.emit('accept'),
+        disconnect: vi.fn(),
+      })
+      await act(async () => {
+        devices[0].emit('incoming', call)
+      })
+      if (phase !== 'incoming') {
+        await act(async () => container.querySelector('button')?.click())
+        expect(container.textContent).toContain('Call active')
+      }
+      await act(async () => {
+        events.emit('transportClose')
+        if (phase === 'reconnecting') {
+          status = 'reconnecting'
+          events.emit('reconnecting', new Error('Signaling unavailable'))
+        }
+        devices[0].state = 'unregistered'
+        devices[0].emit('unregistered')
+        devices[0].emit(
+          'error',
+          Object.assign(new Error('Connection failed'), { code: 31005 }),
+        )
+        window.dispatchEvent(new Event('focus'))
+        await vi.advanceTimersByTimeAsync(30_000)
+      })
+      expect(devices[0].destroy).not.toHaveBeenCalled()
+      expect(fetchCredentials).toHaveBeenCalledTimes(1)
+      expect(container.textContent).toContain(
+        phase === 'incoming' ? 'Answer' : 'Call active',
+      )
+
+      await act(async () => {
+        events.emit('disconnect')
+        await vi.advanceTimersByTimeAsync(2_000)
+      })
+      expect(container.textContent).toBe('Ready')
+    },
+  )
+
+  it('bounds failed recovery attempts despite repeated browser wakeups', async () => {
+    const { devices, fetchCredentials } = await renderCallingProvider()
+    fetchCredentials.mockRejectedValue(new Error('Network unavailable'))
+    await act(async () => {
+      devices[0].state = 'unregistered'
+      devices[0].emit('unregistered')
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+    expect(fetchCredentials).toHaveBeenCalledTimes(2)
+    await act(async () => {
+      for (let index = 0; index < 20; index += 1) {
+        window.dispatchEvent(new Event('focus'))
+        window.dispatchEvent(new Event('online'))
+      }
+      await vi.advanceTimersByTimeAsync(8_000)
+    })
+    expect(fetchCredentials).toHaveBeenCalledTimes(2)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000)
+    })
+    expect(fetchCredentials).toHaveBeenCalledTimes(3)
   })
 })
 

@@ -12,10 +12,27 @@ function WorkerStatus({
   worker: WorkerEntry
   index: number
 }) {
-  if (worker.status === 'busy') {
+  if (worker.status !== 'available') {
+    const ringing = worker.status === 'ringing'
     return (
-      <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-50 text-green-700 border border-green-200">
-        <span className="inline-block size-1.5 rounded-full bg-green-500 animate-pulse shrink-0" />
+      <span
+        role="img"
+        aria-label={`${worker.name}: ${ringing ? 'ringing' : 'connected'}`}
+        className={cn(
+          'flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border',
+          {
+            'bg-amber-50 text-amber-800 border-amber-200': ringing,
+            'bg-green-50 text-green-800 border-green-200': !ringing,
+          },
+        )}
+      >
+        <span
+          aria-hidden="true"
+          className={cn(
+            'inline-block size-1.5 rounded-full animate-pulse shrink-0',
+            { 'bg-amber-500': ringing, 'bg-green-500': !ringing },
+          )}
+        />
         {worker.name}
       </span>
     )
@@ -49,7 +66,12 @@ export function OnPhonesIndicator() {
   const active = workers.length > 0
 
   return (
-    <div className="hidden sm:flex items-center gap-1.5 rounded-full border border-border bg-secondary/50 px-2 py-1 text-sm">
+    <div
+      role="status"
+      aria-label="Round-robin call status"
+      aria-live="polite"
+      className="hidden sm:flex items-center gap-1.5 rounded-full border border-border bg-secondary/50 px-2 py-1 text-sm"
+    >
       <Phone
         className={cn(
           'size-3.5 shrink-0 mx-1',

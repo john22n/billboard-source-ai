@@ -3,14 +3,15 @@ import { db } from '@/db'
 import { user } from '@/db/schema'
 import { getSessionWithoutRefresh } from '@/lib/auth'
 import { isMissingConfig, serverConfig } from '@/lib/config'
+import { readCallOffer, type CurrentCall } from '@/lib/taskrouter-call-state'
 
 const VOICEMAIL_EMAIL = 'voicemail@system'
-const CACHE_TTL_MS = 4_000
+const CACHE_TTL_MS = 1_000
 
 interface WorkerEntry {
   id: string
   name: string
-  status: 'available' | 'busy'
+  status: 'available' | 'ringing' | 'busy'
 }
 
 interface SortableWorkerEntry extends WorkerEntry {
@@ -22,8 +23,13 @@ interface UserRoster {
   workerSids: Set<string>
 }
 
-let cachedWorkers: { workers: WorkerEntry[]; expiresAt: number } | null = null
-let pendingWorkers: Promise<WorkerEntry[]> | null = null
+interface WorkerSnapshot {
+  workers: WorkerEntry[]
+  calls: Map<string, CurrentCall>
+}
+
+let cachedWorkers: { snapshot: WorkerSnapshot; expiresAt: number } | null = null
+let pendingWorkers: Promise<WorkerSnapshot> | null = null
 
 function firstNameFromEmail(email: string): string {
   const local = email.split('@')[0]
@@ -72,8 +78,14 @@ function rosterWorker(
   },
   roster: UserRoster,
   activitySids: { available: string; busy: string },
+  calls: Map<string, CurrentCall>,
 ): SortableWorkerEntry | null {
-  const status = workerStatus(worker, activitySids)
+  const call = calls.get(worker.sid)
+  const status = call
+    ? call.status === 'ringing'
+      ? 'ringing'
+      : 'busy'
+    : workerStatus(worker, activitySids)
   if (!status) return null
 
   const email = workerEmail(worker).toLowerCase()
@@ -88,9 +100,9 @@ function rosterWorker(
   }
 }
 
-async function fetchWorkers(): Promise<WorkerEntry[]> {
+async function fetchWorkers(): Promise<WorkerSnapshot> {
   if (cachedWorkers && cachedWorkers.expiresAt > Date.now()) {
-    return cachedWorkers.workers
+    return cachedWorkers.snapshot
   }
 
   if (pendingWorkers) return pendingWorkers
@@ -105,7 +117,7 @@ async function fetchWorkers(): Promise<WorkerEntry[]> {
     ] as const)
     const client = twilio(accountSid, authToken)
 
-    const [twilioWorkers, users] = await Promise.all([
+    const [twilioWorkers, users, tasks] = await Promise.all([
       client.taskrouter.v1
         .workspaces(workspaceSid)
         .workers.list({ pageSize: 1_000 }),
@@ -115,7 +127,30 @@ async function fetchWorkers(): Promise<WorkerEntry[]> {
           taskRouterWorkerSid: user.taskRouterWorkerSid,
         })
         .from(user),
+      client.taskrouter.v1.workspaces(workspaceSid).tasks.list({
+        assignmentStatus: ['reserved', 'assigned'],
+        pageSize: 1_000,
+      }),
     ])
+
+    const calls = new Map<string, CurrentCall>()
+    for (const task of tasks) {
+      try {
+        const attributes = JSON.parse(task.attributes || '{}')
+        const offer = readCallOffer(attributes)
+        if (!offer || typeof attributes.call_sid !== 'string') continue
+        calls.set(offer.workerSid, {
+          taskSid: task.sid,
+          callSid: attributes.call_sid,
+          callerFrom:
+            typeof attributes.from === 'string' ? attributes.from : '',
+          status: offer.status,
+          channel: offer.channel,
+        })
+      } catch {
+        // Legacy/non-voice tasks do not have this application's call offer.
+      }
+    }
 
     const roster = {
       emails: new Set(users.map((entry) => entry.email.toLowerCase())),
@@ -126,7 +161,7 @@ async function fetchWorkers(): Promise<WorkerEntry[]> {
       ),
     }
     const relevantWorkers = twilioWorkers
-      .map((worker) => rosterWorker(worker, roster, activitySids))
+      .map((worker) => rosterWorker(worker, roster, activitySids, calls))
       .filter((worker): worker is SortableWorkerEntry => worker !== null)
 
     const availableWorkers = relevantWorkers
@@ -137,14 +172,21 @@ async function fetchWorkers(): Promise<WorkerEntry[]> {
           new Date(b.dateStatusChanged).getTime(),
       )
     const busyWorkers = relevantWorkers.filter(
-      (worker) => worker.status === 'busy',
+      (worker) => worker.status !== 'available',
     )
     const workers = [...availableWorkers, ...busyWorkers].map(
       ({ id, name, status }) => ({ id, name, status }),
     )
 
-    cachedWorkers = { workers, expiresAt: Date.now() + CACHE_TTL_MS }
-    return workers
+    // Keep caller numbers inside the server-side snapshot. A response only
+    // includes the caller belonging to its authenticated rep, never the roster.
+    for (const worker of twilioWorkers) {
+      const call = calls.get(worker.sid)
+      if (call) calls.set(workerEmail(worker).toLowerCase(), call)
+    }
+    const snapshot = { workers, calls }
+    cachedWorkers = { snapshot, expiresAt: Date.now() + CACHE_TTL_MS }
+    return snapshot
   })()
 
   try {
@@ -161,11 +203,14 @@ export async function GET() {
       return Response.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const workers = await fetchWorkers()
+    const { workers, calls } = await fetchWorkers()
+    const currentCall =
+      calls.get(session.taskRouterWorkerSid || session.email.toLowerCase()) ??
+      null
 
     return Response.json(
-      { workers },
-      { headers: { 'Cache-Control': 'no-store' } },
+      { workers, currentCall },
+      { headers: { 'Cache-Control': 'private, no-store' } },
     )
   } catch (error) {
     if (isMissingConfig(error)) {

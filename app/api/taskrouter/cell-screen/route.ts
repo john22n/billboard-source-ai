@@ -23,6 +23,16 @@ export async function POST(req: Request) {
 
     // ── action URL for the gather ─────────────────────────────────────────────
     const acceptUrl = new URL(`${appUrl}/api/taskrouter/cell-screen-accept`)
+    const query = new URL(req.url).searchParams
+    for (const key of [
+      'taskSid',
+      'workspaceSid',
+      'workerSid',
+      'reservationSid',
+    ]) {
+      const value = query.get(key)
+      if (value) acceptUrl.searchParams.set(key, value)
+    }
     serverConfig.app.addVercelBypassToken(acceptUrl)
 
     const escapeXml = (s: string): string =>

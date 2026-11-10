@@ -38,6 +38,7 @@ import { useMockupSession } from '@/hooks/useMockupSession'
 import { useMockupStore } from '@/stores/mockupStore'
 import { ArtMockupWizard } from '@/components/mockup/ArtMockupWizard'
 import { useDashboardStore } from '@/stores/dashboardStore'
+import { useAvailableWorkers } from '@/hooks/useAvailableWorkers'
 
 type NutshellFormData = ReturnType<
   ReturnType<typeof useFormStore.getState>['getFormData']
@@ -362,7 +363,45 @@ type CallHeaderProps = {
   onClearError: () => void
 }
 
+function IncomingCallNotice({
+  incomingCall,
+  onAcceptCall,
+  onRejectCall,
+}: Pick<CallHeaderProps, 'incomingCall' | 'onAcceptCall' | 'onRejectCall'>) {
+  if (!incomingCall) return null
+
+  return (
+    <div className="bg-green-500/30 border border-white/30 rounded px-2 sm:px-3 py-1.5 sm:py-2 animate-pulse">
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-1.5 sm:gap-2">
+        <p className="text-white text-xs sm:text-sm font-semibold">
+          📞 Incoming:{' '}
+          {incomingCall.customParameters?.get('callerFrom') ||
+            incomingCall.parameters.From}
+        </p>
+        <div className="flex gap-1.5 sm:gap-2">
+          <Button
+            onClick={onAcceptCall}
+            size="sm"
+            className="bg-green-600 hover:bg-green-700 h-6 sm:h-7 text-xs px-2 sm:px-3"
+          >
+            Accept
+          </Button>
+          <Button
+            onClick={onRejectCall}
+            size="sm"
+            variant="destructive"
+            className="h-6 sm:h-7 text-xs px-2 sm:px-3"
+          >
+            Reject
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function CallHeader(props: CallHeaderProps) {
+  const { currentCall } = useAvailableWorkers()
   const {
     userEmail,
     status,
@@ -388,6 +427,12 @@ function CallHeader(props: CallHeaderProps) {
     onRetryExtraction,
     onClearError,
   } = props
+  const routedCall = !incomingCall && !callActive && currentCall
+  const routedStatus = routedCall
+    ? routedCall.status === 'ringing'
+      ? 'Incoming call'
+      : 'On call'
+    : status
 
   return (
     <CardHeader className="bg-gradient-to-r from-blue-600 via-indigo-600 to-primary text-white py-2 sm:py-3 px-3 sm:px-4 flex-shrink-0">
@@ -407,12 +452,12 @@ function CallHeader(props: CallHeaderProps) {
             <div
               className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs ${isProcessing ? 'animate-pulse' : ''}`}
             >
-              {twilioReady && !callActive && (
+              {twilioReady && !callActive && !currentCall && (
                 <span
                   className={`inline-block w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full flex-shrink-0 ${status === 'Ready to receive calls' ? 'bg-green-600 animate-pulse' : 'bg-red-600'}`}
                 ></span>
               )}
-              {callActive && (
+              {(callActive || currentCall?.status === 'answered') && (
                 <span className="inline-block w-1.5 h-1.5 sm:w-2 sm:h-2 bg-red-400 rounded-full animate-pulse flex-shrink-0"></span>
               )}
               <span
@@ -420,7 +465,7 @@ function CallHeader(props: CallHeaderProps) {
                 aria-live="polite"
                 className="font-medium truncate max-w-[100px] sm:max-w-none"
               >
-                {status}
+                {routedStatus}
               </span>
             </div>
             <MicrophoneIndicator
@@ -444,41 +489,18 @@ function CallHeader(props: CallHeaderProps) {
                 size="sm"
                 variant="secondary"
                 className="flex-1 sm:flex-initial bg-white/20 hover:bg-white/30 text-white border border-white/30 font-semibold backdrop-blur-sm h-7 sm:h-8 text-[10px] sm:text-xs px-2 sm:px-3"
-                disabled={callActive}
+                disabled={callActive || !!currentCall}
               >
                 Clear
               </Button>
             </div>
           </div>
         </div>
-        {incomingCall && (
-          <div className="bg-green-500/30 border border-white/30 rounded px-2 sm:px-3 py-1.5 sm:py-2 animate-pulse">
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-1.5 sm:gap-2">
-              <p className="text-white text-xs sm:text-sm font-semibold">
-                📞 Incoming:{' '}
-                {incomingCall.customParameters?.get('callerFrom') ||
-                  incomingCall.parameters.From}
-              </p>
-              <div className="flex gap-1.5 sm:gap-2">
-                <Button
-                  onClick={onAcceptCall}
-                  size="sm"
-                  className="bg-green-600 hover:bg-green-700 h-6 sm:h-7 text-xs px-2 sm:px-3"
-                >
-                  Accept
-                </Button>
-                <Button
-                  onClick={onRejectCall}
-                  size="sm"
-                  variant="destructive"
-                  className="h-6 sm:h-7 text-xs px-2 sm:px-3"
-                >
-                  Reject
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
+        <IncomingCallNotice
+          incomingCall={incomingCall}
+          onAcceptCall={onAcceptCall}
+          onRejectCall={onRejectCall}
+        />
         {callerPhone && !incomingCall && (
           <div className="px-2 py-1 bg-blue-500/30 backdrop-blur-sm border border-blue-300/30 rounded text-[10px] sm:text-xs w-fit">
             <span className="text-white font-medium">
@@ -902,12 +924,14 @@ function TabbedBody(props: TabbedBodyProps) {
 }
 
 function useCallerPhone(incomingCall: TwilioState['incomingCall']) {
+  const { currentCall } = useAvailableWorkers()
+  const routedFrom = currentCall?.callerFrom
   const [callerPhone, setCallerPhone] = useState<string>('')
 
   useEffect(() => {
-    if (!incomingCall) return
-    const customFrom = incomingCall.customParameters?.get('callerFrom')
-    const from = customFrom || incomingCall.parameters?.From || ''
+    const customFrom = incomingCall?.customParameters?.get('callerFrom')
+    const from =
+      customFrom || incomingCall?.parameters?.From || routedFrom || ''
     if (!from) return
     console.log(
       '📞 Captured caller phone:',
@@ -917,7 +941,7 @@ function useCallerPhone(incomingCall: TwilioState['incomingCall']) {
     // The Twilio call object is external state; preserve the last captured number.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setCallerPhone(from)
-  }, [incomingCall])
+  }, [incomingCall, routedFrom])
 
   return { callerPhone, setCallerPhone }
 }
@@ -983,6 +1007,7 @@ function useCallSessionProtection(
     'startTranscription' | 'stopTranscription'
   >,
 ) {
+  const { currentCall } = useAvailableWorkers()
   const [hasPendingSubmission, setHasPendingSubmission] = useState(false)
   const handleCallAccepted = useCallback(
     (call: { parameters: { CallSid?: string } }) => {
@@ -1002,7 +1027,11 @@ function useCallSessionProtection(
   )
   useCallLifecycle(twilio, transcription, sessionIssuedAt, handleCallAccepted)
   const markSubmitted = useCallback(() => setHasPendingSubmission(false), [])
-  return { hasPendingSubmission, markSubmitted }
+  return {
+    hasPendingSubmission,
+    markSubmitted,
+    hasActiveCall: twilio.callActive || !!currentCall,
+  }
 }
 
 function formatTranscript(transcripts: TranscriptionState['transcripts']) {
@@ -1408,7 +1437,7 @@ export default function SalesCallTranscriber({
   )
   useAutoLogout(
     sessionIssuedAt,
-    twilio.callActive ||
+    callSession.hasActiveCall ||
       callSession.hasPendingSubmission ||
       nutshell.isSubmittingNutshell,
   )

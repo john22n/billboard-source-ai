@@ -36,6 +36,7 @@ vi.mock('@/lib/config', async (importOriginal) => {
 
 import { GET } from './route'
 import { POST as acceptCell } from '../../taskrouter/cell-screen-accept/route'
+import { POST as legStatus } from '../../taskrouter/client-status/route'
 
 describe('GET /api/workers/available without Busy activity configuration', () => {
   beforeEach(() => {
@@ -120,10 +121,26 @@ describe('call status shared by the cell and site', () => {
         channel: null,
       },
     })
+    let failFetch = true
+    let failUpdate = true
     const tasks = Object.assign(
       () => ({
-        fetch: async () => ({ ...task }),
+        fetch: async () => {
+          if (failFetch) {
+            failFetch = false
+            throw Object.assign(new Error('Temporary TaskRouter outage'), {
+              status: 503,
+            })
+          }
+          return { ...task }
+        },
         update: async ({ attributes }: { attributes: string }) => {
+          if (failUpdate) {
+            failUpdate = false
+            throw Object.assign(new Error('Temporary TaskRouter outage'), {
+              status: 503,
+            })
+          }
           task.attributes = attributes
           return { ...task }
         },
@@ -176,6 +193,57 @@ describe('call status shared by the cell and site', () => {
       channel: null,
     })
 
+    getSession.mockResolvedValue({
+      userId: 'rep-2',
+      taskRouterWorkerSid: 'WK-next',
+    })
+    const observerRinging = await (await GET()).json()
+    expect(observerRinging.workers).toContainEqual({
+      id: 'WK-rep',
+      name: 'Rep',
+      status: 'ringing',
+    })
+    expect(observerRinging.currentCall).toBeNull()
+    expect(JSON.stringify(observerRinging)).not.toContain('+13035550123')
+    getSession.mockResolvedValue({
+      userId: 'rep-1',
+      taskRouterWorkerSid: 'WK-rep',
+    })
+
+    const callback = (
+      route: string,
+      parameters: Record<string, string>,
+      query = '',
+    ) =>
+      new Request(
+        `https://app.example/api/taskrouter/${route}?taskSid=WT-call&workspaceSid=WS-test&workerSid=WK-rep&reservationSid=WR-offer${query}`,
+        {
+          method: 'POST',
+          body: new URLSearchParams({
+            CallSid: 'CA-child',
+            ParentCallSid: 'CA-parent',
+            ...parameters,
+          }),
+        },
+      )
+
+    // Carrier answer and the wrong screening digit must both remain ringing.
+    expect(
+      (
+        await legStatus(
+          callback('client-status', { CallStatus: 'in-progress' }, '&leg=cell'),
+        )
+      ).status,
+    ).toBe(204)
+    expect(
+      await (
+        await acceptCell(callback('cell-screen-accept', { Digits: '2' }))
+      ).text(),
+    ).toContain('<Hangup/>')
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect((await (await GET()).json()).currentCall.status).toBe('ringing')
+
+    // Acceptance must survive transient failures reading and writing the offer.
     const response = await acceptCell(
       new Request(
         'https://app.example/api/taskrouter/cell-screen-accept?taskSid=WT-call&workspaceSid=WS-test&workerSid=WK-rep',
@@ -196,7 +264,6 @@ describe('call status shared by the cell and site', () => {
       id: 'WK-rep',
       name: 'Rep',
       status: 'busy',
-      callChannel: 'cell',
     })
     expect(answered.currentCall).toMatchObject({
       status: 'answered',
@@ -224,6 +291,57 @@ describe('call status shared by the cell and site', () => {
       id: 'WK-rep',
       name: 'Rep',
       status: 'available',
+    })
+
+    // Late callbacks cannot resurrect a completed offer.
+    await acceptCell(callback('cell-screen-accept', { Digits: '1' }))
+    await legStatus(
+      callback('client-status', { CallStatus: 'in-progress' }, '&leg=browser'),
+    )
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect((await (await GET()).json()).currentCall).toBeNull()
+
+    // A subsequent browser-answered call must not inherit the old cell state.
+    task.assignmentStatus = 'assigned'
+    task.attributes = JSON.stringify({
+      call_sid: 'CA-next-parent',
+      from: '+13035550987',
+      call_offer: {
+        workerSid: 'WK-rep',
+        reservationSid: 'WR-next',
+        status: 'ringing',
+        channel: null,
+      },
+    })
+    await acceptCell(callback('cell-screen-accept', { Digits: '1' }))
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect((await (await GET()).json()).currentCall.status).toBe('ringing')
+
+    const browserResponse = await legStatus(
+      new Request(
+        'https://app.example/api/taskrouter/client-status?taskSid=WT-call&workspaceSid=WS-test&workerSid=WK-rep&reservationSid=WR-next&leg=browser',
+        {
+          method: 'POST',
+          body: new URLSearchParams({
+            CallStatus: 'in-progress',
+            CallSid: 'CA-browser',
+            ParentCallSid: 'CA-next-parent',
+          }),
+        },
+      ),
+    )
+    expect(browserResponse.status).toBe(204)
+    await vi.advanceTimersByTimeAsync(2_000)
+    const browserAnswered = await (await GET()).json()
+    expect(browserAnswered.currentCall).toMatchObject({
+      status: 'answered',
+      channel: 'browser',
+      callerFrom: '+13035550987',
+    })
+    expect(browserAnswered.workers).toContainEqual({
+      id: 'WK-rep',
+      name: 'Rep',
+      status: 'busy',
     })
   })
 })
