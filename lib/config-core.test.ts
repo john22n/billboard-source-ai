@@ -7,6 +7,67 @@ import {
 } from './config-core'
 
 describe('server config', () => {
+  it('opts into Cloud SQL on Vercel without requiring a Neon URL', () => {
+    const config = createServerConfig({
+      VERCEL: '1',
+      CLOUD_SQL_INSTANCE_CONNECTION_NAME: 'project:us-central1:database',
+      CLOUD_SQL_DATABASE: 'billboard',
+      CLOUD_SQL_USER: 'app',
+      CLOUD_SQL_PASSWORD: 'test-password',
+      GCP_PROJECT_NUMBER: '123456789012',
+      GCP_WORKLOAD_IDENTITY_POOL_ID: 'test-pool',
+      GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID: 'test-provider',
+      GCP_SERVICE_ACCOUNT_EMAIL: 'app@project.iam.gserviceaccount.com',
+    })
+
+    expect(config.database.useNeon).toBe(false)
+    expect(config.database).toHaveProperty('cloudSql', {
+      instanceConnectionName: 'project:us-central1:database',
+      database: 'billboard',
+      user: 'app',
+      password: 'test-password',
+      federation: {
+        audience:
+          'https://iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/test-pool/providers/test-provider',
+        serviceAccountEmail: 'app@project.iam.gserviceaccount.com',
+      },
+    })
+    expect(createServerConfig({ VERCEL: '1' }).database.useNeon).toBe(true)
+    expect(createServerConfig({}).database.useNeon).toBe(false)
+    expect(createServerConfig({}).database).toHaveProperty('cloudSql', null)
+
+    const incomplete = createServerConfig({
+      VERCEL: '1',
+      CLOUD_SQL_INSTANCE_CONNECTION_NAME: 'project:us-central1:database',
+      DATABASE_URL: 'postgresql://unused.example/neon',
+    })
+    expect(incomplete.database.useNeon).toBe(false)
+    expect(() => Reflect.get(incomplete.database, 'cloudSql')).toThrow(
+      'CLOUD_SQL_DATABASE',
+    )
+
+    const databaseEnv = {
+      CLOUD_SQL_INSTANCE_CONNECTION_NAME: 'project:us-central1:database',
+      CLOUD_SQL_DATABASE: 'billboard',
+      CLOUD_SQL_USER: 'app',
+      CLOUD_SQL_PASSWORD: 'test-password',
+    }
+    expect(createServerConfig(databaseEnv).database).toHaveProperty(
+      'cloudSql.federation',
+      null,
+    )
+    expect(() =>
+      Reflect.get(
+        createServerConfig({ ...databaseEnv, VERCEL: '1' }).database,
+        'cloudSql',
+      ),
+    ).toThrow('GCP_PROJECT_NUMBER')
+    expect(
+      createServerConfig({ VERCEL: '1', GCP_PROJECT_NUMBER: '123456789012' })
+        .database.useNeon,
+    ).toBe(true)
+  })
+
   it('requires a sufficiently long JWT secret without falling back', () => {
     const config = createServerConfig({})
 
