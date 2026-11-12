@@ -21,14 +21,14 @@ describe('server config', () => {
     })
 
     expect(config.database.useNeon).toBe(false)
-    expect(config.database).toHaveProperty('cloudSql', {
+    expect(config.database.cloudSql).toEqual({
       instanceConnectionName: 'project:us-central1:database',
       database: 'billboard',
       user: 'app',
       password: 'test-password',
       federation: {
         audience:
-          'https://iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/test-pool/providers/test-provider',
+          '//iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/test-pool/providers/test-provider',
         serviceAccountEmail: 'app@project.iam.gserviceaccount.com',
       },
     })
