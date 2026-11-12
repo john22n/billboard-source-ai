@@ -96,6 +96,16 @@ export interface ServerConfig {
   database: {
     url: string
     useNeon: boolean
+    cloudSql: {
+      instanceConnectionName: string
+      database: string
+      user: string
+      password: string
+      federation: {
+        audience: string
+        serviceAccountEmail: string
+      } | null
+    } | null
   }
   openai: {
     apiKey: string | null
@@ -205,6 +215,21 @@ const taskRouterActivityEnvKeys: Record<TaskRouterActivityName, string> = {
   unavailable: 'TASKROUTER_ACTIVITY_UNAVAILABLE_SID',
   offline: 'TASKROUTER_ACTIVITY_OFFLINE_SID',
   busy: 'TASKROUTER_ACTIVITY_BUSY_SID',
+}
+
+function cloudSqlFederation(env: EnvSource) {
+  const path = 'serverConfig.database.cloudSql.federation'
+  const projectNumber = requiredString(env, 'GCP_PROJECT_NUMBER', path)
+  const poolId = requiredString(env, 'GCP_WORKLOAD_IDENTITY_POOL_ID', path)
+  const providerId = requiredString(
+    env,
+    'GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID',
+    path,
+  )
+  return {
+    audience: `https://iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`,
+    serviceAccountEmail: requiredString(env, 'GCP_SERVICE_ACCOUNT_EMAIL', path),
+  }
 }
 
 export function createServerConfig(env: EnvSource): ServerConfig {
@@ -543,7 +568,36 @@ export function createServerConfig(env: EnvSource): ServerConfig {
       get url() {
         return requiredString(env, 'DATABASE_URL', 'serverConfig.database.url')
       },
-      useNeon: isVercel,
+      useNeon:
+        isVercel && !optionalString(env, 'CLOUD_SQL_INSTANCE_CONNECTION_NAME'),
+      get cloudSql() {
+        const instanceConnectionName = optionalString(
+          env,
+          'CLOUD_SQL_INSTANCE_CONNECTION_NAME',
+        )
+        if (!instanceConnectionName) return null
+        return {
+          instanceConnectionName,
+          database: requiredString(
+            env,
+            'CLOUD_SQL_DATABASE',
+            'serverConfig.database.cloudSql.database',
+          ),
+          user: requiredString(
+            env,
+            'CLOUD_SQL_USER',
+            'serverConfig.database.cloudSql.user',
+          ),
+          password:
+            env.CLOUD_SQL_PASSWORD ||
+            requiredString(
+              env,
+              'CLOUD_SQL_PASSWORD',
+              'serverConfig.database.cloudSql.password',
+            ),
+          federation: isVercel ? cloudSqlFederation(env) : null,
+        }
+      },
     },
     openai,
     twilio,
