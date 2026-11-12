@@ -41,23 +41,21 @@ export class CloudSqlPool extends Pool {
           subject_token_supplier: {
             // Fetch a current token on every refresh, not once at module load.
             getSubjectToken: () =>
-              getVercelOidcToken({ audience: federation.audience }),
+              getVercelOidcToken({ audience: `https:${federation.audience}` }),
           },
         })
       : undefined
-    this.connector = new Connector({ auth })
-    try {
-      Object.assign(
-        this.options,
-        await this.connector.getOptions({
-          instanceConnectionName: this.config.instanceConnectionName,
-          ipType: IpAddressTypes.PUBLIC,
-        }),
-      )
-    } catch (error) {
-      this.connector.close()
-      throw error
-    }
+    const connector = new Connector({ auth })
+    Object.assign(
+      this.options,
+      await connector.getOptions({
+        instanceConnectionName: this.config.instanceConnectionName,
+        ipType: IpAddressTypes.PUBLIC,
+      }),
+    )
+    // Failed initial refreshes have no sockets or refresh timers to close.
+    // Connector 1.13 close() on a failed refresh creates an unhandled rejection.
+    this.connector = connector
   }
 
   override connect(): Promise<PoolClient>

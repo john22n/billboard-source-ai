@@ -227,7 +227,7 @@ function cloudSqlFederation(env: EnvSource) {
     path,
   )
   return {
-    audience: `https://iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`,
+    audience: `//iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`,
     serviceAccountEmail: requiredString(env, 'GCP_SERVICE_ACCOUNT_EMAIL', path),
   }
 }

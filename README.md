@@ -81,10 +81,12 @@ Cloud SQL Admin. No service-account JSON key is used or required.
 
 On Vercel, authentication uses OIDC and Google Workload Identity Federation.
 Configure the provider with the exact Vercel **team issuer**, **Default audience**,
-and `google.subject = assertion.sub`. The app derives the audience as
-`https://iam.googleapis.com/projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/POOL_ID/providers/PROVIDER_ID`
-and requests a fresh Vercel token with that audience whenever Google credentials
-need refreshing. Do not use the project's name in place of the team slug.
+and `google.subject = assertion.sub`. The app derives the Google STS audience as
+`//iam.googleapis.com/projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/POOL_ID/providers/PROVIDER_ID`.
+It requests a fresh Vercel token with `https:` prepended to that resource name
+whenever Google credentials need refreshing. Google's default OIDC audience
+accepts this HTTPS form, but the STS request requires the resource name without
+`https:`. Do not use the project's name in place of the team slug.
 Grant `roles/iam.workloadIdentityUser` on the service account to the exact subject
 `owner:TEAM_SLUG:project:PROJECT_NAME:environment:preview`, and restrict the provider
 condition to that subject for Preview testing. Production requires a separately
