@@ -103,6 +103,12 @@ The connector handles transport TLS; do not add a separate `sslmode` or disable
 certificate verification globally. Use Vercel's Node.js runtime with Node.js 22
 or newer (matching `.node-version`), not the Edge runtime.
 
+On a protected Preview with Cloud SQL enabled, `GET /api/health/cloud-sql`
+executes only `SELECT 1` and returns `{ "connected": true }` on success, or a
+generic 503 on failure. It returns 404 outside Preview or when Cloud SQL is not
+enabled. This checks connectivity without requiring a restored schema, reading
+application data, or writing anything. Keep Vercel deployment protection enabled.
+
 `DATABASE_URL` is ignored by the application's Cloud SQL path. Drizzle CLI and
 standalone maintenance scripts still use `DATABASE_URL`, not this connector.
 For those tools, use an authenticated Cloud SQL Auth Proxy and an explicitly
