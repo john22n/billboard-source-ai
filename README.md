@@ -1,8 +1,41 @@
 # billboard-source-ai
 
-website: https://www.billboardsource.com/index.html
+Billboard Source's sales application combines AI-assisted creative generation,
+CRM lead submission, and telephony administration in a TypeScript, React, and
+Next.js application backed by PostgreSQL.
 
-The offical BillBoard Source Company AI application
+The product has supported **more than $2M in sales since its late-January 2026
+launch**, as reported by John Noriega in November 2026. His work began as a
+consultant in January 2025 and continued full-time from July 2026. This is a
+product-level sales outcome, not revenue attributed to any single AI feature.
+
+Company website: https://www.billboardsource.com/index.html  
+Application: https://billboard-source-ai.vercel.app (authorized access required;
+not a public demo with disposable customer data).
+
+## Engineering decisions and evidence
+
+- **Keep creative output connected to the sales workflow.**
+  [Lead submission](app/api/nutshell/create-lead/route.ts) and
+  [attachment handling](lib/mockup/nutshell.ts) connect generated artwork to
+  Nutshell. [Signed receipts](lib/mockup/receipts.ts) support retrying attachments
+  against the existing lead rather than creating another lead after an upload
+  failure.
+- **Keep provider credentials server-side.**
+  [Voicemail administration](app/api/admin/voicemail-ai/route.ts) requires an
+  admin session, while [provider log retrieval](lib/voicemail-ai-logs.ts) keeps
+  Twilio access on the server. Browser-facing functionality does not require
+  handing provider credentials to employees' browsers.
+- **Test workflows without production services.**
+  [Playwright tests](tests/end-to-end/) exercise login and Creative Studio with
+  disposable PostgreSQL and mocked AI/telephony responses. This checks user
+  flows and request contracts, not live model quality. The
+  [CI workflow](.github/workflows/ci-cd.yml) also runs linting, type checks, unit
+  tests, dependency auditing, and SBOM generation.
+
+The operational notes below describe configuration, failure modes, and rollout
+requirements. Do not run database or provider setup commands against production
+as part of a portfolio demonstration.
 
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
