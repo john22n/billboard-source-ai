@@ -2,13 +2,11 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { Client } from 'pg'
-import { drizzle } from 'drizzle-orm/node-postgres'
-import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { generateDrizzleJson, generateMigration } from 'drizzle-kit/api'
 import { afterAll, beforeAll, expect, test } from 'vitest'
 import * as schema from '../db/schema'
+import { migrateDev as runMigrations } from './migrate-dev'
 
 // Opt in because this suite starts disposable PostgreSQL 18 with pgvector.
 const enabled = process.env.BILLBOARD_MIGRATION_TEST === '1'
@@ -62,11 +60,10 @@ beforeAll(async () => {
     database: 'postgres',
   })
   await admin.connect()
-  expect(
-    Number(
-      (await admin.query('SHOW server_version_num')).rows[0].server_version_num,
-    ),
-  ).toBeGreaterThanOrEqual(180000)
+  const serverVersion = Number(
+    (await admin.query('SHOW server_version_num')).rows[0].server_version_num,
+  )
+  expect(Math.floor(serverVersion / 10000)).toBe(18)
   await admin.query(
     `CREATE ROLE "${owner}" LOGIN; CREATE ROLE billboard_app_dev LOGIN`,
   )
@@ -79,7 +76,7 @@ beforeAll(async () => {
   })
   await expected.connect()
   try {
-    await expected.query('CREATE EXTENSION vector')
+    await expected.query("CREATE EXTENSION vector VERSION '0.8.5'")
     // Independent source of truth: current application schema, not migration SQL.
     for (const sql of await generateMigration(
       generateDrizzleJson({}),
@@ -99,8 +96,15 @@ beforeAll(async () => {
   })
   await admin.connect()
   await admin.query(
-    `CREATE EXTENSION vector; GRANT CONNECT, CREATE ON DATABASE billboard_dev TO "${owner}"; GRANT USAGE, CREATE ON SCHEMA public TO "${owner}"`,
+    `CREATE EXTENSION vector VERSION '0.8.5'; GRANT CONNECT, CREATE ON DATABASE billboard_dev TO "${owner}"; GRANT USAGE, CREATE ON SCHEMA public TO "${owner}"`,
   )
+  expect(
+    (
+      await admin.query(
+        "SELECT extversion FROM pg_extension WHERE extname='vector'",
+      )
+    ).rows,
+  ).toEqual([{ extversion: '0.8.5' }])
   migrationClient = new Client({
     host: directory,
     user: owner,
@@ -110,21 +114,61 @@ beforeAll(async () => {
 }, 30000)
 
 afterAll(async () => {
-  await migrationClient?.end()
-  await admin?.end()
-  if (started)
-    execFileSync('pg_ctl', ['-D', directory, '-m', 'fast', '-w', 'stop'], {
-      stdio: 'pipe',
-    })
-  if (directory) rmSync(directory, { recursive: true, force: true })
+  const errors: unknown[] = []
+  const connections = await Promise.allSettled([
+    migrationClient?.end(),
+    admin?.end(),
+  ])
+  for (const result of connections) {
+    if (result.status === 'rejected') errors.push(result.reason)
+  }
+  try {
+    if (started) {
+      execFileSync('pg_ctl', ['-D', directory, '-m', 'fast', '-w', 'stop'], {
+        stdio: 'pipe',
+      })
+      started = false
+    }
+  } catch (error) {
+    errors.push(error)
+  }
+  // Do not delete a possibly running server's data if pg_ctl failed to stop it.
+  if (directory && !started) rmSync(directory, { recursive: true, force: true })
+  if (errors.length)
+    throw new AggregateError(errors, `PostgreSQL teardown failed: ${directory}`)
 })
 
-// Dynamic import lets the test-first commit typecheck before the runner exists.
-async function runMigrations(client: Client) {
-  const { migrateDev } = await import(
-    pathToFileURL(join(process.cwd(), 'scripts/migrate-dev.ts')).href
-  )
-  await migrateDev(client)
+async function readRerunState() {
+  return {
+    schema: (await migrationClient.query(catalog)).rows,
+    users: (await migrationClient.query('SELECT * FROM "User" ORDER BY id'))
+      .rows,
+    settings: (
+      await migrationClient.query(
+        'SELECT * FROM art_wizard_settings ORDER BY id',
+      )
+    ).rows,
+    permissions: (
+      await migrationClient.query(`SELECT c.relname,
+      CASE WHEN c.relkind='S' THEN
+        ARRAY[has_sequence_privilege('billboard_app_dev',c.oid,'USAGE'),has_sequence_privilege('billboard_app_dev',c.oid,'SELECT')]
+      ELSE ARRAY[has_table_privilege('billboard_app_dev',c.oid,'SELECT'),has_table_privilege('billboard_app_dev',c.oid,'INSERT'),
+        has_table_privilege('billboard_app_dev',c.oid,'UPDATE'),has_table_privilege('billboard_app_dev',c.oid,'DELETE')]
+      END AS privileges, c.relowner::regrole::text AS owner
+      FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+      WHERE n.nspname='public' AND c.relkind IN ('r','S') ORDER BY c.relname`)
+    ).rows,
+    defaults: (
+      await migrationClient.query(
+        'SELECT defaclrole::regrole::text,defaclnamespace::regnamespace::text,defaclobjtype,defaclacl::text FROM pg_default_acl ORDER BY defaclobjtype',
+      )
+    ).rows,
+    schemaPermissions: (
+      await migrationClient.query(
+        "SELECT has_schema_privilege('billboard_app_dev','public','USAGE') AS usage,has_schema_privilege('billboard_app_dev','public','CREATE') AS create",
+      )
+    ).rows,
+  }
 }
 
 test.skipIf(!enabled).each([
@@ -165,7 +209,7 @@ test.skipIf(!enabled)(
         ).rows[0].journal,
       ).toBeNull()
     } finally {
-      await admin.query('CREATE EXTENSION vector')
+      await admin.query("CREATE EXTENSION vector VERSION '0.8.5'")
     }
     await migrationClient.query('CREATE TABLE untracked (id integer)')
     try {
@@ -188,13 +232,16 @@ test.skipIf(!enabled)(
 test.skipIf(!enabled)(
   'the complete migration history produces the application schema and can be rerun',
   async () => {
-    const db = drizzle(migrationClient)
-    await migrate(db, { migrationsFolder: './drizzle' })
+    await runMigrations(migrationClient)
     expect((await migrationClient.query(catalog)).rows).toEqual(expectedSchema)
+    await migrationClient.query(`INSERT INTO "User" (id,email,calls_accepted) VALUES ('rerun-test','rerun@example.invalid',13);
+      INSERT INTO art_wizard_settings (id,system_prompt,image_prompts) VALUES (1,'Preserve this setting','{"poster":"Keep this prompt"}')`)
+    const stateBeforeRerun = await readRerunState()
     const before = await migrationClient.query(
       'SELECT id, hash, created_at FROM drizzle.__drizzle_migrations ORDER BY id',
     )
-    await migrate(db, { migrationsFolder: './drizzle' })
+    await runMigrations(migrationClient)
+    expect(await readRerunState()).toEqual(stateBeforeRerun)
     expect(
       (
         await migrationClient.query(
@@ -202,6 +249,9 @@ test.skipIf(!enabled)(
         )
       ).rows,
     ).toEqual(before.rows)
+    await migrationClient.query(
+      `DELETE FROM "User" WHERE id='rerun-test'; DELETE FROM art_wizard_settings WHERE id=1`,
+    )
   },
   30000,
 )

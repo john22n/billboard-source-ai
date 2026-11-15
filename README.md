@@ -59,6 +59,14 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Cloud SQL dev migrations
+
+See the [dev migration rollout](docs/cloud-sql-dev-migrations.md) for the
+PostgreSQL 18/pgvector rehearsal, administrator prerequisites, and guarded
+`db:migrate:dev` command. Run `pnpm test:db` with PostgreSQL 18 tools on `PATH`
+to test the full chain locally. Cloud SQL writes require separate approval;
+`db:push:dev` is not a dry run or an instance-safe rollout command.
+
 ## Proposal Generator
 
 The fourth dashboard tab embeds `https://geopoepoe.com/gpp/v3/proposals`.
