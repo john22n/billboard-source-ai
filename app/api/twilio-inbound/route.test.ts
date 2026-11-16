@@ -8,7 +8,10 @@ const mocks = vi.hoisted(() => ({
   workflow: vi.fn(),
 }))
 
-vi.mock('@/db', () => ({ db: { select: mocks.select } }))
+vi.mock('@/db', () => {
+  const db = { select: mocks.select }
+  return { getDb: async () => db }
+})
 vi.mock('@/db/schema', () => ({ user: { twilioPhoneNumber: 'phone' } }))
 vi.mock('drizzle-orm', () => ({ eq: vi.fn() }))
 vi.mock('@/lib/dal', () => ({ incrementMainCallsTotal: mocks.count }))

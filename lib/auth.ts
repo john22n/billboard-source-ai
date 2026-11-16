@@ -1,7 +1,7 @@
 import { compare, hash } from 'bcrypt'
 import { nanoid } from 'nanoid'
 import { cookies } from 'next/headers'
-import { db } from '@/db'
+import { getDb } from '@/db'
 import { user } from '@/db/schema'
 import * as jose from 'jose'
 import { cache } from 'react'
@@ -42,6 +42,7 @@ export async function createUser(
   const id = nanoid()
 
   try {
+    const db = await getDb()
     await db.insert(user).values({
       id,
       email,
@@ -157,6 +158,7 @@ export const getSession = cache(async () => {
     const payload = await verifyJWT(token)
     if (!payload) return null
 
+    const db = await getDb()
     const [currentUser] = await db
       .select({
         email: user.email,

@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm'
-import { db } from '@/db'
+import { getDb } from '@/db'
 import { artWizardSettings } from '@/db/schema'
 import { defaultImagePrompts, type ImagePrompts } from './instructions'
 
@@ -157,6 +157,7 @@ export async function getSystemPrompt(): Promise<{
   isDefault: boolean
   imagePrompts: ImagePrompts
 }> {
+  const db = await getDb()
   const [settings] = await db
     .select({
       prompt: artWizardSettings.systemPrompt,
@@ -174,6 +175,7 @@ export async function getSystemPrompt(): Promise<{
 }
 
 export async function saveSystemPrompt(prompt: string) {
+  const db = await getDb()
   await db
     .insert(artWizardSettings)
     .values({ id: 1, systemPrompt: prompt })
@@ -189,6 +191,7 @@ export async function resetSystemPrompt() {
 }
 
 export async function saveImagePrompts(imagePrompts: ImagePrompts | null) {
+  const db = await getDb()
   await db
     .insert(artWizardSettings)
     .values({ id: 1, systemPrompt: defaultSystemPrompt, imagePrompts })

@@ -9,7 +9,10 @@ const state = vi.hoisted(() => ({
 vi.mock('@/lib/twilio-webhook', () => ({
   isValidTwilioWebhook: async () => state.valid,
 }))
-vi.mock('@/db', () => ({ db: {} }))
+vi.mock('@/db', () => {
+  const db = {}
+  return { getDb: async () => db }
+})
 vi.mock('@/lib/call-attempt-outcomes', () => ({
   recordAcceptedAttempt: vi.fn(),
   recordMissedAttempt: vi.fn(),

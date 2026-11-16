@@ -6,7 +6,7 @@
  */
 
 import twilio from 'twilio'
-import { db } from '@/db'
+import { getDb } from '@/db'
 import { user } from '@/db/schema'
 import { eq } from 'drizzle-orm'
 import {
@@ -122,6 +122,7 @@ async function handleWorkerActivityUpdate(
     return
   }
 
+  const db = await getDb()
   const currentUser = await db
     .select({ id: user.id, email: user.email })
     .from(user)

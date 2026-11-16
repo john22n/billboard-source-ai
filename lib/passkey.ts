@@ -14,7 +14,7 @@ import type {
   RegistrationResponseJSON,
   AuthenticationResponseJSON,
 } from '@simplewebauthn/types'
-import { db } from '@/db'
+import { getDb } from '@/db'
 import { passkey, user } from '@/db/schema'
 import { eq } from 'drizzle-orm'
 import { serverConfig } from '@/lib/config'
@@ -53,6 +53,7 @@ export interface StoredPasskey {
 export async function getPasskeysByUserId(
   userId: string,
 ): Promise<StoredPasskey[]> {
+  const db = await getDb()
   const passkeys = await db
     .select()
     .from(passkey)
@@ -77,6 +78,7 @@ export async function getPasskeysByUserId(
 export async function getPasskeyByCredentialId(
   credentialId: string,
 ): Promise<StoredPasskey | null> {
+  const db = await getDb()
   const [p] = await db
     .select()
     .from(passkey)
@@ -102,6 +104,7 @@ export async function getPasskeyByCredentialId(
  * Get user by email (for passkey authentication)
  */
 export async function getUserByEmail(email: string) {
+  const db = await getDb()
   const [u] = await db.select().from(user).where(eq(user.email, email)).limit(1)
   return u || null
 }
@@ -119,6 +122,7 @@ export async function savePasskey(data: {
   transports?: string[]
   name?: string
 }) {
+  const db = await getDb()
   await db.insert(passkey).values({
     id: data.id,
     userId: data.userId,
@@ -138,6 +142,7 @@ export async function updatePasskeyCounter(
   credentialId: string,
   newCounter: number,
 ) {
+  const db = await getDb()
   await db
     .update(passkey)
     .set({ counter: newCounter })
@@ -148,6 +153,7 @@ export async function updatePasskeyCounter(
  * Delete a passkey
  */
 export async function deletePasskey(passkeyId: string) {
+  const db = await getDb()
   await db.delete(passkey).where(eq(passkey.id, passkeyId))
 }
 
@@ -302,6 +308,7 @@ export async function verifyPasskeyAuthentication(
   }
 
   // Get the userId from the passkey to identify who logged in
+  const db = await getDb()
   const [p] = await db
     .select({ userId: passkey.userId })
     .from(passkey)

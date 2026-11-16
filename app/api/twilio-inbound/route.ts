@@ -1,6 +1,6 @@
 // app/api/twilio-inbound/route.ts
 // Weekend AI coverage bypasses TaskRouter; other incoming calls are enqueued.
-import { db } from '@/db'
+import { getDb } from '@/db'
 import { user } from '@/db/schema'
 import { eq } from 'drizzle-orm'
 import { incrementMainCallsTotal } from '@/lib/dal'
@@ -48,6 +48,7 @@ async function resolveRouting(
     }
   }
 
+  const db = await getDb()
   const matchedUser = await db
     .select()
     .from(user)

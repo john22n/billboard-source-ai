@@ -11,65 +11,66 @@
  * - Adds rate-limit protection
  */
 
-import twilio from 'twilio';
-import { db } from '../db';
-import { user } from '../db/schema';
-import { eq, isNotNull } from 'drizzle-orm';
+import twilio from 'twilio'
+import { getDb, closeDb } from '../db'
+import { user } from '../db/schema'
+import { eq, isNotNull } from 'drizzle-orm'
 
-const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
-const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
-const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!;
-const ACTIVITY_OFFLINE_SID = process.env.TASKROUTER_ACTIVITY_OFFLINE_SID!;
+const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!
+const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!
+const WORKSPACE_SID = process.env.TASKROUTER_WORKSPACE_SID!
+const ACTIVITY_OFFLINE_SID = process.env.TASKROUTER_ACTIVITY_OFFLINE_SID!
 
 if (!ACCOUNT_SID || !AUTH_TOKEN || !WORKSPACE_SID || !ACTIVITY_OFFLINE_SID) {
-  console.error('❌ Missing required environment variables');
-  process.exit(1);
+  console.error('❌ Missing required environment variables')
+  process.exit(1)
 }
 
-const client = twilio(ACCOUNT_SID, AUTH_TOKEN);
+const client = twilio(ACCOUNT_SID, AUTH_TOKEN)
 
 /** Main routing number user */
-const MAIN_ROUTING_NUMBER = '+18338547126';
-const MAIN_ROUTING_EMAIL = 'tech@billboardsource.com';
+const MAIN_ROUTING_NUMBER = '+18338547126'
+const MAIN_ROUTING_EMAIL = 'tech@billboardsource.com'
 
 /** Sleep helper (rate-limit protection) */
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 async function syncWorkers() {
-  console.log('═══════════════════════════════════════════');
-  console.log('🔄 SYNCING TASKROUTER WORKERS');
-  console.log('═══════════════════════════════════════════');
+  console.log('═══════════════════════════════════════════')
+  console.log('🔄 SYNCING TASKROUTER WORKERS')
+  console.log('═══════════════════════════════════════════')
 
   /** ------------------------------------------------------------------ */
   /** Fetch existing workers                                             */
   /** ------------------------------------------------------------------ */
   const existingWorkers = await client.taskrouter.v1
     .workspaces(WORKSPACE_SID)
-    .workers.list({ limit: 200 });
+    .workers.list({ limit: 200 })
 
   const workersByEmail = new Map(
-    existingWorkers.map(w => [w.friendlyName, w])
-  );
+    existingWorkers.map((w) => [w.friendlyName, w]),
+  )
 
   /** ------------------------------------------------------------------ */
   /** Fetch users with Twilio numbers                                    */
   /** ------------------------------------------------------------------ */
+  const db = await getDb()
   const users = await db
     .select()
     .from(user)
-    .where(isNotNull(user.twilioPhoneNumber));
+    .where(isNotNull(user.twilioPhoneNumber))
 
-  console.log(`👥 Found ${users.length} users with Twilio numbers\n`);
+  console.log(`👥 Found ${users.length} users with Twilio numbers\n`)
 
   /** ------------------------------------------------------------------ */
   /** Sync each user                                                     */
   /** ------------------------------------------------------------------ */
   for (const u of users) {
-    console.log(`👤 ${u.email}`);
+    console.log(`👤 ${u.email}`)
 
     const isMainRoutingUser =
       u.twilioPhoneNumber === MAIN_ROUTING_NUMBER &&
-      u.email === MAIN_ROUTING_EMAIL;
+      u.email === MAIN_ROUTING_EMAIL
 
     const workerAttributes = {
       userId: u.id,
@@ -78,12 +79,12 @@ async function syncWorkers() {
       available: false, // controlled by presence / UI
       contact_uri: `client:${u.email}`,
       role: isMainRoutingUser ? 'main-routing' : 'agent',
-    };
+    }
 
-    const existingWorker = workersByEmail.get(u.email);
+    const existingWorker = workersByEmail.get(u.email)
 
     if (existingWorker) {
-      console.log(`  🔁 Updating worker ${existingWorker.sid}`);
+      console.log(`  🔁 Updating worker ${existingWorker.sid}`)
 
       await client.taskrouter.v1
         .workspaces(WORKSPACE_SID)
@@ -91,7 +92,7 @@ async function syncWorkers() {
         .update({
           attributes: JSON.stringify(workerAttributes),
           activitySid: ACTIVITY_OFFLINE_SID,
-        });
+        })
 
       await db
         .update(user)
@@ -99,10 +100,10 @@ async function syncWorkers() {
           taskRouterWorkerSid: existingWorker.sid,
           workerActivity: 'offline',
         })
-        .where(eq(user.id, u.id));
+        .where(eq(user.id, u.id))
 
-      await sleep(300);
-      continue;
+      await sleep(300)
+      continue
     }
 
     /** ------------------------------------------------------------------ */
@@ -114,9 +115,9 @@ async function syncWorkers() {
         friendlyName: u.email,
         activitySid: ACTIVITY_OFFLINE_SID,
         attributes: JSON.stringify(workerAttributes),
-      });
+      })
 
-    console.log(`  ✅ Created worker ${worker.sid}`);
+    console.log(`  ✅ Created worker ${worker.sid}`)
 
     await db
       .update(user)
@@ -124,26 +125,30 @@ async function syncWorkers() {
         taskRouterWorkerSid: worker.sid,
         workerActivity: 'offline',
       })
-      .where(eq(user.id, u.id));
+      .where(eq(user.id, u.id))
 
-    await sleep(300);
+    await sleep(300)
   }
 
-  console.log('\n═══════════════════════════════════════════');
-  console.log('✅ WORKER SYNC COMPLETE');
-  console.log('═══════════════════════════════════════════');
+  console.log('\n═══════════════════════════════════════════')
+  console.log('✅ WORKER SYNC COMPLETE')
+  console.log('═══════════════════════════════════════════')
 }
 
 /** ------------------------------------------------------------------ */
 /** RUN                                                                */
 /** ------------------------------------------------------------------ */
 syncWorkers()
-  .then(() => {
-    console.log('\n🎉 Sync completed successfully!');
-    process.exit(0);
+  .then(async () => {
+    console.log('\n🎉 Sync completed successfully!')
+    await closeDb()
+    process.exit(0)
   })
-  .catch(err => {
-    console.error('\n❌ Sync failed:', err);
-    process.exit(1);
-  });
-
+  .catch(async (err) => {
+    console.error('\n❌ Sync failed:', err)
+    try {
+      await closeDb()
+    } finally {
+      process.exit(1)
+    }
+  })

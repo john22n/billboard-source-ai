@@ -1,5 +1,5 @@
 import twilio from 'twilio'
-import { db } from '@/db'
+import { getDb } from '@/db'
 import { user } from '@/db/schema'
 import { getSessionWithoutRefresh } from '@/lib/auth'
 import { isMissingConfig, serverConfig } from '@/lib/config'
@@ -117,6 +117,7 @@ async function fetchWorkers(): Promise<WorkerSnapshot> {
     ] as const)
     const client = twilio(accountSid, authToken)
 
+    const db = await getDb()
     const [twilioWorkers, users, tasks] = await Promise.all([
       client.taskrouter.v1
         .workspaces(workspaceSid)

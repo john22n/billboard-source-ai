@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { createSession } from '@/lib/auth'
 import { verifyPasskeyAuthentication } from '@/lib/passkey'
-import { db } from '@/db'
+import { getDb } from '@/db'
 import { user } from '@/db/schema'
 import { eq } from 'drizzle-orm'
 import type { AuthenticationResponseJSON } from '@simplewebauthn/types'
@@ -97,6 +97,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Get user info to create session
+    const db = await getDb()
     const [userData] = await db
       .select({ id: user.id, email: user.email, role: user.role })
       .from(user)

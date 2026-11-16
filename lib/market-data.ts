@@ -3,7 +3,7 @@ import 'server-only'
 import { parse } from 'csv-parse/sync'
 import { sql } from 'drizzle-orm'
 import OpenAI from 'openai'
-import { db } from '@/db'
+import { getDb } from '@/db'
 import { billboardLocations, type NewBillboardLocation } from '@/db/schema'
 import { aiModels } from '@/lib/ai-models'
 
@@ -248,6 +248,7 @@ export async function syncLatestMarketData(
       embedding: embeddings[index],
     }))
 
+    const db = await getDb()
     await db
       .insert(billboardLocations)
       .values(recordsWithEmbeddings)

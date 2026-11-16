@@ -95,16 +95,18 @@ export interface ServerConfig {
   }
   database: {
     url: string
-    useNeon: boolean
+    driver: 'neon' | 'postgres' | 'cloudsql'
     cloudSql: {
       instanceConnectionName: string
       database: string
       user: string
-      password: string
       federation: {
         audience: string
         serviceAccountEmail: string
-      } | null
+        ownerId: string
+        projectId: string
+        environmentId: string
+      }
     } | null
   }
   openai: {
@@ -229,6 +231,9 @@ function cloudSqlFederation(env: EnvSource) {
   return {
     audience: `//iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`,
     serviceAccountEmail: requiredString(env, 'GCP_SERVICE_ACCOUNT_EMAIL', path),
+    ownerId: requiredString(env, 'CLOUD_SQL_VERCEL_OWNER_ID', path),
+    projectId: requiredString(env, 'CLOUD_SQL_VERCEL_PROJECT_ID', path),
+    environmentId: requiredString(env, 'CLOUD_SQL_VERCEL_ENVIRONMENT_ID', path),
   }
 }
 
@@ -568,34 +573,79 @@ export function createServerConfig(env: EnvSource): ServerConfig {
       get url() {
         return requiredString(env, 'DATABASE_URL', 'serverConfig.database.url')
       },
-      useNeon:
-        isVercel && !optionalString(env, 'CLOUD_SQL_INSTANCE_CONNECTION_NAME'),
+      get driver() {
+        const driver =
+          optionalString(env, 'DATABASE_DRIVER') ??
+          (isVercel ? 'neon' : 'postgres')
+        if (
+          driver !== 'neon' &&
+          driver !== 'postgres' &&
+          driver !== 'cloudsql'
+        ) {
+          throw new ConfigError({
+            path: 'serverConfig.database.driver',
+            envKey: 'DATABASE_DRIVER',
+            reason: 'must be neon, postgres, or cloudsql',
+          })
+        }
+        if (
+          driver !== 'neon' &&
+          (vercelEnv === 'production' || env.VERCEL_TARGET_ENV === 'production')
+        ) {
+          throw new ConfigError({
+            path: 'serverConfig.database.driver',
+            envKey: 'DATABASE_DRIVER',
+            reason: 'production must remain on Neon; no cutover is authorized',
+          })
+        }
+        return driver
+      },
       get cloudSql() {
-        const instanceConnectionName = optionalString(
+        if (this.driver !== 'cloudsql') return null
+        if (!isVercel || optionalString(env, 'VERCEL_TARGET_ENV') !== 'dev') {
+          throw new ConfigError({
+            path: 'serverConfig.database.cloudSql',
+            envKey: 'VERCEL_TARGET_ENV',
+            reason:
+              'Cloud SQL requires the isolated Vercel dev custom environment; use postgres with an app-identity proxy locally',
+          })
+        }
+        const federation = cloudSqlFederation(env)
+        const user = requiredString(
           env,
-          'CLOUD_SQL_INSTANCE_CONNECTION_NAME',
+          'CLOUD_SQL_USER',
+          'serverConfig.database.cloudSql.user',
         )
-        if (!instanceConnectionName) return null
+        if (
+          !federation.serviceAccountEmail.endsWith(
+            '.iam.gserviceaccount.com',
+          ) ||
+          user !==
+            federation.serviceAccountEmail.replace(
+              /\.gserviceaccount\.com$/,
+              '',
+            )
+        ) {
+          throw new ConfigError({
+            path: 'serverConfig.database.cloudSql.user',
+            envKey: 'CLOUD_SQL_USER',
+            reason:
+              'must be the impersonated service account email without .gserviceaccount.com',
+          })
+        }
         return {
-          instanceConnectionName,
+          instanceConnectionName: requiredString(
+            env,
+            'CLOUD_SQL_INSTANCE_CONNECTION_NAME',
+            'serverConfig.database.cloudSql.instanceConnectionName',
+          ),
           database: requiredString(
             env,
             'CLOUD_SQL_DATABASE',
             'serverConfig.database.cloudSql.database',
           ),
-          user: requiredString(
-            env,
-            'CLOUD_SQL_USER',
-            'serverConfig.database.cloudSql.user',
-          ),
-          password:
-            env.CLOUD_SQL_PASSWORD ||
-            requiredString(
-              env,
-              'CLOUD_SQL_PASSWORD',
-              'serverConfig.database.cloudSql.password',
-            ),
-          federation: isVercel ? cloudSqlFederation(env) : null,
+          user,
+          federation,
         }
       },
     },

@@ -2,7 +2,7 @@ import 'server-only'
 
 import { headers } from 'next/headers'
 import { sql } from 'drizzle-orm'
-import { db } from '@/db'
+import { getDb } from '@/db'
 import {
   privacySafeAccountIdentity,
   privacySafeSourceIdentity,
@@ -37,6 +37,7 @@ export async function rateLimit(
 ): Promise<RateLimitResult> {
   // Scope is source-controlled and identity is either a user id or SHA-256.
   const key = `${scope}:${identity}`.slice(0, 160)
+  const db = await getDb()
   const result = await db.execute(sql`
     INSERT INTO rate_limit_buckets (key, count, reset_at)
     VALUES (${key}, 1, NOW() + (${windowSeconds} * INTERVAL '1 second'))
@@ -65,10 +66,12 @@ export async function resetRateLimit(
   identity: string,
 ): Promise<void> {
   const key = `${scope}:${identity}`.slice(0, 160)
+  const db = await getDb()
   await db.execute(sql`DELETE FROM rate_limit_buckets WHERE key = ${key}`)
 }
 
 export async function clearExpiredRateLimits(): Promise<number> {
+  const db = await getDb()
   const result = await db.execute(sql`
     DELETE FROM rate_limit_buckets
     WHERE reset_at < NOW() - INTERVAL '1 day'
