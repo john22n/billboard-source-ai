@@ -334,6 +334,55 @@ test.skipIf(!enabled)(
 )
 
 test.skipIf(!enabled)(
+  'preserves imported summaries and notification data without inventing leads',
+  async () => {
+    await migrationClient.query(`
+      INSERT INTO "User" (id,email) VALUES ('import-test','import@example.invalid');
+      INSERT INTO nutshell_lead_summary_snapshot
+        (id,total_leads,won_count,open_count,lost_count,total_won_value)
+        VALUES (1,17,3,9,5,12345.67);
+      INSERT INTO lead_notifications
+        (id,recipient_id,assignee_id,assignee_email,assignment_event_id,company_name,lead_url,lead_created_at)
+        VALUES ('notice','import-test','assignee','test@example.invalid','event','Example','https://example.invalid',now());
+      INSERT INTO nutshell_webhook_inbox (event_id,lead_id) VALUES ('event','lead');
+      INSERT INTO art_wizard_settings (id,system_prompt,image_settings) VALUES (1,'Preserve','{"quality":"high"}');
+    `)
+    await runMigrations(migrationClient)
+    expect(
+      (
+        await migrationClient.query(
+          'SELECT count(*)::int AS count FROM nutshell_leads',
+        )
+      ).rows,
+    ).toEqual([{ count: 0 }])
+    expect(
+      (
+        await migrationClient.query(
+          'SELECT total_leads,total_won_value FROM nutshell_lead_summary_snapshot',
+        )
+      ).rows,
+    ).toEqual([{ total_leads: 17, total_won_value: '12345.67' }])
+    expect(
+      (await migrationClient.query('SELECT id FROM lead_notifications')).rows,
+    ).toEqual([{ id: 'notice' }])
+    expect(
+      (
+        await migrationClient.query(
+          'SELECT event_id,lead_id FROM nutshell_webhook_inbox',
+        )
+      ).rows,
+    ).toEqual([{ event_id: 'event', lead_id: 'lead' }])
+    expect(
+      (
+        await migrationClient.query(
+          'SELECT image_settings FROM art_wizard_settings',
+        )
+      ).rows,
+    ).toEqual([{ image_settings: { quality: 'high' } }])
+  },
+)
+
+test.skipIf(!enabled)(
   'rejects a modified migration journal rather than skipping unknown history',
   async () => {
     const original = (
