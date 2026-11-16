@@ -142,3 +142,100 @@ This is database preparation, not a Vercel cutover. `lib/config-core.ts` current
 selects Neon HTTP when running on Vercel; swapping `DATABASE_URL` alone will not
 connect the app to Cloud SQL. Driver selection, runtime credentials/networking,
 and any data migration need a separate reviewed change and authorization.
+
+## GitHub Actions dev migrations (disabled until provisioned)
+
+The CI workflow rehearses the chain in disposable PostgreSQL 18 with pgvector
+0.8.5 on pull requests and pushes to `main`, without cloud credentials. Only a
+successful `main` push can reach the shared-dev migration job, after quality,
+browser, security, and migration checks pass. No production migration job exists;
+production remains on Neon. App runtime routing is unchanged by this workflow.
+
+The job is additionally gated by the **repository** Actions variable
+`DEV_MIGRATIONS_ENABLED=true`. Leave it unset until the following administrator
+setup is approved and verified. Do not put this switch in an environment: job
+conditions are evaluated before environment variables become available.
+
+1. Create GitHub Environment `dev` in `john22n/billboard-source-ai`, restrict its
+   deployment branches to `main`, and configure required reviewers where the
+   repository plan supports them. Protect `main` and review workflow/migration
+   changes before merging. Anyone able to change trusted workflow code can use
+   the migration identity; the runtime app must never receive it.
+2. Inspect existing GCP resources before creating anything. Use a **separate**
+   WIF pool `github-billboard-dev` and provider `github-actions` in project
+   `789243463553`, not the existing Amp pool/provider. Issuer:
+   `https://token.actions.githubusercontent.com`. Use the provider's default
+   audience. Map `google.subject=assertion.sub` and
+   `attribute.repository_id=assertion.repository_id`.
+3. Require this exact provider attribute condition (repository and owner IDs
+   were read from GitHub, not inferred from their names):
+
+   ```text
+   assertion.repository_id == '1016437788' &&
+   assertion.repository_owner_id == '15069297' &&
+   assertion.sub == 'repo:john22n/billboard-source-ai:environment:dev' &&
+   assertion.ref == 'refs/heads/main' &&
+   assertion.event_name == 'push' &&
+   assertion.workflow_ref == 'john22n/billboard-source-ai/.github/workflows/ci-cd.yml@refs/heads/main'
+   ```
+
+4. On **only** service account
+   `amp-billboard-db@cs-poc-l0o7at4xalxqxcyxekiay2j.iam.gserviceaccount.com`, grant
+   `roles/iam.workloadIdentityUser` to
+   `principalSet://iam.googleapis.com/projects/789243463553/locations/global/workloadIdentityPools/github-billboard-dev/attribute.repository_id/1016437788`.
+   Preserve existing Amp bindings and the service account's exact dev-instance
+   Cloud SQL conditions. Do not grant Cloud SQL Admin or project-wide access.
+   Reusing the dev migration owner avoids transferring existing object ownership
+   and keeps owner-specific default privileges effective. This is an additional
+   trusted caller of the migration account, not an app identity.
+5. Read back provider condition, account policy, and dev-only Cloud SQL role
+   bindings. Confirm the instance/database still match this runbook. Keep the
+   repository switch `false` through verification. Enable it only after a
+   successful GitHub verification run and separate rollout approval. Enabling
+   it does not run a migration immediately; the next successful push to `main`
+   (or rerun of a qualifying push) can do so.
+
+### Read-only identity verification
+
+The `verify-dev` job runs after all four CI checks on a `main` push, independently
+of `DEV_MIGRATIONS_ENABLED`. Pull requests cannot invoke it. It uses the same
+GitHub WIF provider, migration identity, and exact dev proxy target as the rollout
+job, without calling the migrator. It connects with read-only transactions enabled
+and checks the database name, session/current user, read-only state, vector in
+`public`, and every applied journal hash/timestamp against this checkout. It
+reports the pending count without applying anything. A missing/empty journal or
+incompatible history fails verification; pending migrations are allowed.
+
+The checks use a repeatable-read, read-only transaction and finish with rollback.
+They do not inspect application records, grant privileges, seed data, or prove
+schema parity/DDL privileges. The underlying migration identity still has write
+privileges; read-only mode protects this job, not arbitrary trusted workflow code.
+`migrate-dev` additionally requires successful verification and the explicit
+enable switch. Publishing/running the workflow needs separate approval; no
+`workflow_dispatch` trigger or broader WIF condition was added.
+
+The exact embedded verification program passed against Cloud SQL dev via the
+existing **Amp** identity path: vector 0.8.5, 12 applied migrations, zero pending.
+The proxy was stopped afterward. This validates the SQL checks, not GitHub's OIDC
+exchange, which must still pass in GitHub before enabling migrations.
+
+No service-account key or database password is stored in GitHub. The auth action
+creates short-lived external-account credentials immediately before the proxy
+starts and removes them at job cleanup. The proxy binary is version- and
+SHA256-pinned, listens only on loopback, checks readiness, and is stopped on
+success or failure. The existing runner ignores `DATABASE_URL` and validates the
+database, IAM username, extension, app privileges, and migration history.
+
+Push workflows and the migration job do not cancel in-progress runs; the shared
+job concurrency group and database advisory lock prevent overlapping migrations.
+GitHub concurrency can replace pending runs, so not every intermediate commit is
+guaranteed a rollout; the retained checkout applies its complete pending chain.
+Do not edit already-applied SQL. A stale checkout with incompatible history fails
+closed. To disable future rollouts, unset the repository switch; this does not
+cancel an already-running migration or undo schema changes.
+
+Do not use workflow reruns as blind retries: inspect history and any failed grant
+transaction first. This pipeline does not deploy or order Vercel deployments;
+schema changes must remain compatible with independently deployed app versions.
+GitHub OIDC exchange and runner package installation still require verification
+in the first approved CI run; local rehearsal cannot prove either platform path.

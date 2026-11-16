@@ -187,3 +187,6 @@ next-env.d.ts
 
 # Amp orb runtime
 .amp/portals/
+
+# Ephemeral GitHub Actions WIF credentials
+gha-creds-*.json
