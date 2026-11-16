@@ -148,6 +148,81 @@ export const nutshellLeads = pgTable('nutshell_leads', {
 export type NutshellLead = InferSelectModel<typeof nutshellLeads>
 export type NewNutshellLead = typeof nutshellLeads.$inferInsert
 
+// Imported Neon aggregate, intentionally separate from individual app leads.
+export const nutshellLeadSummarySnapshot = pgTable(
+  'nutshell_lead_summary_snapshot',
+  {
+    id: integer('id').primaryKey().default(1),
+    currency: varchar('currency', { length: 3 }).default('USD'),
+    syncedAt: timestamp('synced_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    totalLeads: integer('total_leads').default(0).notNull(),
+    wonCount: integer('won_count').default(0).notNull(),
+    openCount: integer('open_count').default(0).notNull(),
+    lostCount: integer('lost_count').default(0).notNull(),
+    totalWonValue: numeric('total_won_value', { precision: 14, scale: 2 })
+      .default('0')
+      .notNull(),
+  },
+)
+
+export const leadNotifications = pgTable(
+  'lead_notifications',
+  {
+    id: varchar('id', { length: 80 }).primaryKey(),
+    recipientId: varchar('recipient_id', { length: 21 }).references(
+      () => user.id,
+    ),
+    assigneeId: varchar('assignee_id', { length: 80 }).notNull(),
+    assigneeEmail: text('assignee_email').notNull(),
+    assignmentEventId: varchar('assignment_event_id', { length: 80 }).notNull(),
+    companyName: text('company_name').notNull(),
+    leadUrl: text('lead_url').notNull(),
+    leadCreatedAt: timestamp('lead_created_at', {
+      withTimezone: true,
+    }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    clearedAt: timestamp('cleared_at', { withTimezone: true }),
+  },
+  (table) => ({
+    recipientIndex: index('lead_notifications_recipient_idx').on(
+      table.recipientId,
+      table.clearedAt,
+      table.leadCreatedAt,
+    ),
+  }),
+)
+
+export const nutshellWebhookInbox = pgTable(
+  'nutshell_webhook_inbox',
+  {
+    id: serial('id').primaryKey(),
+    eventId: varchar('event_id', { length: 80 }).notNull(),
+    leadId: varchar('lead_id', { length: 80 }).notNull(),
+    status: varchar('status', { length: 20 }).default('pending').notNull(),
+    receivedAt: timestamp('received_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    attempts: integer('attempts').default(0).notNull(),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    lastReason: varchar('last_reason', { length: 80 }),
+  },
+  (table) => ({
+    eventLeadUnique: unique('nutshell_webhook_inbox_event_lead_unique').on(
+      table.eventId,
+      table.leadId,
+    ),
+    retryIndex: index('nutshell_webhook_inbox_retry_idx').on(
+      table.status,
+      table.nextAttemptAt,
+    ),
+  }),
+)
+
 // App-wide singleton metrics (Feature 2). One fixed row (id = 1), no unbounded
 // growth, so it stays within the Neon free tier. Currently tracks total inbound
 // calls to the Main Routing Number shown in the Admin Panel header.
@@ -162,6 +237,7 @@ export type AppMetrics = InferSelectModel<typeof appMetrics>
 export const artWizardSettings = pgTable('art_wizard_settings', {
   id: integer('id').primaryKey().default(1),
   systemPrompt: text('system_prompt').notNull(),
+  imageSettings: jsonb('image_settings'),
   imagePrompts: jsonb('image_prompts').$type<ImagePrompts>(),
 })
 

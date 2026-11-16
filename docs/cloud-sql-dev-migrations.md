@@ -1,5 +1,76 @@
 # Cloud SQL dev migration rollout
 
+## Neon dev data reconciliation and import
+
+On 2026-11-16, migration `0012_preserve_neon_dev_data` was applied to
+`billboard-source-db-dev` / `billboard_dev`, followed by the explicitly approved
+data copy from Neon `billboardsourceAI-dev` (`neondb` on
+`ep-wandering-bar-ah76v51o-pooler.c-3.us-east-1.aws.neon.tech`).
+The source snapshot began at **2026-11-16 22:07:51.207012 UTC**.
+
+The additive migration creates `lead_notifications`, `nutshell_webhook_inbox`,
+and `nutshell_lead_summary_snapshot`, and adds nullable `image_settings` to
+`art_wizard_settings`. The existing individual-record `nutshell_leads` is
+unchanged. John approved preserving the source aggregate separately, without
+changing app statistics or manufacturing individual leads.
+
+| Source table           | Destination table              | Rows copied |
+| ---------------------- | ------------------------------ | ----------: |
+| User                   | User                           |           4 |
+| Passkey                | Passkey                        |           0 |
+| app_metrics            | app_metrics                    |           1 |
+| art_wizard_settings    | art_wizard_settings            |           1 |
+| billboard_locations    | billboard_locations            |      30,310 |
+| lead_notifications     | lead_notifications             |           8 |
+| nutshell_leads         | nutshell_lead_summary_snapshot |           1 |
+| nutshell_webhook_inbox | nutshell_webhook_inbox         |         121 |
+| openai_logs            | openai_logs                    |          84 |
+| rate_limit_buckets     | rate_limit_buckets             |          25 |
+| reported_issues        | reported_issues                |           0 |
+
+**30,555 rows copied; no source table omitted.** Destination individual leads
+remain empty. All 12 destination tables were rechecked empty under exclusive
+table locks before import, with the migration advisory lock held. A complete
+rehearsal was rolled back before the committed copy. Data moved in memory using
+a repeatable-read, read-only source transaction; no customer-data dump or
+credentials were written to disk. Destination constraints remained enabled.
+
+Before commit and again through a new read-only connection after commit, all
+table counts and full-row SHA256 checksums matched the source snapshot. All
+13 migration hashes/timestamps matched the checkout; the prior 12 journal
+records were preserved. Existing owners/grants, role attributes, and default
+grants were unchanged during reconciliation, and schema/security/journal
+readbacks were unchanged during the data copy. New objects inherit the existing
+app grant policy. No GCP IAM policy changes were made.
+
+Sequence next allocations were preserved and checked above imported IDs:
+`billboard_locations_id_seq` **31,511**, `openai_logs_id_seq` **86**,
+`nutshell_webhook_inbox_id_seq` **126**, and `nutshell_leads_id_seq` **1,572**.
+The last sequence retains the source's historical allocation despite the empty
+individual-lead table. Transactional `ALTER SEQUENCE RESTART` preserves next
+allocation, representing it as `last_value=next, is_called=false` rather than
+copying the source's `is_called=true` encoding. No sequence was advanced merely
+to test it.
+
+Neon remained writable by its existing users: the inbox grew from 116 rows at
+initial discovery to 121 before the snapshot. No row-count drift was observed
+at postflight (22:10:44 UTC). This is a point-in-time copy, not ongoing replication.
+No discrepancies against the imported snapshot were found. Neon source data,
+production, application statistics logic, and connection configuration were not
+modified. The proxy was stopped afterward.
+
+Validation: seven database integration tests, 364 unit tests, 15 Playwright
+tests, typecheck, targeted ESLint, and Drizzle metadata checks passed. The browser
+fixture includes the new nullable column so existing settings writes remain
+covered. The new regression checks retained notification/settings/summary data
+after a migration rerun and confirms no individual leads were invented.
+
+**Publish migration 0012 before another main CI verification:** the dev journal
+now contains it, so an older checkout correctly rejects the unknown history.
+Do not edit prior migration hashes or rerun the data copy into this populated DB.
+
+## Initial empty-schema rollout (historical)
+
 The approved rollout is complete on `billboard-source-db-dev` / `billboard_dev`.
 John installed pgvector 0.8.5 in `public`; Amp applied migrations `0000–0011`
 and app grants through the dev-only IAM identity after fixing the review findings.
