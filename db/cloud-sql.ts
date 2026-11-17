@@ -27,6 +27,7 @@ export async function createCloudSqlPool(config: CloudSqlConfig) {
     subject_token_supplier: {
       async getSubjectToken() {
         const token = await getVercelOidcToken({ audience })
+        console.info('[DEBUG-staging-db] received Vercel token')
         const { payload } = await verifyVercelOidcToken(token, {
           audience,
           projectId: federation.projectId,
@@ -41,6 +42,7 @@ export async function createCloudSqlPool(config: CloudSqlConfig) {
         ) {
           throw new Error('Cloud SQL staging identity mismatch')
         }
+        console.info('[DEBUG-staging-db] verified staging token')
         return token
       },
     },
@@ -51,6 +53,7 @@ export async function createCloudSqlPool(config: CloudSqlConfig) {
     ipType: IpAddressTypes.PUBLIC,
     authType: AuthTypes.IAM,
   })
+  console.info('[DEBUG-staging-db] connector options ready')
   // Do not close a failed initial refresh: connector 1.13 close() creates an
   // unhandled rejection in that case. No pool or refresh timer exists yet.
   const pool = new Pool({

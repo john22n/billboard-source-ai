@@ -45,6 +45,35 @@ const shutdowns = new Set<Promise<void>>()
 export function getDb() {
   if (!current) {
     const pending = createDatabase().catch((error) => {
+      if (process.env.VERCEL_TARGET_ENV === 'staging') {
+        console.error('[DEBUG-staging-db] initialization failed', {
+          name: error?.name,
+          code: /^[A-Z_0-9]+$/.test(String(error?.code))
+            ? error.code
+            : undefined,
+          status: error?.response?.status,
+          configKeys: error?.issues?.map(
+            (issue: { envKey: string }) => issue.envKey,
+          ),
+          expectedClaim: [
+            'environment',
+            'project_id',
+            'owner_id',
+            'aud',
+            'iss',
+          ].find((claim) => String(error?.message).includes(claim)),
+          missingToken: String(error?.message).includes('OIDC token'),
+          exchangeFailed: String(error?.message).includes('exchange token'),
+          oauthError: [
+            'invalid_grant',
+            'invalid_target',
+            'unauthorized_client',
+            'access_denied',
+          ].find((code) =>
+            JSON.stringify(error?.response?.data ?? {}).includes(code),
+          ),
+        })
+      }
       if (current === pending) current = undefined
       throw error
     })
