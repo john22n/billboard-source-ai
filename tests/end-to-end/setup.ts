@@ -67,7 +67,8 @@ export default async function setup() {
       )
       await pool.query(`CREATE TABLE art_wizard_settings (
         id integer PRIMARY KEY DEFAULT 1,
-        system_prompt text NOT NULL
+        system_prompt text NOT NULL,
+        image_settings jsonb
       )`)
       await pool.query(
         readFileSync(

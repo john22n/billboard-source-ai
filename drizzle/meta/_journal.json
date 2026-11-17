@@ -78,6 +78,20 @@
       "when": 1791540000000,
       "tag": "0010_art_wizard_image_prompts",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1794787200000,
+      "tag": "0011_complete_application_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1794866373900,
+      "tag": "0012_preserve_neon_dev_data",
+      "breakpoints": true
     }
   ]
 }
