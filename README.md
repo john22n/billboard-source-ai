@@ -92,22 +92,22 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 
 ## Cloud SQL on Vercel
 
-Cloud SQL is an explicit **staging-only** opt-in. `DATABASE_DRIVER` accepts `neon`,
+Cloud SQL is an explicit **staging or preview** opt-in. `DATABASE_DRIVER` accepts `neon`,
 `postgres`, or `cloudsql`. When absent, Vercel keeps Neon HTTP and local execution
 keeps PostgreSQL, both using `DATABASE_URL`. Old `CLOUD_SQL_*` variables alone no
 longer switch databases. Unknown modes and incomplete opt-in settings fail closed.
 Production rejects any explicit driver other than Neon, even if Cloud SQL settings
 were accidentally inherited. **No production cutover is implemented or authorized.**
 
-The connector is restricted to the trusted Vercel custom environment named `staging`
-(`VERCEL_TARGET_ENV=staging`), not arbitrary Preview branches. Its verified OIDC token
-must also match the configured stable owner, project, and custom-environment IDs.
+The connector accepts `VERCEL_TARGET_ENV=staging` or `preview`. Its verified OIDC
+token must match the configured stable owner, project, and deployment environment.
+Staging also requires its exact custom-environment ID; preview tokens must have no
+custom-environment ID. Use separate service accounts and WIF pools for the two.
 These code checks supplement, and do not replace, exact Google WIF restrictions.
-Broader Preview/Development access or a separate isolated dev project needs a
-separately reviewed trust configuration; do not broaden this path implicitly.
+Development deployments are not enabled by this path.
 
 After separate approval and provisioning, configure these **server-only** values
-only in that staging environment. The existing Cloud SQL instance and database
+in staging or the approved Preview branch scope. The Cloud SQL instance and database
 keep their dev names; the GitHub migration environment remains `dev`:
 
 | Variable                                 | Value                                                                             |
@@ -118,7 +118,7 @@ keep their dev names; the GitHub migration environment remains `dev`:
 | `CLOUD_SQL_USER`                         | App SA email without `.gserviceaccount.com`, e.g. `billboard-app-dev@PROJECT.iam` |
 | `CLOUD_SQL_VERCEL_OWNER_ID`              | Exact approved Vercel team ID                                                     |
 | `CLOUD_SQL_VERCEL_PROJECT_ID`            | Exact approved Vercel project ID                                                  |
-| `CLOUD_SQL_VERCEL_ENVIRONMENT_ID`        | Actual custom `staging` environment ID, not a branch or slug                      |
+| `CLOUD_SQL_VERCEL_ENVIRONMENT_ID`        | Required for staging; omit for preview                                            |
 | `GCP_PROJECT_NUMBER`                     | Numeric project number containing the dedicated WIF pool                          |
 | `GCP_WORKLOAD_IDENTITY_POOL_ID`          | Dedicated app WIF pool, separate from Amp/migrations                              |
 | `GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID` | Dedicated Vercel provider                                                         |
@@ -133,12 +133,21 @@ not supply `CLOUD_SQL_PASSWORD` to this connector. It uses IAM database authenti
 
 Enable the Cloud SQL Admin, Security Token Service, and IAM Credentials APIs.
 Configure the provider's exact issuer and audience, and restrict its condition to
-the approved `owner_id`, `project_id`, `custom_environment_id`, and `environment=staging`
-claims. Only that principal may impersonate the app account. The app uses the
+the approved `owner_id`, `project_id`, and environment. Staging requires the exact
+`custom_environment_id` and `environment=staging`; preview requires
+`environment=preview` and an absent or null `custom_environment_id`. The verified
+team issuer is `https://oidc.vercel.com/billboardsource-ai`.
+Only that principal may impersonate its app account. The app uses the
 canonical `//iam.googleapis.com/projects/.../providers/...` STS audience and requests
 a fresh Vercel token with the matching `https:` audience on each credential refresh.
 It verifies the token before passing it to Google. No JWT or service-account key
 is persisted. Keep deployment protection enabled.
+
+Start with branch-scoped Preview variables. Before enabling the shared Preview
+configuration, update every affected branch to include this runtime support;
+older branches may reject the preview identity. Existing deployments need a
+redeploy to pick up environment changes. Preview and staging deployments using
+`billboard_dev` share data; this is not a database per branch.
 
 Application callers await `getDb()` inside async requests/actions. A cached
 initialization promise shares the pool across concurrent first callers; failed
