@@ -45,19 +45,6 @@ const shutdowns = new Set<Promise<void>>()
 export function getDb() {
   if (!current) {
     const pending = createDatabase().catch((error) => {
-      if (process.env.VERCEL_TARGET_ENV === 'staging') {
-        console.error('[DEBUG-staging-db] initialization failed', {
-          issuerMismatch: /issuer.*(match|expected)/i.test(
-            String(error?.message),
-          ),
-          issuerConnectionFailed: /connecting.*issuer/i.test(
-            String(error?.message),
-          ),
-          rejectedCondition: /attribute condition/i.test(
-            String(error?.message),
-          ),
-        })
-      }
       if (current === pending) current = undefined
       throw error
     })
