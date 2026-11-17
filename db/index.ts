@@ -47,30 +47,14 @@ export function getDb() {
     const pending = createDatabase().catch((error) => {
       if (process.env.VERCEL_TARGET_ENV === 'staging') {
         console.error('[DEBUG-staging-db] initialization failed', {
-          name: error?.name,
-          code: /^[A-Z_0-9]+$/.test(String(error?.code))
-            ? error.code
-            : undefined,
-          status: error?.response?.status,
-          configKeys: error?.issues?.map(
-            (issue: { envKey: string }) => issue.envKey,
+          issuerMismatch: /issuer.*(match|expected)/i.test(
+            String(error?.message),
           ),
-          expectedClaim: [
-            'environment',
-            'project_id',
-            'owner_id',
-            'aud',
-            'iss',
-          ].find((claim) => String(error?.message).includes(claim)),
-          missingToken: String(error?.message).includes('OIDC token'),
-          exchangeFailed: String(error?.message).includes('exchange token'),
-          oauthError: [
-            'invalid_grant',
-            'invalid_target',
-            'unauthorized_client',
-            'access_denied',
-          ].find((code) =>
-            JSON.stringify(error?.response?.data ?? {}).includes(code),
+          issuerConnectionFailed: /connecting.*issuer/i.test(
+            String(error?.message),
+          ),
+          rejectedCondition: /attribute condition/i.test(
+            String(error?.message),
           ),
         })
       }

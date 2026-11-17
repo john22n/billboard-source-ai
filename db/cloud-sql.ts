@@ -42,7 +42,10 @@ export async function createCloudSqlPool(config: CloudSqlConfig) {
         ) {
           throw new Error('Cloud SQL staging identity mismatch')
         }
-        console.info('[DEBUG-staging-db] verified staging token')
+        console.info('[DEBUG-staging-db] verified staging token', {
+          issuer: payload.iss,
+          environment: payload.environment,
+        })
         return token
       },
     },
