@@ -10,7 +10,7 @@ describe('server config', () => {
   const cloudSqlEnv = {
     VERCEL: '1',
     VERCEL_ENV: 'preview',
-    VERCEL_TARGET_ENV: 'dev',
+    VERCEL_TARGET_ENV: 'staging',
     DATABASE_DRIVER: 'cloudsql',
     CLOUD_SQL_INSTANCE_CONNECTION_NAME: 'project:us-central1:database',
     CLOUD_SQL_DATABASE: 'billboard_dev',
@@ -39,7 +39,7 @@ describe('server config', () => {
     )
   })
 
-  it('selects the isolated dev IAM login without a database password', () => {
+  it('selects the isolated staging IAM login without a database password', () => {
     const config = createServerConfig(cloudSqlEnv)
     expect(Reflect.get(config.database, 'driver')).toBe('cloudsql')
     expect(config.database.cloudSql).toEqual({
@@ -76,6 +76,7 @@ describe('server config', () => {
       { VERCEL_TARGET_ENV: undefined },
       { VERCEL_TARGET_ENV: 'preview' },
       { VERCEL_TARGET_ENV: 'development' },
+      { VERCEL_TARGET_ENV: 'dev' },
       { CLOUD_SQL_DATABASE: undefined },
       { CLOUD_SQL_INSTANCE_CONNECTION_NAME: undefined },
       { CLOUD_SQL_VERCEL_ENVIRONMENT_ID: undefined },
