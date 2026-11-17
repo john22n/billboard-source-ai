@@ -164,6 +164,42 @@ it.each([
   },
 )
 
+it('accepts preview tokens only for this project and without a custom environment', async () => {
+  vi.stubEnv('VERCEL_TARGET_ENV', 'preview')
+  vi.stubEnv('CLOUD_SQL_VERCEL_ENVIRONMENT_ID', undefined)
+  const { getDb } = await import(entryPath)
+  await getDb()
+  external.token.mockResolvedValue('preview-token')
+  const previewClaims = {
+    ...claims,
+    environment: 'preview',
+    custom_environment_id: undefined,
+  }
+  for (const custom_environment_id of [undefined, null]) {
+    external.verify.mockResolvedValue({
+      payload: { ...previewClaims, custom_environment_id },
+    })
+    expect(await external.authClients[0].retrieveSubjectToken()).toBe(
+      'preview-token',
+    )
+  }
+  for (const override of [
+    { owner_id: 'other-owner' },
+    { project_id: 'other-project' },
+    { environment: 'production' },
+    { environment: 'staging' },
+    { environment: undefined },
+    { custom_environment_id: 'env_dev' },
+  ]) {
+    external.verify.mockResolvedValue({
+      payload: { ...previewClaims, ...override },
+    })
+    await expect(
+      external.authClients[0].retrieveSubjectToken(),
+    ).rejects.toThrow('Cloud SQL preview identity mismatch')
+  }
+})
+
 it('does not retire a database handle still held by a caller after a long idle period', async () => {
   const { getDb } = await import(entryPath)
   let now = Date.now()
