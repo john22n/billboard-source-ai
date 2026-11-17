@@ -52,8 +52,23 @@ describe('server config', () => {
         serviceAccountEmail: 'app@project.iam.gserviceaccount.com',
         ownerId: 'team_dev',
         projectId: 'prj_dev',
+        environment: 'staging',
         environmentId: 'env_dev',
       },
+    })
+  })
+
+  it('selects the preview IAM login without requiring a custom environment ID', () => {
+    const config = createServerConfig({
+      ...cloudSqlEnv,
+      VERCEL_TARGET_ENV: 'preview',
+      CLOUD_SQL_VERCEL_ENVIRONMENT_ID: undefined,
+    })
+    expect(config.database.cloudSql?.federation).toMatchObject({
+      environment: 'preview',
+      environmentId: null,
+      ownerId: 'team_dev',
+      projectId: 'prj_dev',
     })
   })
 
@@ -70,11 +85,10 @@ describe('server config', () => {
     }
   })
 
-  it('rejects Cloud SQL outside the intended custom environment or with incomplete identity', () => {
+  it('rejects Cloud SQL outside preview and staging or with incomplete identity', () => {
     for (const override of [
       { VERCEL: undefined },
       { VERCEL_TARGET_ENV: undefined },
-      { VERCEL_TARGET_ENV: 'preview' },
       { VERCEL_TARGET_ENV: 'development' },
       { VERCEL_TARGET_ENV: 'dev' },
       { CLOUD_SQL_DATABASE: undefined },
