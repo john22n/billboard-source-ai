@@ -92,22 +92,23 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 
 ## Cloud SQL on Vercel
 
-Cloud SQL is an explicit **dev-only** opt-in. `DATABASE_DRIVER` accepts `neon`,
+Cloud SQL is an explicit **staging-only** opt-in. `DATABASE_DRIVER` accepts `neon`,
 `postgres`, or `cloudsql`. When absent, Vercel keeps Neon HTTP and local execution
 keeps PostgreSQL, both using `DATABASE_URL`. Old `CLOUD_SQL_*` variables alone no
 longer switch databases. Unknown modes and incomplete opt-in settings fail closed.
 Production rejects any explicit driver other than Neon, even if Cloud SQL settings
 were accidentally inherited. **No production cutover is implemented or authorized.**
 
-The connector is restricted to the trusted Vercel custom environment named `dev`
-(`VERCEL_TARGET_ENV=dev`), not arbitrary Preview branches. Its verified OIDC token
+The connector is restricted to the trusted Vercel custom environment named `staging`
+(`VERCEL_TARGET_ENV=staging`), not arbitrary Preview branches. Its verified OIDC token
 must also match the configured stable owner, project, and custom-environment IDs.
 These code checks supplement, and do not replace, exact Google WIF restrictions.
 Broader Preview/Development access or a separate isolated dev project needs a
 separately reviewed trust configuration; do not broaden this path implicitly.
 
 After separate approval and provisioning, configure these **server-only** values
-only in that dev environment:
+only in that staging environment. The existing Cloud SQL instance and database
+keep their dev names; the GitHub migration environment remains `dev`:
 
 | Variable                                 | Value                                                                             |
 | ---------------------------------------- | --------------------------------------------------------------------------------- |
@@ -117,7 +118,7 @@ only in that dev environment:
 | `CLOUD_SQL_USER`                         | App SA email without `.gserviceaccount.com`, e.g. `billboard-app-dev@PROJECT.iam` |
 | `CLOUD_SQL_VERCEL_OWNER_ID`              | Exact approved Vercel team ID                                                     |
 | `CLOUD_SQL_VERCEL_PROJECT_ID`            | Exact approved Vercel project ID                                                  |
-| `CLOUD_SQL_VERCEL_ENVIRONMENT_ID`        | Actual custom `dev` environment ID, not a branch or slug                          |
+| `CLOUD_SQL_VERCEL_ENVIRONMENT_ID`        | Actual custom `staging` environment ID, not a branch or slug                      |
 | `GCP_PROJECT_NUMBER`                     | Numeric project number containing the dedicated WIF pool                          |
 | `GCP_WORKLOAD_IDENTITY_POOL_ID`          | Dedicated app WIF pool, separate from Amp/migrations                              |
 | `GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID` | Dedicated Vercel provider                                                         |
@@ -132,7 +133,7 @@ not supply `CLOUD_SQL_PASSWORD` to this connector. It uses IAM database authenti
 
 Enable the Cloud SQL Admin, Security Token Service, and IAM Credentials APIs.
 Configure the provider's exact issuer and audience, and restrict its condition to
-the approved `owner_id`, `project_id`, `custom_environment_id`, and `environment=dev`
+the approved `owner_id`, `project_id`, `custom_environment_id`, and `environment=staging`
 claims. Only that principal may impersonate the app account. The app uses the
 canonical `//iam.googleapis.com/projects/.../providers/...` STS audience and requests
 a fresh Vercel token with the matching `https:` audience on each credential refresh.

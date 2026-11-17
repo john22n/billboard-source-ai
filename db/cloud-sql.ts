@@ -31,15 +31,15 @@ export async function createCloudSqlPool(config: CloudSqlConfig) {
           audience,
           projectId: federation.projectId,
           ownerId: federation.ownerId,
-          environment: 'dev',
+          environment: 'staging',
         })
         if (
           payload.owner_id !== federation.ownerId ||
           payload.project_id !== federation.projectId ||
-          payload.environment !== 'dev' ||
+          payload.environment !== 'staging' ||
           payload.custom_environment_id !== federation.environmentId
         ) {
-          throw new Error('Cloud SQL dev identity mismatch')
+          throw new Error('Cloud SQL staging identity mismatch')
         }
         return token
       },

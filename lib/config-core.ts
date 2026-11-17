@@ -602,12 +602,15 @@ export function createServerConfig(env: EnvSource): ServerConfig {
       },
       get cloudSql() {
         if (this.driver !== 'cloudsql') return null
-        if (!isVercel || optionalString(env, 'VERCEL_TARGET_ENV') !== 'dev') {
+        if (
+          !isVercel ||
+          optionalString(env, 'VERCEL_TARGET_ENV') !== 'staging'
+        ) {
           throw new ConfigError({
             path: 'serverConfig.database.cloudSql',
             envKey: 'VERCEL_TARGET_ENV',
             reason:
-              'Cloud SQL requires the isolated Vercel dev custom environment; use postgres with an app-identity proxy locally',
+              'Cloud SQL requires the isolated Vercel staging custom environment; use postgres with an app-identity proxy locally',
           })
         }
         const federation = cloudSqlFederation(env)
