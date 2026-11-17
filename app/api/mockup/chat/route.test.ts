@@ -51,7 +51,10 @@ vi.mock('@/lib/mockup/system-prompt', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/mockup/system-prompt')>()),
   getSystemPrompt: mocks.settings,
 }))
-vi.mock('@/db', () => ({ db: {} }))
+vi.mock('@/db', () => {
+  const db = {}
+  return { getDb: async () => db }
+})
 vi.mock('ai', async (importOriginal) => ({
   ...(await importOriginal<typeof import('ai')>()),
   streamText: mocks.streamText,

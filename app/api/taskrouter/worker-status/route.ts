@@ -6,7 +6,7 @@
  */
 
 import twilio from 'twilio'
-import { db } from '@/db'
+import { getDb } from '@/db'
 import { user } from '@/db/schema'
 import { eq } from 'drizzle-orm'
 import { getSession } from '@/lib/auth'
@@ -23,6 +23,7 @@ export async function GET() {
       return Response.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    const db = await getDb()
     const currentUser = await db
       .select({
         workerActivity: user.workerActivity,
@@ -78,6 +79,7 @@ export async function POST(req: Request) {
     ] as const)
     const client = twilio(accountSid, authToken)
 
+    const db = await getDb()
     const currentUser = await db
       .select({
         id: user.id,

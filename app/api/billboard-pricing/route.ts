@@ -1,6 +1,6 @@
 // app/api/billboard-pricing/route.ts
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/db'
+import { getDb } from '@/db'
 import { sql } from 'drizzle-orm'
 import { generateText } from 'ai'
 import { createOpenAI } from '@ai-sdk/openai'
@@ -113,6 +113,7 @@ Transcript: ${transcript}`,
     })
     const embedding = embeddingResponse.data[0].embedding
     // ✅ STRICT HYBRID SEARCH: Require both city AND state to match
+    const db = await getDb()
     const results = await db.execute(sql`
       SELECT 
         city,

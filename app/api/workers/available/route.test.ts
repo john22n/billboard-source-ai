@@ -21,9 +21,10 @@ const { getSession, twilioClient, selectUsers, configEnv, task } = vi.hoisted(
 )
 
 vi.mock('@/lib/auth', () => ({ getSessionWithoutRefresh: getSession }))
-vi.mock('@/db', () => ({
-  db: { select: () => ({ from: selectUsers }) },
-}))
+vi.mock('@/db', () => {
+  const db = { select: () => ({ from: selectUsers }) }
+  return { getDb: async () => db }
+})
 vi.mock('@/lib/twilio-webhook', () => ({ isValidTwilioWebhook: () => true }))
 vi.mock('twilio', () => ({ default: twilioClient }))
 vi.mock('@/lib/config', async (importOriginal) => {

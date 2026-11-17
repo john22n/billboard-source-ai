@@ -19,7 +19,7 @@
  */
 
 import twilio from 'twilio'
-import { db } from '@/db'
+import { getDb } from '@/db'
 import { user } from '@/db/schema'
 import { getSession } from '@/lib/auth'
 import {
@@ -146,6 +146,7 @@ async function fetchAvailability() {
   const client = twilio(accountSid, authToken)
 
   // Get all DB users to map emails → user IDs
+  const db = await getDb()
   const dbUsers = await db.select({ id: user.id, email: user.email }).from(user)
 
   const emailToUserId: Record<string, string> = {}

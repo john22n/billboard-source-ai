@@ -90,6 +90,96 @@ The easiest way to deploy your Next.js app is to use the [Vercel Platform](https
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
 
+## Cloud SQL on Vercel
+
+Cloud SQL is an explicit **dev-only** opt-in. `DATABASE_DRIVER` accepts `neon`,
+`postgres`, or `cloudsql`. When absent, Vercel keeps Neon HTTP and local execution
+keeps PostgreSQL, both using `DATABASE_URL`. Old `CLOUD_SQL_*` variables alone no
+longer switch databases. Unknown modes and incomplete opt-in settings fail closed.
+Production rejects any explicit driver other than Neon, even if Cloud SQL settings
+were accidentally inherited. **No production cutover is implemented or authorized.**
+
+The connector is restricted to the trusted Vercel custom environment named `dev`
+(`VERCEL_TARGET_ENV=dev`), not arbitrary Preview branches. Its verified OIDC token
+must also match the configured stable owner, project, and custom-environment IDs.
+These code checks supplement, and do not replace, exact Google WIF restrictions.
+Broader Preview/Development access or a separate isolated dev project needs a
+separately reviewed trust configuration; do not broaden this path implicitly.
+
+After separate approval and provisioning, configure these **server-only** values
+only in that dev environment:
+
+| Variable                                 | Value                                                                             |
+| ---------------------------------------- | --------------------------------------------------------------------------------- |
+| `DATABASE_DRIVER`                        | `cloudsql`                                                                        |
+| `CLOUD_SQL_INSTANCE_CONNECTION_NAME`     | Exact dev `project:region:instance`                                               |
+| `CLOUD_SQL_DATABASE`                     | `billboard_dev`                                                                   |
+| `CLOUD_SQL_USER`                         | App SA email without `.gserviceaccount.com`, e.g. `billboard-app-dev@PROJECT.iam` |
+| `CLOUD_SQL_VERCEL_OWNER_ID`              | Exact approved Vercel team ID                                                     |
+| `CLOUD_SQL_VERCEL_PROJECT_ID`            | Exact approved Vercel project ID                                                  |
+| `CLOUD_SQL_VERCEL_ENVIRONMENT_ID`        | Actual custom `dev` environment ID, not a branch or slug                          |
+| `GCP_PROJECT_NUMBER`                     | Numeric project number containing the dedicated WIF pool                          |
+| `GCP_WORKLOAD_IDENTITY_POOL_ID`          | Dedicated app WIF pool, separate from Amp/migrations                              |
+| `GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID` | Dedicated Vercel provider                                                         |
+| `GCP_SERVICE_ACCOUNT_EMAIL`              | Least-privilege dev app service account                                           |
+
+Use a separate app service account with `roles/cloudsql.client` and
+`roles/cloudsql.instanceUser`, each restricted to the exact dev instance. Register
+its PostgreSQL IAM login and grant membership in `billboard_app_dev`; verify existing
+and future migration-owned table/sequence rights. Do not grant ownership, DDL, or
+migration-role membership. Preserve the built-in app login and its password, but do
+not supply `CLOUD_SQL_PASSWORD` to this connector. It uses IAM database authentication.
+
+Enable the Cloud SQL Admin, Security Token Service, and IAM Credentials APIs.
+Configure the provider's exact issuer and audience, and restrict its condition to
+the approved `owner_id`, `project_id`, `custom_environment_id`, and `environment=dev`
+claims. Only that principal may impersonate the app account. The app uses the
+canonical `//iam.googleapis.com/projects/.../providers/...` STS audience and requests
+a fresh Vercel token with the matching `https:` audience on each credential refresh.
+It verifies the token before passing it to Google. No JWT or service-account key
+is persisted. Keep deployment protection enabled.
+
+Application callers await `getDb()` inside async requests/actions. A cached
+initialization promise shares the pool across concurrent first callers; failed
+initialization can be retried. Importing the module never connects during a build.
+The Cloud SQL pool has a provisional cap of **two connections per function instance**,
+a 10-second acquisition timeout, and a 5-second idle timeout. Vercel's
+`attachDatabasePool` keeps request-scoped idle cleanup alive before suspension.
+`closeDb()` explicitly drains the pool and closes its connector for operator/test
+shutdown; it does not retire a handle still owned by a caller merely because time
+has passed. Credential refresh uses the connector's lifecycle and a fresh token
+supplier, not a cached JWT. Total connections still scale with function concurrency.
+Verify the dev instance's connection budget and intended
+concurrency before deployment; this provisional per-instance cap is not a global limit.
+The installed connector refreshes certificates with background timers. Local token
+rotation tests do not establish what happens across Vercel suspension. Real
+warm-instance refresh/suspension must pass separately approved Vercel testing before
+enabling the dev deployment; this is an explicit deployment prerequisite.
+
+Use the Node.js runtime with Node.js 22 or newer. The in-process connector manages
+TLS to the public IP without authorized networks; do not apply URL SSL rewriting
+to connector sockets or disable certificate verification globally. There is no new
+HTTP health endpoint. `pnpm db:check:dev` runs an operator-controlled read-only
+`SELECT 1` through the awaited `getDb()` client and always closes it. It prints
+only `{ "connected": true }` on success, refuses Neon/Production, and restricts
+the local PostgreSQL path to loopback. Run it only with separately approved dev
+app-identity configuration, then exercise existing protected login/database routes.
+
+Local tests use disposable PostgreSQL with `DATABASE_DRIVER=postgres`. Local/orb dev
+traffic can use a separately approved app-identity Auth Proxy bound to loopback and
+an explicit dev `DATABASE_URL`, without Vercel tokens or migration credentials.
+Drizzle CLI and standalone maintenance tools keep their existing `DATABASE_URL`
+and migration identity; this change performs no schema migration. Preserve all
+production Neon settings and credentials. IAM/WIF changes, environment creation,
+database grants, data seeding, and deployment each require separate approval.
+
+`pnpm test:db:runtime` runs the cached initialization/identity tests and a disposable
+local PostgreSQL + pgvector integration test as an inherited non-owner app role.
+It requires `initdb` and `pg_ctl` on PATH plus the server's pgvector extension.
+The test stubs Google networking only; it exercises real Drizzle queries, rate
+limits, commit/rollback, foreign keys, vector queries, DDL denial, and default
+privileges on future objects. It never connects to the shared dev or production DB.
+
 ## CI/CD
 
 The GitHub Actions workflow in `.github/workflows/ci-cd.yml`:

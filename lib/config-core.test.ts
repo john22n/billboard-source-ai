@@ -7,6 +7,90 @@ import {
 } from './config-core'
 
 describe('server config', () => {
+  const cloudSqlEnv = {
+    VERCEL: '1',
+    VERCEL_ENV: 'preview',
+    VERCEL_TARGET_ENV: 'dev',
+    DATABASE_DRIVER: 'cloudsql',
+    CLOUD_SQL_INSTANCE_CONNECTION_NAME: 'project:us-central1:database',
+    CLOUD_SQL_DATABASE: 'billboard_dev',
+    CLOUD_SQL_USER: 'app@project.iam',
+    CLOUD_SQL_VERCEL_OWNER_ID: 'team_dev',
+    CLOUD_SQL_VERCEL_PROJECT_ID: 'prj_dev',
+    CLOUD_SQL_VERCEL_ENVIRONMENT_ID: 'env_dev',
+    GCP_PROJECT_NUMBER: '123456789012',
+    GCP_WORKLOAD_IDENTITY_POOL_ID: 'test-pool',
+    GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID: 'test-provider',
+    GCP_SERVICE_ACCOUNT_EMAIL: 'app@project.iam.gserviceaccount.com',
+  }
+
+  it('requires an explicit driver and preserves existing deployment defaults', () => {
+    for (const env of [
+      { VERCEL: '1', VERCEL_ENV: 'production' },
+      { VERCEL: '1', VERCEL_ENV: 'preview' },
+      { ...cloudSqlEnv, DATABASE_DRIVER: undefined, VERCEL_ENV: 'production' },
+    ]) {
+      const config = createServerConfig(env)
+      expect(Reflect.get(config.database, 'driver')).toBe('neon')
+      expect(config.database.cloudSql).toBeNull()
+    }
+    expect(Reflect.get(createServerConfig({}).database, 'driver')).toBe(
+      'postgres',
+    )
+  })
+
+  it('selects the isolated dev IAM login without a database password', () => {
+    const config = createServerConfig(cloudSqlEnv)
+    expect(Reflect.get(config.database, 'driver')).toBe('cloudsql')
+    expect(config.database.cloudSql).toEqual({
+      instanceConnectionName: 'project:us-central1:database',
+      database: 'billboard_dev',
+      user: 'app@project.iam',
+      federation: {
+        audience:
+          '//iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/test-pool/providers/test-provider',
+        serviceAccountEmail: 'app@project.iam.gserviceaccount.com',
+        ownerId: 'team_dev',
+        projectId: 'prj_dev',
+        environmentId: 'env_dev',
+      },
+    })
+  })
+
+  it('fails closed for invalid drivers and production overrides', () => {
+    for (const env of [
+      { DATABASE_DRIVER: 'typo' },
+      { ...cloudSqlEnv, VERCEL_ENV: 'production' },
+      { ...cloudSqlEnv, VERCEL_TARGET_ENV: 'production' },
+      { VERCEL: '1', VERCEL_ENV: 'production', DATABASE_DRIVER: 'postgres' },
+    ]) {
+      expect(() =>
+        Reflect.get(createServerConfig(env).database, 'driver'),
+      ).toThrow(ConfigError)
+    }
+  })
+
+  it('rejects Cloud SQL outside the intended custom environment or with incomplete identity', () => {
+    for (const override of [
+      { VERCEL: undefined },
+      { VERCEL_TARGET_ENV: undefined },
+      { VERCEL_TARGET_ENV: 'preview' },
+      { VERCEL_TARGET_ENV: 'development' },
+      { CLOUD_SQL_DATABASE: undefined },
+      { CLOUD_SQL_INSTANCE_CONNECTION_NAME: undefined },
+      { CLOUD_SQL_VERCEL_ENVIRONMENT_ID: undefined },
+      { CLOUD_SQL_VERCEL_OWNER_ID: undefined },
+      { CLOUD_SQL_VERCEL_PROJECT_ID: undefined },
+      { GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID: undefined },
+      { CLOUD_SQL_USER: 'migration-owner' },
+    ]) {
+      expect(
+        () =>
+          createServerConfig({ ...cloudSqlEnv, ...override }).database.cloudSql,
+      ).toThrow(ConfigError)
+    }
+  })
+
   it('requires a sufficiently long JWT secret without falling back', () => {
     const config = createServerConfig({})
 
