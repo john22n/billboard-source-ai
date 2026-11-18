@@ -1,4 +1,5 @@
 {
+  "buildCommand": "pnpm exec next build --webpack",
   "crons": [
     {
       "path": "/api/cron/process-lead-notifications",
