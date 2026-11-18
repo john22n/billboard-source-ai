@@ -4,6 +4,123 @@ import { Pool } from 'pg'
 import { createServerConfig } from '../../lib/config-core'
 import { baseUrl, databaseUrl, jwtSecret, userId } from './environment'
 
+test('scoped processing leaves older unrelated pending leads untouched', async () => {
+  process.env.DATABASE_URL = databaseUrl
+  process.env.DATABASE_DRIVER = 'postgres'
+  const { processLeadNotifications } =
+    await import('../../lib/lead-notifications/processor')
+  const pool = new Pool({ connectionString: databaseUrl })
+  const config = createServerConfig({
+    NUTSHELL_NOTIFICATIONS_ENABLED: 'true',
+    LEAD_NOTIFICATIONS_LAUNCH_CUTOFF: '2026-01-01T00:00:00Z',
+    LEAD_NOTIFICATIONS_RECIPIENT_ALLOWLIST: 'creative-studio@example.test',
+    NUTSHELL_API_KEY: 'synthetic-local-test-key',
+  })
+  const leadIds = ['78001-leads', '78002-leads']
+  const allIds = ['78000-leads', ...leadIds]
+  try {
+    for (const leadId of allIds) {
+      await pool.query(
+        `INSERT INTO nutshell_webhook_inbox(event_id, lead_id, next_attempt_at)
+         VALUES ($1, $2, now() - interval '1 day')`,
+        [leadId.replace('-leads', '-events'), leadId],
+      )
+      await pool.query(
+        `INSERT INTO lead_notifications
+         (id, assignee_id, assignee_email, assignment_event_id, company_name,
+          lead_url, lead_created_at, recipient_id)
+         VALUES ($1, '301-users', 'creative-studio@example.test', '301-events',
+                 'Scoped test company', 'https://app.nutshell.com/lead/78001', now(), $2)`,
+        [leadId, userId],
+      )
+    }
+    const options = {
+      config,
+      leadIds,
+      fetcher: async () => {
+        throw new Error('Frozen snapshots must not require CRM reads')
+      },
+    }
+    expect(await processLeadNotifications({ ...options, leadIds: [] })).toEqual(
+      {
+        enabled: true,
+        processed: 0,
+      },
+    )
+    expect(await processLeadNotifications(options)).toEqual({
+      enabled: true,
+      processed: 2,
+    })
+    expect(
+      (
+        await pool.query(
+          `SELECT lead_id, status, attempts FROM nutshell_webhook_inbox
+           WHERE lead_id = ANY($1) ORDER BY lead_id`,
+          [allIds],
+        )
+      ).rows,
+    ).toEqual([
+      { lead_id: '78000-leads', status: 'pending', attempts: 0 },
+      { lead_id: '78001-leads', status: 'processed', attempts: 1 },
+      { lead_id: '78002-leads', status: 'processed', attempts: 1 },
+    ])
+    expect(await processLeadNotifications(options)).toEqual({
+      enabled: true,
+      processed: 0,
+    })
+    const clearedAt = new Date('2026-11-18T00:00:00Z')
+    await pool.query(
+      'UPDATE lead_notifications SET cleared_at = $1 WHERE id = $2',
+      [clearedAt, leadIds[0]],
+    )
+    await pool.query(
+      `UPDATE nutshell_webhook_inbox SET status = 'pending', next_attempt_at = now() - interval '1 second'
+       WHERE lead_id = $1`,
+      [leadIds[0]],
+    )
+    expect(await processLeadNotifications(options)).toEqual({
+      enabled: true,
+      processed: 1,
+    })
+    expect(
+      (
+        await pool.query(
+          'SELECT cleared_at FROM lead_notifications WHERE id = $1',
+          [leadIds[0]],
+        )
+      ).rows[0].cleared_at,
+    ).toEqual(clearedAt)
+    expect(
+      (
+        await pool.query(
+          'SELECT status, attempts FROM nutshell_webhook_inbox WHERE lead_id = $1',
+          [allIds[0]],
+        )
+      ).rows[0],
+    ).toEqual({ status: 'pending', attempts: 0 })
+    expect(
+      await processLeadNotifications({ config, fetcher: options.fetcher }),
+    ).toEqual({ enabled: true, processed: 1 })
+    expect(
+      (
+        await pool.query(
+          'SELECT status, attempts FROM nutshell_webhook_inbox WHERE lead_id = $1',
+          [allIds[0]],
+        )
+      ).rows[0],
+    ).toEqual({ status: 'processed', attempts: 1 })
+  } finally {
+    await pool.query('DELETE FROM lead_notifications WHERE id = ANY($1)', [
+      allIds,
+    ])
+    await pool.query(
+      'DELETE FROM nutshell_webhook_inbox WHERE lead_id = ANY($1)',
+      [allIds],
+    )
+    await pool.end()
+  }
+})
+
 async function signIn(context: BrowserContext, accountId = userId) {
   const token = await new SignJWT({ userId: accountId })
     .setProtectedHeader({ alg: 'HS256' })

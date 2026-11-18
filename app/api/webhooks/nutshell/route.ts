@@ -106,7 +106,9 @@ export async function POST(request: Request) {
         try {
           const { processLeadNotifications } =
             await import('@/lib/lead-notifications/processor')
-          await processLeadNotifications()
+          await processLeadNotifications({
+            leadIds: rows.map(({ leadId }) => leadId),
+          })
         } catch {
           // Intake remains durable; the protected scheduled retry recovers it.
           console.error('Lead notification processing unavailable')

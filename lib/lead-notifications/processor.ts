@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, lte, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, lte, sql } from 'drizzle-orm'
 import { serverConfig, type ServerConfig } from '@/lib/config'
 import { leadNotifications, nutshellWebhookInbox, user } from '@/db/schema'
 import { hydrateLead } from './hydrate'
@@ -144,6 +144,7 @@ export async function processLeadNotifications(
   options: {
     config?: ServerConfig
     fetcher?: typeof fetch
+    leadIds?: string[]
   } = {},
 ) {
   const config = options.config ?? serverConfig
@@ -156,6 +157,9 @@ export async function processLeadNotifications(
   const due = and(
     eq(nutshellWebhookInbox.status, 'pending'),
     lte(nutshellWebhookInbox.nextAttemptAt, new Date()),
+    options.leadIds === undefined
+      ? undefined
+      : inArray(nutshellWebhookInbox.leadId, options.leadIds),
   )
   const candidates = await db
     .select()
