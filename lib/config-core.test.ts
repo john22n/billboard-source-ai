@@ -10,7 +10,7 @@ describe('server config', () => {
   const cloudSqlEnv = {
     VERCEL: '1',
     VERCEL_ENV: 'preview',
-    VERCEL_TARGET_ENV: 'dev',
+    VERCEL_TARGET_ENV: 'staging',
     DATABASE_DRIVER: 'cloudsql',
     CLOUD_SQL_INSTANCE_CONNECTION_NAME: 'project:us-central1:database',
     CLOUD_SQL_DATABASE: 'billboard_dev',
@@ -39,7 +39,7 @@ describe('server config', () => {
     )
   })
 
-  it('selects the isolated dev IAM login without a database password', () => {
+  it('selects the isolated staging IAM login without a database password', () => {
     const config = createServerConfig(cloudSqlEnv)
     expect(Reflect.get(config.database, 'driver')).toBe('cloudsql')
     expect(config.database.cloudSql).toEqual({
@@ -52,8 +52,23 @@ describe('server config', () => {
         serviceAccountEmail: 'app@project.iam.gserviceaccount.com',
         ownerId: 'team_dev',
         projectId: 'prj_dev',
+        environment: 'staging',
         environmentId: 'env_dev',
       },
+    })
+  })
+
+  it('selects the preview IAM login without requiring a custom environment ID', () => {
+    const config = createServerConfig({
+      ...cloudSqlEnv,
+      VERCEL_TARGET_ENV: 'preview',
+      CLOUD_SQL_VERCEL_ENVIRONMENT_ID: undefined,
+    })
+    expect(config.database.cloudSql?.federation).toMatchObject({
+      environment: 'preview',
+      environmentId: null,
+      ownerId: 'team_dev',
+      projectId: 'prj_dev',
     })
   })
 
@@ -70,12 +85,12 @@ describe('server config', () => {
     }
   })
 
-  it('rejects Cloud SQL outside the intended custom environment or with incomplete identity', () => {
+  it('rejects Cloud SQL outside preview and staging or with incomplete identity', () => {
     for (const override of [
       { VERCEL: undefined },
       { VERCEL_TARGET_ENV: undefined },
-      { VERCEL_TARGET_ENV: 'preview' },
       { VERCEL_TARGET_ENV: 'development' },
+      { VERCEL_TARGET_ENV: 'dev' },
       { CLOUD_SQL_DATABASE: undefined },
       { CLOUD_SQL_INSTANCE_CONNECTION_NAME: undefined },
       { CLOUD_SQL_VERCEL_ENVIRONMENT_ID: undefined },

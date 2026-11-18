@@ -105,7 +105,8 @@ export interface ServerConfig {
         serviceAccountEmail: string
         ownerId: string
         projectId: string
-        environmentId: string
+        environment: 'staging' | 'preview'
+        environmentId: string | null
       }
     } | null
   }
@@ -219,7 +220,10 @@ const taskRouterActivityEnvKeys: Record<TaskRouterActivityName, string> = {
   busy: 'TASKROUTER_ACTIVITY_BUSY_SID',
 }
 
-function cloudSqlFederation(env: EnvSource) {
+function cloudSqlFederation(
+  env: EnvSource,
+  environment: 'staging' | 'preview',
+) {
   const path = 'serverConfig.database.cloudSql.federation'
   const projectNumber = requiredString(env, 'GCP_PROJECT_NUMBER', path)
   const poolId = requiredString(env, 'GCP_WORKLOAD_IDENTITY_POOL_ID', path)
@@ -233,7 +237,11 @@ function cloudSqlFederation(env: EnvSource) {
     serviceAccountEmail: requiredString(env, 'GCP_SERVICE_ACCOUNT_EMAIL', path),
     ownerId: requiredString(env, 'CLOUD_SQL_VERCEL_OWNER_ID', path),
     projectId: requiredString(env, 'CLOUD_SQL_VERCEL_PROJECT_ID', path),
-    environmentId: requiredString(env, 'CLOUD_SQL_VERCEL_ENVIRONMENT_ID', path),
+    environment,
+    environmentId:
+      environment === 'staging'
+        ? requiredString(env, 'CLOUD_SQL_VERCEL_ENVIRONMENT_ID', path)
+        : null,
   }
 }
 
@@ -602,15 +610,19 @@ export function createServerConfig(env: EnvSource): ServerConfig {
       },
       get cloudSql() {
         if (this.driver !== 'cloudsql') return null
-        if (!isVercel || optionalString(env, 'VERCEL_TARGET_ENV') !== 'dev') {
+        const environment = optionalString(env, 'VERCEL_TARGET_ENV')
+        if (
+          !isVercel ||
+          (environment !== 'staging' && environment !== 'preview')
+        ) {
           throw new ConfigError({
             path: 'serverConfig.database.cloudSql',
             envKey: 'VERCEL_TARGET_ENV',
             reason:
-              'Cloud SQL requires the isolated Vercel dev custom environment; use postgres with an app-identity proxy locally',
+              'Cloud SQL requires Vercel preview or staging; use postgres with an app-identity proxy locally',
           })
         }
-        const federation = cloudSqlFederation(env)
+        const federation = cloudSqlFederation(env, environment)
         const user = requiredString(
           env,
           'CLOUD_SQL_USER',

@@ -40,7 +40,7 @@ const entryPath = './index'
 const claims = {
   owner_id: 'team_dev',
   project_id: 'prj_dev',
-  environment: 'dev',
+  environment: 'staging',
   custom_environment_id: 'env_dev',
 }
 
@@ -51,7 +51,7 @@ beforeEach(() => {
   for (const [key, value] of Object.entries({
     VERCEL: '1',
     VERCEL_ENV: 'preview',
-    VERCEL_TARGET_ENV: 'dev',
+    VERCEL_TARGET_ENV: 'staging',
     DATABASE_DRIVER: 'cloudsql',
     CLOUD_SQL_INSTANCE_CONNECTION_NAME: 'project:us-central1:instance',
     CLOUD_SQL_DATABASE: 'billboard_dev',
@@ -147,10 +147,12 @@ it.each([
   { owner_id: 'other-owner' },
   { project_id: 'other-project' },
   { environment: 'production' },
+  { environment: 'preview' },
+  { environment: 'dev' },
   { custom_environment_id: 'other-environment' },
   { custom_environment_id: undefined },
 ])(
-  'denies a token outside the configured dev identity: %j',
+  'denies a token outside the configured staging identity: %j',
   async (override) => {
     const { getDb } = await import(entryPath)
     await getDb()
@@ -158,9 +160,45 @@ it.each([
     external.verify.mockResolvedValue({ payload: { ...claims, ...override } })
     await expect(
       external.authClients[0].retrieveSubjectToken(),
-    ).rejects.toThrow('Cloud SQL dev identity mismatch')
+    ).rejects.toThrow('Cloud SQL staging identity mismatch')
   },
 )
+
+it('accepts preview tokens only for this project and without a custom environment', async () => {
+  vi.stubEnv('VERCEL_TARGET_ENV', 'preview')
+  vi.stubEnv('CLOUD_SQL_VERCEL_ENVIRONMENT_ID', undefined)
+  const { getDb } = await import(entryPath)
+  await getDb()
+  external.token.mockResolvedValue('preview-token')
+  const previewClaims = {
+    ...claims,
+    environment: 'preview',
+    custom_environment_id: undefined,
+  }
+  for (const custom_environment_id of [undefined, null]) {
+    external.verify.mockResolvedValue({
+      payload: { ...previewClaims, custom_environment_id },
+    })
+    expect(await external.authClients[0].retrieveSubjectToken()).toBe(
+      'preview-token',
+    )
+  }
+  for (const override of [
+    { owner_id: 'other-owner' },
+    { project_id: 'other-project' },
+    { environment: 'production' },
+    { environment: 'staging' },
+    { environment: undefined },
+    { custom_environment_id: 'env_dev' },
+  ]) {
+    external.verify.mockResolvedValue({
+      payload: { ...previewClaims, ...override },
+    })
+    await expect(
+      external.authClients[0].retrieveSubjectToken(),
+    ).rejects.toThrow('Cloud SQL preview identity mismatch')
+  }
+})
 
 it('does not retire a database handle still held by a caller after a long idle period', async () => {
   const { getDb } = await import(entryPath)
