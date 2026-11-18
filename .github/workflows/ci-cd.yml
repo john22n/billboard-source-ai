@@ -11,13 +11,147 @@ permissions:
 
 concurrency:
   group: ci-cd-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Never interrupt an in-flight shared dev migration with a newer push.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   NODE_VERSION: 22
   PNPM_VERSION: 10.33.2
 
 jobs:
+  migration-test:
+    name: Rehearse migrations on disposable PostgreSQL
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install PostgreSQL 18 and pgvector 0.8.5
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-common build-essential
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install --yes postgresql-18 postgresql-server-dev-18
+          git clone --branch v0.8.5 --depth 1 https://github.com/pgvector/pgvector.git "$RUNNER_TEMP/pgvector"
+          make -C "$RUNNER_TEMP/pgvector" PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config
+          sudo make -C "$RUNNER_TEMP/pgvector" PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config install
+          echo /usr/lib/postgresql/18/bin >> "$GITHUB_PATH"
+      - run: pnpm exec drizzle-kit check
+      - run: pnpm test:db
+
+  verify-dev:
+    name: Verify Cloud SQL dev identity (read-only)
+    needs: [quality, e2e, security, migration-test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Authenticate as the existing dev schema owner
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: cs-poc-l0o7at4xalxqxcyxekiay2j
+          workload_identity_provider: projects/789243463553/locations/global/workloadIdentityPools/github-billboard-dev/providers/github-actions
+          service_account: amp-billboard-db@cs-poc-l0o7at4xalxqxcyxekiay2j.iam.gserviceaccount.com
+      - name: Verify identity and migration history without writes
+        shell: bash
+        run: |
+          bash scripts/with-dev-sql-proxy.sh node --input-type=module <<'JS'
+          import assert from 'node:assert/strict'
+          import pg from 'pg'
+          import { readMigrationFiles } from 'drizzle-orm/migrator'
+
+          const database = 'billboard_dev'
+          const user = 'amp-billboard-db@cs-poc-l0o7at4xalxqxcyxekiay2j.iam'
+          const client = new pg.Client({
+            host: '127.0.0.1', port: 15432, database, user,
+            password: '', ssl: false, connectionTimeoutMillis: 30000,
+            options: '-c default_transaction_read_only=on -c statement_timeout=30000',
+          })
+          try {
+            await client.connect()
+            await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY')
+            const { rows: [identity] } = await client.query(`
+              SELECT current_database() AS database, current_user AS username,
+                session_user AS login, current_setting('transaction_read_only') AS read_only
+            `)
+            assert.deepEqual(identity, { database, username: user, login: user, read_only: 'on' })
+            const { rows: extensions } = await client.query(`
+              SELECT e.extversion FROM pg_extension e JOIN pg_namespace n ON n.oid=e.extnamespace
+              WHERE e.extname='vector' AND n.nspname='public'
+            `)
+            assert.equal(extensions.length, 1, 'Expected vector in public')
+            const migrations = readMigrationFiles({ migrationsFolder: './drizzle' })
+            const { rows: applied } = await client.query(
+              'SELECT hash, created_at FROM drizzle.__drizzle_migrations ORDER BY id',
+            )
+            assert.ok(applied.length > 0, 'Expected the existing dev migration journal')
+            for (const [index, entry] of applied.entries()) {
+              assert.equal(entry.hash, migrations[index]?.hash, 'Migration hash mismatch')
+              assert.equal(Number(entry.created_at), migrations[index]?.folderMillis, 'Migration timestamp mismatch')
+            }
+            await client.query('ROLLBACK')
+            console.log(`Dev read-only verification passed: vector ${extensions[0].extversion}; ${applied.length} applied migrations; ${migrations.length - applied.length} pending (not applied).`)
+          } finally {
+            await client.end()
+          }
+          JS
+
+  migrate-dev:
+    name: Migrate Cloud SQL dev only
+    needs: [verify-dev]
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      vars.DEV_MIGRATIONS_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: dev
+    concurrency:
+      group: cloud-sql-billboard-dev-migrations
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Authenticate as the existing dev schema owner
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: cs-poc-l0o7at4xalxqxcyxekiay2j
+          workload_identity_provider: projects/789243463553/locations/global/workloadIdentityPools/github-billboard-dev/providers/github-actions
+          service_account: amp-billboard-db@cs-poc-l0o7at4xalxqxcyxekiay2j.iam.gserviceaccount.com
+      - name: Apply guarded dev migrations through IAM proxy
+        shell: bash
+        run: bash scripts/with-dev-sql-proxy.sh pnpm db:migrate:dev --apply-dev
+
   quality:
     name: Lint, typecheck, and test
     runs-on: ubuntu-24.04

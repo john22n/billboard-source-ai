@@ -2,13 +2,13 @@ import { beforeEach, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({ after: vi.fn(), returning: vi.fn() }))
 vi.mock('next/server', () => ({ after: mocks.after }))
 vi.mock('@/db', () => ({
-  db: {
+  getDb: async () => ({
     insert: () => ({
       values: () => ({
         onConflictDoNothing: () => ({ returning: mocks.returning }),
       }),
     }),
-  },
+  }),
 }))
 import { POST } from './route'
 

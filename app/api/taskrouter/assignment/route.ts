@@ -169,6 +169,12 @@ export async function POST(req: Request) {
         ...taskAttrs,
         excluded_workers: updatedAttemptedWorkers,
         attempt_count: updatedAttemptedWorkers.length,
+        call_offer: {
+          workerSid,
+          reservationSid,
+          status: 'ringing',
+          channel: null,
+        },
         direct_fallback_offered:
           taskAttrs.direct_fallback_offered === true || isDirectFallback,
       }

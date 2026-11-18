@@ -70,6 +70,8 @@ interface TwilioRuntime {
   incomingCall: Call | null
   tokenRefresh: { device: Device; promise: Promise<boolean> } | null
   deviceRecovery: Promise<boolean> | null
+  recoveryNotBefore?: number
+  connectionError?: boolean
   tabOwnership: TwilioTabOwnership | null
   hasDeviceOwnership: boolean
   tabId: string
@@ -105,6 +107,8 @@ type UpdateState = Dispatch<Partial<TwilioState>>
 type TwilioDeviceRecoveryReason =
   | 'device-missing'
   | 'device-destroyed'
+  | 'device-unregistered'
+  | 'device-connection-error'
   | 'device-busy-without-active-call'
   | 'device-has-untracked-calls'
   | 'call-ended-during-accept'
@@ -132,6 +136,7 @@ const CONSTANT_AUDIO_INPUT_WARNING = 'constant-audio-input-level'
 const MICROPHONE_VOLUME_UPDATE_MS = 150
 const TWILIO_DEVICE_LOCK_NAME = 'billboard-source-twilio-device'
 const CALL_ACCEPT_TIMEOUT_MS = 10_000
+const DEVICE_RECOVERY_DELAY_MS = 10_000
 const telemetryLimits = TWILIO_CLIENT_TELEMETRY_LIMITS
 
 class CallAcceptanceTimeoutError extends Error {
@@ -675,6 +680,24 @@ export function handleIncomingCall(
   })
   showIncomingNotification(runtime, update, call)
 
+  call.on('transportClose', () => {
+    if (call.status() !== Call.State.Pending) return
+    // The SDK emits transportClose before marking a pending call closed,
+    // without emitting any of the usual terminal call events.
+    queueMicrotask(() => {
+      if (
+        call.status() !== Call.State.Closed ||
+        runtime.incomingCall !== call ||
+        runtime.activeCall === call ||
+        runtime.acceptingCall === call
+      ) {
+        return
+      }
+      closeIncomingNotification(runtime)
+      runtime.incomingCall = null
+      update({ incomingCall: null, ...getIdleMicrophoneState(runtime) })
+    })
+  })
   call.on('disconnect', () => {
     reportTwilioClientEvent(runtime, 'call-disconnected', { call })
     const wasAccepting = runtime.acceptingCall === call
@@ -776,6 +799,7 @@ function handleDeviceRegistered(
 ) {
   if (!isCurrentDevice(runtime, device)) return
   runtime.initialized = true
+  runtime.connectionError = false
   console.info('Twilio device registered', {
     state: device.state,
     edge: device.edge || 'unknown',
@@ -796,20 +820,13 @@ function handleDeviceUnregistered(
 ) {
   if (!isCurrentDevice(runtime, device)) return
 
+  // The SDK reconnects its transport and re-registers itself. Give it time
+  // before replacing an idle device; never register concurrently with it.
+  runtime.recoveryNotBefore = Date.now() + DEVICE_RECOVERY_DELAY_MS
   update({
     twilioReady: false,
     status: 'Reconnecting calling service...',
   })
-  if (runtime.tokenRefresh?.device === device) return
-  if (runtime.initializing) return
-
-  runtime.initializing = true
-  device
-    .register()
-    .catch((error) => console.error('Failed to re-register Twilio:', error))
-    .finally(() => {
-      runtime.initializing = false
-    })
 }
 
 function bindDeviceEvents(
@@ -836,7 +853,13 @@ function bindDeviceEvents(
     }
     console.error('Twilio device error:', error)
     reportTwilioClientEvent(runtime, 'device-error', { error })
+    const connectionError = error.code === 31005 || error.code === 31009
+    if (connectionError && !runtime.connectionError) {
+      runtime.connectionError = true
+      runtime.recoveryNotBefore = Date.now() + DEVICE_RECOVERY_DELAY_MS
+    }
     update({
+      ...(connectionError ? { twilioReady: false } : {}),
       status: `Twilio error: ${error.message}`,
       deviceError: `Twilio error: ${error.message}`,
     })
@@ -1086,6 +1109,7 @@ async function startTwilioDevice(runtime: TwilioRuntime, update: UpdateState) {
     tokenRefreshMs: TOKEN_REFRESH_MS,
   })
   bindDeviceEvents(runtime, update, device)
+  runtime.connectionError = false
   runtime.device = device
   try {
     await device.register()
@@ -1109,6 +1133,7 @@ async function initializeTwilio(runtime: TwilioRuntime, update: UpdateState) {
 
   try {
     runtime.initializing = true
+    runtime.recoveryNotBefore = Date.now() + DEVICE_RECOVERY_DELAY_MS
     update({ status: 'Initializing Twilio...', deviceError: null })
     return await startTwilioDevice(runtime, update)
   } catch (error) {
@@ -1128,16 +1153,31 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Unknown error'
 }
 
+function canReplaceTwilioDevice(runtime: TwilioRuntime) {
+  return (
+    runtime.hasDeviceOwnership &&
+    !runtime.loggedOut &&
+    !runtime.activeCall &&
+    !runtime.acceptingCall &&
+    !runtime.incomingCall
+  )
+}
+
 export function getDeviceRecoveryReason(runtime: TwilioRuntime) {
-  if (runtime.loggedOut || !runtime.hasDeviceOwnership) return null
-  if (!runtime.initialized || runtime.deviceRecovery) return null
-  if (runtime.activeCall || runtime.acceptingCall || runtime.incomingCall) {
+  if (!canReplaceTwilioDevice(runtime)) return null
+  if (typeof navigator !== 'undefined' && navigator.onLine === false)
+    return null
+  if (runtime.initializing || runtime.tokenRefresh || runtime.deviceRecovery) {
     return null
   }
+  if (Date.now() < (runtime.recoveryNotBefore ?? 0)) return null
+  if (runtime.device?.state === 'registering') return null
 
   const device = runtime.device
   if (!device) return 'device-missing'
   if (device.state === 'destroyed') return 'device-destroyed'
+  if (device.state === 'unregistered') return 'device-unregistered'
+  if (runtime.connectionError) return 'device-connection-error'
   if (device.isBusy) return 'device-busy-without-active-call'
   if (getDeviceCalls(device).length > 0) return 'device-has-untracked-calls'
   return null
@@ -1149,12 +1189,10 @@ export async function recoverTwilioDevice(
   reason: TwilioDeviceRecoveryReason,
   startDevice = startTwilioDevice,
 ) {
-  if (runtime.loggedOut || !runtime.hasDeviceOwnership) return false
-  if (runtime.activeCall || runtime.acceptingCall || runtime.incomingCall) {
-    return false
-  }
+  if (!canReplaceTwilioDevice(runtime)) return false
   if (runtime.deviceRecovery) return runtime.deviceRecovery
 
+  runtime.recoveryNotBefore = Date.now() + DEVICE_RECOVERY_DELAY_MS
   const recovery = (async () => {
     reportTwilioClientEvent(runtime, 'device-recovery-start', { reason })
     update({
@@ -1322,11 +1360,15 @@ function useTwilioLifecycle(runtime: TwilioRuntime, update: UpdateState) {
   }, [ownTwilioDevice, runtime])
 
   useEffect(() => {
-    const interval = window.setInterval(
-      () => checkDeviceHealth(runtime, update),
-      2000,
-    )
-    return () => window.clearInterval(interval)
+    const check = () => checkDeviceHealth(runtime, update)
+    const interval = window.setInterval(check, 2000)
+    window.addEventListener('online', check)
+    window.addEventListener('focus', check)
+    return () => {
+      window.clearInterval(interval)
+      window.removeEventListener('online', check)
+      window.removeEventListener('focus', check)
+    }
   }, [runtime, update])
 }
 

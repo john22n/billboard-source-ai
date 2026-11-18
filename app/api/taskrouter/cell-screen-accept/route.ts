@@ -1,4 +1,5 @@
 import { isValidTwilioWebhook } from '@/lib/twilio-webhook'
+import { recordCallAnswer } from '@/lib/taskrouter-call-state'
 
 /**
  * Cell Screen Accept — Digit Press Handler
@@ -26,6 +27,12 @@ export async function POST(req: Request) {
 
     if (digit === '1') {
       console.log('✅ [CellScreenAccept] Accepted — bridging call')
+      // Status "in-progress" on the cell leg means the carrier answered, not
+      // that the rep accepted. Publish only after the screening digit.
+      await recordCallAnswer(req, formData, 'cell').catch(() => {
+        // A roster outage must not disconnect a call the rep just accepted.
+        console.error('❌ Failed to synchronize cell call acceptance')
+      })
       return new Response(
         '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
         { status: 200, headers: { 'Content-Type': 'text/xml' } },

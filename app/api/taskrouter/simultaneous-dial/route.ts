@@ -68,6 +68,9 @@ export async function POST(req: Request) {
     const clientStatusUrl = new URL(`${appUrl}/api/taskrouter/client-status`)
     clientStatusUrl.searchParams.set('leg', 'browser')
     clientStatusUrl.searchParams.set('taskSid', taskSid)
+    clientStatusUrl.searchParams.set('workspaceSid', workspaceSid)
+    clientStatusUrl.searchParams.set('workerSid', workerSid)
+    clientStatusUrl.searchParams.set('reservationSid', reservationSid)
     serverConfig.app.addVercelBypassToken(clientStatusUrl)
 
     // ── cell child-leg status callback ───────────────────────────────────────
@@ -79,6 +82,9 @@ export async function POST(req: Request) {
     // ── cell screening URL ────────────────────────────────────────────────────
     const cellScreenUrl = new URL(`${appUrl}/api/taskrouter/cell-screen`)
     cellScreenUrl.searchParams.set('taskSid', taskSid)
+    cellScreenUrl.searchParams.set('workspaceSid', workspaceSid)
+    cellScreenUrl.searchParams.set('workerSid', workerSid)
+    cellScreenUrl.searchParams.set('reservationSid', reservationSid)
     serverConfig.app.addVercelBypassToken(cellScreenUrl)
 
     // ── recording status callback — tagged as a call recording ───────────────

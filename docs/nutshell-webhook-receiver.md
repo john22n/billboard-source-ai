@@ -4,7 +4,7 @@
 
 The original dev receiver records new-lead event IDs and their linked lead IDs in `nutshell_webhook_inbox`. On November 9, seven real Contact Us lead events were confirmed durable; the latest 50 observed requests returned 200 or 202. Read-only REST hydration resolved all seven initial-assignee emails and company names. Nutshell's earlier test-button requests returned 400; that test-payload difference does not prevent the observed real lead deliveries. Request-body compatibility beyond the observed events remains unverified.
 
-The local implementation adds authoritative REST hydration, a durable processor, recipient-only notification APIs, an account-wide inbox, and opt-in desktop alerts. These additions require migration `0012_lead_notifications.sql` and explicit configuration before deployment; no shared database migration or new deployment is implied by local verification.
+The local implementation adds authoritative REST hydration, a durable processor, recipient-only notification APIs, an account-wide inbox, and opt-in desktop alerts. The required tables are already included in main's `0012_preserve_neon_dev_data.sql`, applied to Cloud SQL dev. Preserve that migration chain; do not replay the superseded branch migrations. Explicit configuration is still required before deployment; no shared database migration or new deployment is implied by local verification.
 
 ## Processor and notification behavior
 
@@ -56,7 +56,7 @@ Tests cover invalid credentials, malformed/oversized bodies, unrelated events, m
 ## Dev deployment checklist — requires approval
 
 1. Confirm the intended Vercel project/environment and stable dev hostname. Verify its database points to dev, not production. The local dev/prod files currently share Nutshell credentials; database separation is not CRM isolation.
-2. Review and approve applying `drizzle/0011_nutshell_webhook_inbox.sql` to the dev database. Do not run a broad schema push or migrate unrelated changes implicitly.
+2. Verify the destination's migration history against `docs/cloud-sql-dev-migrations.md`. Cloud SQL dev already has the required tables through `0012_preserve_neon_dev_data.sql`; do not reapply superseded branch migrations. Any pending migration on another destination requires separate review and approval; do not run a broad schema push.
 3. Set a new server-side webhook secret in the dev Vercel environment. Configure the processor's test-recipient restrictions before real event delivery is enabled.
 4. Deploy the approved branch to dev/preview, without promoting production. Check Vercel deployment protection separately: Nutshell cannot complete an interactive Vercel login. Choose a supported scoped bypass/exception only with approval and verify externally.
 5. Verify missing/incorrect secrets fail, a controlled valid event is durably recorded, replay is idempotent, and no secret appears in accessible logs. Test real vendor POST compatibility before declaring this callback operational.

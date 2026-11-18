@@ -3,6 +3,7 @@ import { WorkerStatusProvider } from '@/hooks/useWorkerStatus'
 import { LeadNotifications } from '@/components/lead-notifications'
 import { getSession } from '@/lib/auth'
 import { serverConfig } from '@/lib/config'
+import { AvailableWorkersProvider } from '@/hooks/useAvailableWorkers'
 
 export default async function AuthenticatedLayout({
   children,
@@ -14,12 +15,14 @@ export default async function AuthenticatedLayout({
     session && serverConfig.nutshell.notificationsEnabled
   return (
     <WorkerStatusProvider>
-      <TwilioProvider>
-        {children}
-        {showNotifications && (
-          <LeadNotifications key={session.userId} userId={session.userId} />
-        )}
-      </TwilioProvider>
+      <AvailableWorkersProvider>
+        <TwilioProvider>
+          {children}
+          {showNotifications && (
+            <LeadNotifications key={session.userId} userId={session.userId} />
+          )}
+        </TwilioProvider>
+      </AvailableWorkersProvider>
     </WorkerStatusProvider>
   )
 }

@@ -8,7 +8,10 @@ const databaseMocks = vi.hoisted(() => {
 })
 
 vi.mock('server-only', () => ({}))
-vi.mock('@/db', () => ({ db: { insert: databaseMocks.insert } }))
+vi.mock('@/db', () => {
+  const db = { insert: databaseMocks.insert }
+  return { getDb: async () => db }
+})
 vi.mock('@/db/schema', () => ({
   billboardLocations: {
     city: 'city',

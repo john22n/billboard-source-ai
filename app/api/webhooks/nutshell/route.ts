@@ -92,7 +92,8 @@ export async function POST(request: Request) {
   if (!rows.length) return Response.json({ accepted: 0 })
 
   try {
-    const { db } = await import('@/db')
+    const { getDb } = await import('@/db')
+    const db = await getDb()
     // One atomic insert: acknowledge only once the entire batch is durable.
     // Store identifiers, not customer data or untrusted embedded URLs/owners.
     const inserted = await db

@@ -1,4 +1,4 @@
-import { db } from '@/db'
+import { getDb } from '@/db'
 import { getSession } from './auth'
 import { serverConfig } from './config'
 import { and, desc, eq, gte, inArray, isNull, lt, sql } from 'drizzle-orm'
@@ -32,6 +32,7 @@ export const getCurrentUser = cache(async () => {
     return null
 
   try {
+    const db = await getDb()
     const result = await db
       .select()
       .from(user)
@@ -45,6 +46,7 @@ export const getCurrentUser = cache(async () => {
 
 export const getUserByEmail = cache(async (email: string) => {
   try {
+    const db = await getDb()
     const result = await db.select().from(user).where(eq(user.email, email))
     return result[0] || null
   } catch {
@@ -56,6 +58,7 @@ export const getUserByEmail = cache(async (email: string) => {
 export async function getUserCellPhoneByEmail(email?: string) {
   if (!email) return null
   try {
+    const db = await getDb()
     const [account] = await db
       .select({ cellPhoneNumber: user.cellPhoneNumber })
       .from(user)
@@ -73,6 +76,7 @@ export async function createPendingLog(
   sessionId: string,
   model = REALTIME_TRANSCRIPTION_MODEL,
 ) {
+  const db = await getDb()
   const [logEntry] = await db
     .insert(openaiLogs)
     .values({
@@ -91,10 +95,12 @@ export async function createPendingLog(
 }
 
 export async function getAllUsers() {
+  const db = await getDb()
   return await db.select().from(user)
 }
 
 export async function deleteUsersByIds(ids: string[]) {
+  const db = await getDb()
   return await db.delete(user).where(inArray(user.id, ids))
 }
 
@@ -102,6 +108,7 @@ const APP_METRICS_ID = 1
 
 // Total inbound calls to the Main Routing Number (Admin Panel header).
 export async function getMainCallsTotal(): Promise<number> {
+  const db = await getDb()
   const rows = await db
     .select({ total: appMetrics.mainCallsTotal })
     .from(appMetrics)
@@ -112,6 +119,7 @@ export async function getMainCallsTotal(): Promise<number> {
 
 // Increment the Main-Number total by one (atomic upsert on the singleton row).
 export async function incrementMainCallsTotal(): Promise<void> {
+  const db = await getDb()
   await db
     .insert(appMetrics)
     .values({ id: APP_METRICS_ID, mainCallsTotal: 1 })
@@ -124,6 +132,7 @@ export async function incrementMainCallsTotal(): Promise<void> {
 // Reset every Sales Rep's Call Attempt Totals (Missed/Rejected/Accepted) to
 // 0/0/0, clear idempotency guards, and zero the Main-Number total.
 export async function resetAllCallCounts(): Promise<void> {
+  const db = await getDb()
   await db.update(user).set({
     callsAccepted: 0,
     callsRejected: 0,
@@ -144,6 +153,7 @@ export async function updateUserTwilioPhone(
   userId: string,
   twilioPhoneNumber: string | null,
 ) {
+  const db = await getDb()
   const result = await db
     .update(user)
     .set({ twilioPhoneNumber })
@@ -156,6 +166,7 @@ export async function updateUserCellPhone(
   userId: string,
   cellPhoneNumber: string | null,
 ) {
+  const db = await getDb()
   const [updated] = await db
     .update(user)
     .set({ cellPhoneNumber })
@@ -174,6 +185,7 @@ export function getCurrentOpenAICostRange(now = new Date()) {
 export async function getUserCosts(
   range: { startDate: Date; endDate: Date } = getCurrentOpenAICostRange(),
 ) {
+  const db = await getDb()
   return await db
     .select({
       id: user.id,
@@ -279,6 +291,7 @@ async function createCompletedOpenAILog({
   cost: number
   sessionId?: string
 }) {
+  const db = await getDb()
   const [logEntry] = await db
     .insert(openaiLogs)
     .values({
@@ -304,6 +317,7 @@ export async function updateLogCost(
 ) {
   const actualCost = calculateOpenAIDurationCost(model, durationSeconds)
 
+  const db = await getDb()
   const result = await db
     .update(openaiLogs)
     .set({
@@ -322,6 +336,7 @@ export async function clearMonthlyOpenAILogs() {
   const now = new Date()
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
 
+  const db = await getDb()
   const result = await db
     .delete(openaiLogs)
     .where(lt(openaiLogs.createdAt, startOfMonth))
@@ -338,6 +353,7 @@ function reportedIssueCutoff(now = new Date()) {
 }
 
 async function clearExcessReportedIssues() {
+  const db = await getDb()
   const excessIssues = db
     .select({ reportId: reportedIssues.reportId })
     .from(reportedIssues)
@@ -353,6 +369,7 @@ async function clearExcessReportedIssues() {
 }
 
 export async function clearExpiredReportedIssues(now = new Date()) {
+  const db = await getDb()
   const expiredIssues = await db
     .delete(reportedIssues)
     .where(lt(reportedIssues.createdAt, reportedIssueCutoff(now)))
@@ -364,6 +381,7 @@ export async function clearExpiredReportedIssues(now = new Date()) {
 export async function saveReportedIssue(
   issue: typeof reportedIssues.$inferInsert,
 ) {
+  const db = await getDb()
   const [savedIssue] = await db
     .insert(reportedIssues)
     .values(issue)
@@ -394,6 +412,7 @@ function withoutLegacyIssueDiagnosis(
 }
 
 export async function getReportedIssues(now = new Date()) {
+  const db = await getDb()
   const issues = await db
     .select()
     .from(reportedIssues)
@@ -410,6 +429,7 @@ export async function resolveReportedIssue(
   reportId: string,
   resolverId: string,
 ) {
+  const db = await getDb()
   const [resolvedIssue] = await db
     .update(reportedIssues)
     .set({ resolvedAt: new Date(), resolvedById: resolverId })
@@ -425,6 +445,7 @@ export async function resolveReportedIssue(
 }
 
 export async function promoteToAdmin(email: string) {
+  const db = await getDb()
   const result = await db
     .update(user)
     .set({ role: 'admin' })
@@ -446,6 +467,7 @@ export async function upsertNutshellLead(lead: {
   nutshellCreatedAt?: Date | null
   closedAt?: Date | null
 }) {
+  const db = await getDb()
   const [result] = await db
     .insert(nutshellLeads)
     .values({
@@ -477,6 +499,7 @@ export async function upsertNutshellLead(lead: {
 }
 
 export async function getNutshellLeadStats() {
+  const db = await getDb()
   const leads = await db
     .select()
     .from(nutshellLeads)

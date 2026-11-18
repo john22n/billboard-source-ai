@@ -95,7 +95,20 @@ export interface ServerConfig {
   }
   database: {
     url: string
-    useNeon: boolean
+    driver: 'neon' | 'postgres' | 'cloudsql'
+    cloudSql: {
+      instanceConnectionName: string
+      database: string
+      user: string
+      federation: {
+        audience: string
+        serviceAccountEmail: string
+        ownerId: string
+        projectId: string
+        environment: 'staging' | 'preview'
+        environmentId: string | null
+      }
+    } | null
   }
   openai: {
     apiKey: string | null
@@ -213,6 +226,31 @@ const taskRouterActivityEnvKeys: Record<TaskRouterActivityName, string> = {
   unavailable: 'TASKROUTER_ACTIVITY_UNAVAILABLE_SID',
   offline: 'TASKROUTER_ACTIVITY_OFFLINE_SID',
   busy: 'TASKROUTER_ACTIVITY_BUSY_SID',
+}
+
+function cloudSqlFederation(
+  env: EnvSource,
+  environment: 'staging' | 'preview',
+) {
+  const path = 'serverConfig.database.cloudSql.federation'
+  const projectNumber = requiredString(env, 'GCP_PROJECT_NUMBER', path)
+  const poolId = requiredString(env, 'GCP_WORKLOAD_IDENTITY_POOL_ID', path)
+  const providerId = requiredString(
+    env,
+    'GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID',
+    path,
+  )
+  return {
+    audience: `//iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`,
+    serviceAccountEmail: requiredString(env, 'GCP_SERVICE_ACCOUNT_EMAIL', path),
+    ownerId: requiredString(env, 'CLOUD_SQL_VERCEL_OWNER_ID', path),
+    projectId: requiredString(env, 'CLOUD_SQL_VERCEL_PROJECT_ID', path),
+    environment,
+    environmentId:
+      environment === 'staging'
+        ? requiredString(env, 'CLOUD_SQL_VERCEL_ENVIRONMENT_ID', path)
+        : null,
+  }
 }
 
 export function createServerConfig(env: EnvSource): ServerConfig {
@@ -557,7 +595,85 @@ export function createServerConfig(env: EnvSource): ServerConfig {
       get url() {
         return requiredString(env, 'DATABASE_URL', 'serverConfig.database.url')
       },
-      useNeon: isVercel,
+      get driver() {
+        const driver =
+          optionalString(env, 'DATABASE_DRIVER') ??
+          (isVercel ? 'neon' : 'postgres')
+        if (
+          driver !== 'neon' &&
+          driver !== 'postgres' &&
+          driver !== 'cloudsql'
+        ) {
+          throw new ConfigError({
+            path: 'serverConfig.database.driver',
+            envKey: 'DATABASE_DRIVER',
+            reason: 'must be neon, postgres, or cloudsql',
+          })
+        }
+        if (
+          driver !== 'neon' &&
+          (vercelEnv === 'production' || env.VERCEL_TARGET_ENV === 'production')
+        ) {
+          throw new ConfigError({
+            path: 'serverConfig.database.driver',
+            envKey: 'DATABASE_DRIVER',
+            reason: 'production must remain on Neon; no cutover is authorized',
+          })
+        }
+        return driver
+      },
+      get cloudSql() {
+        if (this.driver !== 'cloudsql') return null
+        const environment = optionalString(env, 'VERCEL_TARGET_ENV')
+        if (
+          !isVercel ||
+          (environment !== 'staging' && environment !== 'preview')
+        ) {
+          throw new ConfigError({
+            path: 'serverConfig.database.cloudSql',
+            envKey: 'VERCEL_TARGET_ENV',
+            reason:
+              'Cloud SQL requires Vercel preview or staging; use postgres with an app-identity proxy locally',
+          })
+        }
+        const federation = cloudSqlFederation(env, environment)
+        const user = requiredString(
+          env,
+          'CLOUD_SQL_USER',
+          'serverConfig.database.cloudSql.user',
+        )
+        if (
+          !federation.serviceAccountEmail.endsWith(
+            '.iam.gserviceaccount.com',
+          ) ||
+          user !==
+            federation.serviceAccountEmail.replace(
+              /\.gserviceaccount\.com$/,
+              '',
+            )
+        ) {
+          throw new ConfigError({
+            path: 'serverConfig.database.cloudSql.user',
+            envKey: 'CLOUD_SQL_USER',
+            reason:
+              'must be the impersonated service account email without .gserviceaccount.com',
+          })
+        }
+        return {
+          instanceConnectionName: requiredString(
+            env,
+            'CLOUD_SQL_INSTANCE_CONNECTION_NAME',
+            'serverConfig.database.cloudSql.instanceConnectionName',
+          ),
+          database: requiredString(
+            env,
+            'CLOUD_SQL_DATABASE',
+            'serverConfig.database.cloudSql.database',
+          ),
+          user,
+          federation,
+        }
+      },
     },
     openai,
     twilio,

@@ -12,6 +12,7 @@ import twilio from 'twilio'
 import { recordMissedAttempt } from '@/lib/call-attempt-outcomes'
 import { computeMissedAttemptRouting } from '@/lib/taskrouter-retry-routing'
 import { serverConfig } from '@/lib/config'
+import { recordCallAnswer } from '@/lib/taskrouter-call-state'
 
 type TwilioClient = ReturnType<typeof twilio>
 
@@ -212,7 +213,9 @@ export async function POST(req: Request) {
       return new Response('Missing parameters', { status: 400 })
     }
 
-    if (statusCallbackEvent === 'conference-end') {
+    if (statusCallbackEvent === 'conference-start') {
+      await recordCallAnswer(req, formData, 'browser')
+    } else if (statusCallbackEvent === 'conference-end') {
       await handleConferenceEnd({
         client,
         conferenceSid,

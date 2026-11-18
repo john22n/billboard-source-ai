@@ -1,8 +1,41 @@
 # billboard-source-ai
 
-website: https://www.billboardsource.com/index.html
+Billboard Source's sales application combines AI-assisted creative generation,
+CRM lead submission, and telephony administration in a TypeScript, React, and
+Next.js application backed by PostgreSQL.
 
-The offical BillBoard Source Company AI application
+The product has supported **more than $2M in sales since its late-January 2026
+launch**, as reported by John Noriega in November 2026. His work began as a
+consultant in January 2025 and continued full-time from July 2026. This is a
+product-level sales outcome, not revenue attributed to any single AI feature.
+
+Company website: https://www.billboardsource.com/index.html  
+Application: https://billboard-source-ai.vercel.app (authorized access required;
+not a public demo with disposable customer data).
+
+## Engineering decisions and evidence
+
+- **Keep creative output connected to the sales workflow.**
+  [Lead submission](app/api/nutshell/create-lead/route.ts) and
+  [attachment handling](lib/mockup/nutshell.ts) connect generated artwork to
+  Nutshell. [Signed receipts](lib/mockup/receipts.ts) support retrying attachments
+  against the existing lead rather than creating another lead after an upload
+  failure.
+- **Keep provider credentials server-side.**
+  [Voicemail administration](app/api/admin/voicemail-ai/route.ts) requires an
+  admin session, while [provider log retrieval](lib/voicemail-ai-logs.ts) keeps
+  Twilio access on the server. Browser-facing functionality does not require
+  handing provider credentials to employees' browsers.
+- **Test workflows without production services.**
+  [Playwright tests](tests/end-to-end/) exercise login and Creative Studio with
+  disposable PostgreSQL and mocked AI/telephony responses. This checks user
+  flows and request contracts, not live model quality. The
+  [CI workflow](.github/workflows/ci-cd.yml) also runs linting, type checks, unit
+  tests, dependency auditing, and SBOM generation.
+
+The operational notes below describe configuration, failure modes, and rollout
+requirements. Do not run database or provider setup commands against production
+as part of a portfolio demonstration.
 
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
@@ -26,6 +59,14 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Cloud SQL dev migrations
+
+See the [dev migration rollout](docs/cloud-sql-dev-migrations.md) for the
+PostgreSQL 18/pgvector rehearsal, administrator prerequisites, and guarded
+`db:migrate:dev` command. Run `pnpm test:db` with PostgreSQL 18 tools on `PATH`
+to test the full chain locally. Cloud SQL writes require separate approval;
+`db:push:dev` is not a dry run or an instance-safe rollout command.
+
 ## Proposal Generator
 
 The fourth dashboard tab embeds `https://geopoepoe.com/gpp/v3/proposals`.
@@ -48,6 +89,106 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Cloud SQL on Vercel
+
+Cloud SQL is an explicit **staging or preview** opt-in. `DATABASE_DRIVER` accepts `neon`,
+`postgres`, or `cloudsql`. When absent, Vercel keeps Neon HTTP and local execution
+keeps PostgreSQL, both using `DATABASE_URL`. Old `CLOUD_SQL_*` variables alone no
+longer switch databases. Unknown modes and incomplete opt-in settings fail closed.
+Production rejects any explicit driver other than Neon, even if Cloud SQL settings
+were accidentally inherited. **No production cutover is implemented or authorized.**
+
+The connector accepts `VERCEL_TARGET_ENV=staging` or `preview`. Its verified OIDC
+token must match the configured stable owner, project, and deployment environment.
+Staging also requires its exact custom-environment ID; preview tokens must have no
+custom-environment ID. Use separate service accounts and WIF pools for the two.
+These code checks supplement, and do not replace, exact Google WIF restrictions.
+Development deployments are not enabled by this path.
+
+After separate approval and provisioning, configure these **server-only** values
+in staging or the approved Preview branch scope. The Cloud SQL instance and database
+keep their dev names; the GitHub migration environment remains `dev`:
+
+| Variable                                 | Value                                                                             |
+| ---------------------------------------- | --------------------------------------------------------------------------------- |
+| `DATABASE_DRIVER`                        | `cloudsql`                                                                        |
+| `CLOUD_SQL_INSTANCE_CONNECTION_NAME`     | Exact dev `project:region:instance`                                               |
+| `CLOUD_SQL_DATABASE`                     | `billboard_dev`                                                                   |
+| `CLOUD_SQL_USER`                         | App SA email without `.gserviceaccount.com`, e.g. `billboard-app-dev@PROJECT.iam` |
+| `CLOUD_SQL_VERCEL_OWNER_ID`              | Exact approved Vercel team ID                                                     |
+| `CLOUD_SQL_VERCEL_PROJECT_ID`            | Exact approved Vercel project ID                                                  |
+| `CLOUD_SQL_VERCEL_ENVIRONMENT_ID`        | Required for staging; omit for preview                                            |
+| `GCP_PROJECT_NUMBER`                     | Numeric project number containing the dedicated WIF pool                          |
+| `GCP_WORKLOAD_IDENTITY_POOL_ID`          | Dedicated app WIF pool, separate from Amp/migrations                              |
+| `GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID` | Dedicated Vercel provider                                                         |
+| `GCP_SERVICE_ACCOUNT_EMAIL`              | Least-privilege dev app service account                                           |
+
+Use a separate app service account with `roles/cloudsql.client` and
+`roles/cloudsql.instanceUser`, each restricted to the exact dev instance. Register
+its PostgreSQL IAM login and grant membership in `billboard_app_dev`; verify existing
+and future migration-owned table/sequence rights. Do not grant ownership, DDL, or
+migration-role membership. Preserve the built-in app login and its password, but do
+not supply `CLOUD_SQL_PASSWORD` to this connector. It uses IAM database authentication.
+
+Enable the Cloud SQL Admin, Security Token Service, and IAM Credentials APIs.
+Configure the provider's exact issuer and audience, and restrict its condition to
+the approved `owner_id`, `project_id`, and environment. Staging requires the exact
+`custom_environment_id` and `environment=staging`; preview requires
+`environment=preview` and an absent or null `custom_environment_id`. The verified
+team issuer is `https://oidc.vercel.com/billboardsource-ai`.
+Only that principal may impersonate its app account. The app uses the
+canonical `//iam.googleapis.com/projects/.../providers/...` STS audience and requests
+a fresh Vercel token with the matching `https:` audience on each credential refresh.
+It verifies the token before passing it to Google. No JWT or service-account key
+is persisted. Keep deployment protection enabled.
+
+Start with branch-scoped Preview variables. Before enabling the shared Preview
+configuration, update every affected branch to include this runtime support;
+older branches may reject the preview identity. Existing deployments need a
+redeploy to pick up environment changes. Preview and staging deployments using
+`billboard_dev` share data; this is not a database per branch.
+
+Application callers await `getDb()` inside async requests/actions. A cached
+initialization promise shares the pool across concurrent first callers; failed
+initialization can be retried. Importing the module never connects during a build.
+The Cloud SQL pool has a provisional cap of **two connections per function instance**,
+a 10-second acquisition timeout, and a 5-second idle timeout. Vercel's
+`attachDatabasePool` keeps request-scoped idle cleanup alive before suspension.
+`closeDb()` explicitly drains the pool and closes its connector for operator/test
+shutdown; it does not retire a handle still owned by a caller merely because time
+has passed. Credential refresh uses the connector's lifecycle and a fresh token
+supplier, not a cached JWT. Total connections still scale with function concurrency.
+Verify the dev instance's connection budget and intended
+concurrency before deployment; this provisional per-instance cap is not a global limit.
+The installed connector refreshes certificates with background timers. Local token
+rotation tests do not establish what happens across Vercel suspension. Real
+warm-instance refresh/suspension must pass separately approved Vercel testing before
+enabling the dev deployment; this is an explicit deployment prerequisite.
+
+Use the Node.js runtime with Node.js 22 or newer. The in-process connector manages
+TLS to the public IP without authorized networks; do not apply URL SSL rewriting
+to connector sockets or disable certificate verification globally. There is no new
+HTTP health endpoint. `pnpm db:check:dev` runs an operator-controlled read-only
+`SELECT 1` through the awaited `getDb()` client and always closes it. It prints
+only `{ "connected": true }` on success, refuses Neon/Production, and restricts
+the local PostgreSQL path to loopback. Run it only with separately approved dev
+app-identity configuration, then exercise existing protected login/database routes.
+
+Local tests use disposable PostgreSQL with `DATABASE_DRIVER=postgres`. Local/orb dev
+traffic can use a separately approved app-identity Auth Proxy bound to loopback and
+an explicit dev `DATABASE_URL`, without Vercel tokens or migration credentials.
+Drizzle CLI and standalone maintenance tools keep their existing `DATABASE_URL`
+and migration identity; this change performs no schema migration. Preserve all
+production Neon settings and credentials. IAM/WIF changes, environment creation,
+database grants, data seeding, and deployment each require separate approval.
+
+`pnpm test:db:runtime` runs the cached initialization/identity tests and a disposable
+local PostgreSQL + pgvector integration test as an inherited non-owner app role.
+It requires `initdb` and `pg_ctl` on PATH plus the server's pgvector extension.
+The test stubs Google networking only; it exercises real Drizzle queries, rate
+limits, commit/rollback, foreign keys, vector queries, DDL denial, and default
+privileges on future objects. It never connects to the shared dev or production DB.
 
 ## CI/CD
 

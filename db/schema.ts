@@ -148,38 +148,24 @@ export const nutshellLeads = pgTable('nutshell_leads', {
 export type NutshellLead = InferSelectModel<typeof nutshellLeads>
 export type NewNutshellLead = typeof nutshellLeads.$inferInsert
 
-// Durable intake only. A processor must verify source and assignment via REST
-// before creating notifications; callback fields are not authoritative.
-export const nutshellWebhookInbox = pgTable(
-  'nutshell_webhook_inbox',
+// Imported Neon aggregate, intentionally separate from individual app leads.
+export const nutshellLeadSummarySnapshot = pgTable(
+  'nutshell_lead_summary_snapshot',
   {
-    id: serial('id').primaryKey(),
-    eventId: varchar('event_id', { length: 80 }).notNull(),
-    leadId: varchar('lead_id', { length: 80 }).notNull(),
-    status: varchar('status', { length: 20 }).default('pending').notNull(),
-    attempts: integer('attempts').default(0).notNull(),
-    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true })
-      .defaultNow()
-      .notNull(),
-    lastReason: varchar('last_reason', { length: 80 }),
-    receivedAt: timestamp('received_at', { withTimezone: true })
-      .defaultNow()
+    id: integer('id').primaryKey().default(1),
+    currency: varchar('currency', { length: 3 }).default('USD'),
+    syncedAt: timestamp('synced_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    totalLeads: integer('total_leads').default(0).notNull(),
+    wonCount: integer('won_count').default(0).notNull(),
+    openCount: integer('open_count').default(0).notNull(),
+    lostCount: integer('lost_count').default(0).notNull(),
+    totalWonValue: numeric('total_won_value', { precision: 14, scale: 2 })
+      .default('0')
       .notNull(),
   },
-  (table) => ({
-    eventLeadUnique: unique('nutshell_webhook_inbox_event_lead_unique').on(
-      table.eventId,
-      table.leadId,
-    ),
-    retryIndex: index('nutshell_webhook_inbox_retry_idx').on(
-      table.status,
-      table.nextAttemptAt,
-    ),
-  }),
 )
 
-// One immutable initial-assignment snapshot per lead, including unmatched
-// identities. Never delete cleared rows: they are the replay tombstone.
 export const leadNotifications = pgTable(
   'lead_notifications',
   {
@@ -209,6 +195,34 @@ export const leadNotifications = pgTable(
   }),
 )
 
+export const nutshellWebhookInbox = pgTable(
+  'nutshell_webhook_inbox',
+  {
+    id: serial('id').primaryKey(),
+    eventId: varchar('event_id', { length: 80 }).notNull(),
+    leadId: varchar('lead_id', { length: 80 }).notNull(),
+    status: varchar('status', { length: 20 }).default('pending').notNull(),
+    receivedAt: timestamp('received_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    attempts: integer('attempts').default(0).notNull(),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    lastReason: varchar('last_reason', { length: 80 }),
+  },
+  (table) => ({
+    eventLeadUnique: unique('nutshell_webhook_inbox_event_lead_unique').on(
+      table.eventId,
+      table.leadId,
+    ),
+    retryIndex: index('nutshell_webhook_inbox_retry_idx').on(
+      table.status,
+      table.nextAttemptAt,
+    ),
+  }),
+)
+
 // App-wide singleton metrics (Feature 2). One fixed row (id = 1), no unbounded
 // growth, so it stays within the Neon free tier. Currently tracks total inbound
 // calls to the Main Routing Number shown in the Admin Panel header.
@@ -223,6 +237,7 @@ export type AppMetrics = InferSelectModel<typeof appMetrics>
 export const artWizardSettings = pgTable('art_wizard_settings', {
   id: integer('id').primaryKey().default(1),
   systemPrompt: text('system_prompt').notNull(),
+  imageSettings: jsonb('image_settings'),
   imagePrompts: jsonb('image_prompts').$type<ImagePrompts>(),
 })
 

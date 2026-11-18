@@ -37,7 +37,7 @@
  *    is safe in practice.
  */
 
-import { db } from '@/db'
+import { getDb } from '@/db'
 import { user } from '@/db/schema'
 import { and, eq, sql } from 'drizzle-orm'
 import { serverConfig } from '@/lib/config'
@@ -92,6 +92,7 @@ export async function recordAcceptedAttempt(input: {
   if (!input.workerSid || !input.reservationSid) return
 
   try {
+    const db = await getDb()
     await db
       .update(user)
       .set({
@@ -123,6 +124,7 @@ export async function recordMissedAttempt(input: {
   if (!input.workerSid || !input.reservationSid) return
 
   try {
+    const db = await getDb()
     await db
       .update(user)
       .set({
@@ -157,6 +159,7 @@ export async function recordRejectedAttempt(input: {
   if (!input.userId) return
 
   try {
+    const db = await getDb()
     await db
       .update(user)
       .set({
@@ -195,6 +198,7 @@ export async function recordOverflowAttempt(input: {
   if (!overflowNumber) return
 
   try {
+    const db = await getDb()
     const matches = await db
       .select({ id: user.id })
       .from(user)

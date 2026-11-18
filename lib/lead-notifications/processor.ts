@@ -3,7 +3,7 @@ import { serverConfig, type ServerConfig } from '@/lib/config'
 import { leadNotifications, nutshellWebhookInbox, user } from '@/db/schema'
 import { hydrateLead } from './hydrate'
 
-type Database = typeof import('@/db').db
+type Database = Awaited<ReturnType<typeof import('@/db').getDb>>
 type InboxEntry = typeof nutshellWebhookInbox.$inferSelect
 type Notification = typeof leadNotifications.$inferSelect
 type ProcessingOutcome = {
@@ -150,7 +150,8 @@ export async function processLeadNotifications(
   const settings = config.leadNotifications
   const cutoff = settings.launchCutoff
   if (!settings.enabled || !cutoff) return { enabled: false, processed: 0 }
-  const { db } = await import('@/db')
+  const { getDb } = await import('@/db')
+  const db = await getDb()
   const deadline = Date.now() + 20_000
   const due = and(
     eq(nutshellWebhookInbox.status, 'pending'),

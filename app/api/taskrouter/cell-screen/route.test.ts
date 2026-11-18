@@ -16,7 +16,7 @@ import { POST } from './route'
 
 function request() {
   return new Request(
-    'https://app.example/api/taskrouter/cell-screen?taskSid=WTtask',
+    'https://app.example/api/taskrouter/cell-screen?taskSid=WTtask&workspaceSid=WSworkspace&workerSid=WKrep&reservationSid=WRoffer',
     {
       method: 'POST',
       body: new URLSearchParams({
@@ -38,6 +38,10 @@ describe('cell screening', () => {
     expect(xml).toContain('timeout="5"')
     expect(xml).toContain('Incoming sales call. Press 1 to accept.')
     expect(xml).toContain('/api/taskrouter/cell-screen-accept')
+    expect(xml).toContain('taskSid=WTtask')
+    expect(xml).toContain('workspaceSid=WSworkspace')
+    expect(xml).toContain('workerSid=WKrep')
+    expect(xml).toContain('reservationSid=WRoffer')
   })
 
   it('rejects unsigned requests', async () => {

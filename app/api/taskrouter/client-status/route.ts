@@ -1,11 +1,12 @@
 import { isValidTwilioWebhook } from '@/lib/twilio-webhook'
+import { recordCallAnswer } from '@/lib/taskrouter-call-state'
 
 /**
  * Child-leg Status Callback — Simultaneous Ring
  *
  * Fired by Twilio for every browser and cell child-leg status change inside
- * the simultaneous-dial <Dial>. This callback is observational only: <Dial>
- * owns cancellation of losing legs, avoiding a race where a browser status
+ * the simultaneous-dial <Dial>. <Dial> owns cancellation of losing legs,
+ * avoiding a race where a browser status
  * callback cancels a cell leg while the rep is completing call screening.
  *
  * Query parameters (set by simultaneous-dial/route.ts):
@@ -28,6 +29,13 @@ export async function POST(req: Request) {
       parentCallSid: String(formData.get('ParentCallSid') ?? '').slice(-8),
       taskSid: url.searchParams.get('taskSid')?.slice(-8),
     })
+
+    if (
+      url.searchParams.get('leg') === 'browser' &&
+      formData.get('CallStatus') === 'in-progress'
+    ) {
+      await recordCallAnswer(req, formData, 'browser')
+    }
 
     // Always return 204 — Twilio doesn't need TwiML from a statusCallback
     return new Response(null, { status: 204 })

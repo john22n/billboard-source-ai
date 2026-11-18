@@ -1,8 +1,9 @@
 import { and, asc, eq, isNull, sql } from 'drizzle-orm'
-import { db } from '@/db'
+import { getDb } from '@/db'
 import { leadNotifications } from '@/db/schema'
 
 export async function listNotifications(recipientId: string) {
+  const db = await getDb()
   return db
     .select({
       id: leadNotifications.id,
@@ -22,6 +23,7 @@ export async function listNotifications(recipientId: string) {
 }
 
 export async function clearNotification(id: string, recipientId: string) {
+  const db = await getDb()
   const rows = await db
     .update(leadNotifications)
     .set({ clearedAt: sql`coalesce(${leadNotifications.clearedAt}, now())` })
