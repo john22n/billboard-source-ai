@@ -283,3 +283,25 @@ it('ignores a late fallback response after a new live baseline', async () => {
   ).toEqual(['new'])
   expect(banners).toEqual([])
 })
+
+it('stops reconnecting and hands off silently when SSE eligibility is withdrawn', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue(
+      Response.json({
+        ...frame(0, ['recovered']),
+        transport: 'polling',
+      }),
+    ),
+  )
+  client = startPrototypeStream('rep-1', accepted, disconnected, () => false)
+  const previous = Stream.current
+  previous.send(frame(0, ['old']))
+  previous.onerror?.()
+  await vi.advanceTimersByTimeAsync(60_000)
+  expect(Stream.current).toBe(previous)
+  expect(banners).toEqual([])
+  expect(
+    accepted.mock.lastCall?.[0].notifications.map((n: { id: string }) => n.id),
+  ).toEqual(['recovered'])
+})
