@@ -328,3 +328,18 @@ it('keeps arrivals in a rotation gap silent but alerts on subsequent live arriva
   Stream.current.send(frame(1, ['gap', 'fresh'], 'connection-2'))
   expect(banners).toEqual(['Company fresh'])
 })
+
+it('revalidates a fresh stream on focus and discards frames from the previous session', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue(new Response(null, { status: 401 })),
+  )
+  client = startPrototypeStream('rep-1', accepted, disconnected, () => false)
+  const previous = Stream.current
+  previous.send(frame(0, ['old']))
+  window.dispatchEvent(new Event('focus'))
+  previous.send(frame(1, ['old', 'must-not-alert']))
+  await vi.advanceTimersByTimeAsync(0)
+  expect(accepted.mock.lastCall?.[0]).toBeNull()
+  expect(banners).toEqual([])
+})
