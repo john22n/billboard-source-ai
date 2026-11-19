@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { createDesktopAlerts } from '@/lib/lead-notifications/desktop'
+import { startPrototypeStream } from '@/lib/lead-notifications/prototype-client'
 import { useNotificationPermission } from '@/hooks/useNotificationPermission'
 
 interface LeadNotification {
@@ -147,7 +148,10 @@ function useLeadNotifications(userId: string) {
       cleared.current.has(id),
     )
     const controller = new AbortController()
-    function acceptSnapshot(data: Awaited<ReturnType<typeof readInbox>>) {
+    function acceptSnapshot(
+      data: Awaited<ReturnType<typeof readInbox>>,
+      silent = false,
+    ) {
       if (disposed) return
       if (data === null) {
         hasSnapshot = false
@@ -156,7 +160,7 @@ function useLeadNotifications(userId: string) {
         setConnection('signed-out')
         return
       }
-      announceArrivals(data.notifications)
+      if (!silent) announceArrivals(data.notifications)
       offset = Date.parse(data.serverTime) - Date.now()
       setNow(Date.now() + offset)
       setNotifications(
@@ -193,6 +197,28 @@ function useLeadNotifications(userId: string) {
     }
     refresh.current = () => {
       void poll()
+    }
+    // THROWAWAY: ordinary URLs retain the unchanged polling implementation.
+    if (
+      process.env.NODE_ENV === 'development' &&
+      new URLSearchParams(window.location.search).get('leadSsePrototype') ===
+        'true'
+    ) {
+      const prototype = startPrototypeStream(
+        userId,
+        (data) => acceptSnapshot(data, true),
+        offline,
+        (id) => cleared.current.has(id),
+      )
+      refresh.current = prototype.refresh
+      const clock = setInterval(() => setNow(Date.now() + offset), 1_000)
+      return () => {
+        disposed = true
+        prototype.dispose()
+        clearInterval(clock)
+        controller.abort()
+        desktopAlerts.reset()
+      }
     }
     void poll()
     const polling = setInterval(() => {
