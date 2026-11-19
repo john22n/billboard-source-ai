@@ -130,6 +130,114 @@ async function signIn(context: BrowserContext, accountId = userId) {
   await context.addCookies([{ name: 'auth_token', value: token, url: baseUrl }])
 }
 
+test('local SSE keeps recovery silent and synchronizes Clear across real tabs', async ({
+  page,
+  context,
+}) => {
+  test.setTimeout(90_000)
+  const pool = new Pool({ connectionString: databaseUrl })
+  const alerts: string[] = []
+  await context.exposeBinding('recordSseAlert', (_source, title: string) =>
+    alerts.push(title),
+  )
+  await context.addInitScript(() => {
+    const callbacks = window as unknown as {
+      recordSseAlert: (title: string) => void
+    }
+    Object.defineProperty(window, 'Notification', {
+      configurable: true,
+      value: class {
+        static permission = 'granted'
+        constructor(title: string) {
+          callbacks.recordSseAlert(title)
+        }
+        close() {}
+      },
+    })
+  })
+  const seed = (id: number, title: string) =>
+    pool.query(
+      `INSERT INTO lead_notifications (id, recipient_id, assignee_id, assignee_email, assignment_event_id, company_name, lead_url, lead_created_at)
+     VALUES ($1,$2,'301-users','creative-studio@example.test',$3,$4,'https://app.nutshell.com/lead/99600',now())`,
+      [`${id}-leads`, userId, `${id}-events`, title],
+    )
+  const second = await context.newPage()
+  try {
+    await signIn(context)
+    await seed(99600, 'SSE initial backlog')
+    await page.goto('/issues?leadSsePrototype=true')
+    await second.goto('/issues?leadSsePrototype=true')
+    await expect(
+      second.getByRole('link', { name: /SSE initial backlog/ }),
+    ).toBeVisible()
+    expect(alerts).toEqual([])
+    await seed(99601, 'SSE live arrival')
+    await expect(
+      page.getByRole('link', { name: /SSE live arrival/ }),
+    ).toBeVisible({ timeout: 20_000 })
+    await expect(
+      second.getByRole('link', { name: /SSE live arrival/ }),
+    ).toBeVisible({ timeout: 20_000 })
+    await expect.poll(() => alerts).toEqual(['SSE live arrival'])
+    const [cleared] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.url().endsWith('/99601-leads/clear') &&
+          response.request().method() === 'POST',
+      ),
+      page
+        .getByRole('button', { name: 'Clear SSE live arrival', exact: true })
+        .click(),
+    ])
+    expect(cleared.ok()).toBe(true)
+    await expect(
+      second.getByRole('link', { name: /SSE live arrival/ }),
+    ).toHaveCount(0, { timeout: 1500 })
+
+    await context.setOffline(true)
+    await expect(
+      page.getByRole('status').filter({ hasText: 'Updates unavailable' }),
+    ).toBeVisible()
+    await seed(99602, 'SSE offline backlog')
+    await context.setOffline(false)
+    await expect(
+      page.getByRole('link', { name: /SSE offline backlog/ }),
+    ).toBeVisible({ timeout: 20_000 })
+    await expect(
+      second.getByRole('link', { name: /SSE offline backlog/ }),
+    ).toBeVisible({ timeout: 20_000 })
+    await seed(99603, 'SSE after recovery')
+    await expect
+      .poll(() => alerts, { timeout: 20_000 })
+      .toEqual(['SSE live arrival', 'SSE after recovery'])
+    await page.close()
+    await second.close()
+    await seed(99604, 'SSE closed backlog')
+    const reopened = await context.newPage()
+    await reopened.goto('/issues?leadSsePrototype=true')
+    await expect(
+      reopened.getByRole('link', { name: /SSE closed backlog/ }),
+    ).toBeVisible()
+    await expect(
+      reopened.getByRole('link', { name: /SSE live arrival/ }),
+    ).toHaveCount(0)
+    expect(alerts).toEqual(['SSE live arrival', 'SSE after recovery'])
+    // Reconnecting without a session must discard the previous account's cards.
+    await context.setOffline(true)
+    await context.clearCookies()
+    await context.setOffline(false)
+    await expect(
+      reopened.getByRole('region', { name: 'Contact Us leads' }),
+    ).toHaveCount(0, { timeout: 20_000 })
+  } finally {
+    await context.setOffline(false)
+    await pool.query(
+      "DELETE FROM lead_notifications WHERE id LIKE '9960%-leads'",
+    )
+    await pool.end()
+  }
+})
+
 test.beforeEach(async ({ context }) => {
   await context.route('**/api/taskrouter/worker-status', (route) =>
     route.fulfill({ json: { status: 'offline', success: true } }),

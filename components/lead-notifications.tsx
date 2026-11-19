@@ -135,7 +135,7 @@ function useLeadNotifications(userId: string) {
   const [clearing, setClearing] = useState<string | null>(null)
   const [error, setError] = useState('')
   const cleared = useRef(new Set<string>())
-  const refresh = useRef<() => void>(() => {})
+  const refresh = useRef<(clearedId: string) => void>(() => {})
 
   useEffect(() => {
     let disposed = false
@@ -210,7 +210,7 @@ function useLeadNotifications(userId: string) {
         offline,
         (id) => cleared.current.has(id),
       )
-      refresh.current = prototype.refresh
+      refresh.current = prototype.clear
       const clock = setInterval(() => setNow(Date.now() + offset), 1_000)
       return () => {
         disposed = true
@@ -263,7 +263,7 @@ function useLeadNotifications(userId: string) {
       if (!response.ok) throw new Error('Unavailable')
       cleared.current.add(item.id)
       setNotifications((current) => current.filter((n) => n.id !== item.id))
-      refresh.current()
+      refresh.current(item.id)
     } catch {
       setError(
         'Could not clear this lead. It is still in your inbox. Please try again.',
