@@ -1,4 +1,4 @@
-import { beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   currentUser: vi.fn(),
   list: vi.fn(),
@@ -11,11 +11,17 @@ vi.mock('@/lib/lead-notifications/store', () => ({
 }))
 import { GET } from './route'
 import { POST } from './[id]/clear/route'
+const request = () =>
+  new Request('http://localhost/api/lead-notifications?leadSsePrototype=true')
+afterEach(() => vi.unstubAllEnvs())
 
 beforeEach(() => {
   vi.clearAllMocks()
   vi.stubEnv('NUTSHELL_NOTIFICATIONS_ENABLED', 'true')
-  mocks.currentUser.mockResolvedValue({ id: 'rep-a' })
+  mocks.currentUser.mockResolvedValue({
+    id: 'rep-a',
+    email: 'sky@billboardsource.com',
+  })
   mocks.list.mockResolvedValue([
     {
       id: '101-leads',
@@ -28,7 +34,7 @@ beforeEach(() => {
 })
 
 it('exposes only the session recipient contract', async () => {
-  const response = await GET()
+  const response = await GET(request())
   expect(response.headers.get('cache-control')).toContain('no-store')
   expect(await response.json()).toMatchObject({
     userId: 'rep-a',
@@ -41,7 +47,7 @@ it('exposes only the session recipient contract', async () => {
 })
 it('rejects signed out reads and clears', async () => {
   mocks.currentUser.mockResolvedValue(null)
-  expect((await GET()).status).toBe(401)
+  expect((await GET(request())).status).toBe(401)
   expect(
     (
       await POST(new Request('http://localhost'), {
@@ -53,11 +59,35 @@ it('rejects signed out reads and clears', async () => {
 })
 it('returns empty when disabled without reading notifications', async () => {
   vi.stubEnv('NUTSHELL_NOTIFICATIONS_ENABLED', 'false')
-  expect(await (await GET()).json()).toMatchObject({
+  expect(await (await GET(request())).json()).toMatchObject({
     notifications: [],
     userId: 'rep-a',
   })
   expect(mocks.list).not.toHaveBeenCalled()
+})
+it('advertises SSE only to an allowed preview session, regardless of URL opt-in', async () => {
+  vi.stubEnv('LEAD_NOTIFICATIONS_SSE_ENABLED', 'true')
+  vi.stubEnv(
+    'LEAD_NOTIFICATIONS_RECIPIENT_ALLOWLIST',
+    'sky@billboardsource.com',
+  )
+  vi.stubEnv('VERCEL_ENV', 'production')
+  expect(await (await GET(request())).json()).toMatchObject({
+    transport: 'polling',
+  })
+  vi.stubEnv('VERCEL_ENV', 'preview')
+  expect(
+    await (
+      await GET(new Request('http://localhost/api/lead-notifications'))
+    ).json(),
+  ).toMatchObject({ transport: 'sse' })
+  mocks.currentUser.mockResolvedValue({
+    id: 'rep-b',
+    email: 'other@example.test',
+  })
+  expect(await (await GET(request())).json()).toMatchObject({
+    transport: 'polling',
+  })
 })
 it('scopes clear to the session and returns 404 for another or missing notice', async () => {
   mocks.clear.mockResolvedValue(false)

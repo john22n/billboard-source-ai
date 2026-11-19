@@ -34,6 +34,7 @@ Object.assign(env, {
   VERCEL: '',
   DATABASE_URL: databaseUrl,
   JWT_SECRET: jwtSecret,
+  LEAD_NOTIFICATIONS_RECIPIENT_ALLOWLIST: 'creative-studio@example.test',
   NUTSHELL_NOTIFICATIONS_ENABLED: 'true',
   NUTSHELL_WEBHOOK_SECRET: 'playwright-nutshell-webhook-local-only',
   NEXT_PUBLIC_APP_URL: baseUrl,

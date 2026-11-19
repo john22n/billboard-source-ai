@@ -1,4 +1,4 @@
-// SSE remains local opt-in until deployment and native background validation.
+// Page-owned SSE: recovery snapshots never create desktop alerts.
 import { z } from 'zod'
 import { createDesktopAlerts } from './desktop'
 
@@ -6,6 +6,7 @@ const timestamp = z.string().datetime({ offset: true })
 const snapshotSchema = z.object({
   userId: z.string().min(1),
   serverTime: timestamp,
+  transport: z.enum(['sse', 'polling']).optional(),
   notifications: z
     .array(
       z.object({
@@ -50,11 +51,14 @@ function clearChannel(userId: string) {
   }
 }
 
-async function readFallback(signal: AbortSignal) {
-  const response = await fetch('/api/lead-notifications', {
-    cache: 'no-store',
-    signal,
-  })
+async function readFallback(signal: AbortSignal, localOptIn: boolean) {
+  const response = await fetch(
+    `/api/lead-notifications${localOptIn ? '?leadSsePrototype=true' : ''}`,
+    {
+      cache: 'no-store',
+      signal,
+    },
+  )
   if (response.status === 401) return null
   if (!response.ok) throw new Error('Inbox unavailable')
   return snapshotSchema.parse(await response.json())
@@ -65,6 +69,8 @@ export function startPrototypeStream(
   accept: (snapshot: Snapshot | null) => void,
   disconnected: () => void,
   isCleared: (id: string) => boolean,
+  onPolling: () => void = () => {},
+  localOptIn = false,
 ) {
   let source: EventSource | null = null
   let retry: ReturnType<typeof setTimeout> | undefined
@@ -137,10 +143,7 @@ export function startPrototypeStream(
     fallbackRequest = undefined
   }
   function signOut() {
-    disposed = true
-    stop()
-    stopFallback()
-    channel?.close()
+    dispose()
     latest = null
     accept(null)
   }
@@ -151,6 +154,11 @@ export function startPrototypeStream(
       return
     }
     publish(snapshot)
+    if (snapshot.transport !== 'sse') {
+      dispose()
+      onPolling()
+      return
+    }
     disconnected()
   }
   async function refreshFallback() {
@@ -160,6 +168,7 @@ export function startPrototypeStream(
     try {
       const snapshot = await readFallback(
         AbortSignal.any([request.signal, AbortSignal.timeout(10_000)]),
+        localOptIn,
       )
       acceptFallback(snapshot, request)
     } catch {
@@ -216,7 +225,9 @@ export function startPrototypeStream(
     const opened = Date.now()
     let current: EventSource
     try {
-      current = new EventSource('/api/lead-notifications/prototype-stream')
+      current = new EventSource(
+        `/api/lead-notifications/stream${localOptIn ? '?leadSsePrototype=true' : ''}`,
+      )
     } catch {
       recover()
       return
@@ -286,6 +297,19 @@ export function startPrototypeStream(
   document.addEventListener('freeze', suspend)
   document.addEventListener('resume', resume)
   connect()
+  function dispose() {
+    disposed = true
+    stop()
+    stopFallback()
+    channel?.close()
+    window.removeEventListener('offline', suspend)
+    window.removeEventListener('online', resume)
+    window.removeEventListener('pagehide', suspend)
+    window.removeEventListener('pageshow', resume)
+    window.removeEventListener('focus', resume)
+    document.removeEventListener('freeze', suspend)
+    document.removeEventListener('resume', resume)
+  }
   return {
     refresh: connect,
     clear(id: string) {
@@ -296,18 +320,6 @@ export function startPrototypeStream(
         /* Other tabs still reconcile through their next snapshot. */
       }
     },
-    dispose() {
-      disposed = true
-      stop()
-      stopFallback()
-      channel?.close()
-      window.removeEventListener('offline', suspend)
-      window.removeEventListener('online', resume)
-      window.removeEventListener('pagehide', suspend)
-      window.removeEventListener('pageshow', resume)
-      window.removeEventListener('focus', resume)
-      document.removeEventListener('freeze', suspend)
-      document.removeEventListener('resume', resume)
-    },
+    dispose,
   }
 }

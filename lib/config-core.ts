@@ -169,6 +169,7 @@ export interface ServerConfig {
   }
   leadNotifications: {
     enabled: boolean
+    canStream: (email: string, localOptIn?: boolean) => boolean
     launchCutoff: Date | null
     integrationEmail: string
     recipientAllowlist: string[]
@@ -684,6 +685,22 @@ export function createServerConfig(env: EnvSource): ServerConfig {
     voicemail,
     nutshell,
     leadNotifications: {
+      canStream(email, localOptIn = false) {
+        const preview =
+          optionalString(env, 'VERCEL_ENV') === 'preview' &&
+          optionalString(env, 'LEAD_NOTIFICATIONS_SSE_ENABLED') === 'true'
+        const fixture =
+          localOptIn &&
+          !optionalString(env, 'VERCEL_ENV') &&
+          !optionalString(env, 'VERCEL') &&
+          env.NODE_ENV === 'development' &&
+          env.PLAYWRIGHT_TEST === '1'
+        return (
+          nutshell.notificationsEnabled &&
+          (preview || fixture) &&
+          this.recipientAllowlist.includes(email.trim().toLowerCase())
+        )
+      },
       get launchCutoff() {
         const value = optionalString(env, 'LEAD_NOTIFICATIONS_LAUNCH_CUTOFF')
         if (

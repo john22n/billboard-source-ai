@@ -130,6 +130,96 @@ async function signIn(context: BrowserContext, accountId = userId) {
   await context.addCookies([{ name: 'auth_token', value: token, url: baseUrl }])
 }
 
+test('SSE enforces session eligibility and returns to silent polling after withdrawal', async ({
+  page,
+  context,
+}) => {
+  test.setTimeout(90_000)
+  const streamUrl = '/api/lead-notifications/stream?leadSsePrototype=true'
+  expect((await context.request.get(streamUrl)).status()).toBe(401)
+  await signIn(context, 'e2e-studio-admin')
+  expect((await context.request.get(streamUrl)).status()).toBe(404)
+  await signIn(context)
+  expect(
+    (await context.request.get('/api/lead-notifications/stream')).status(),
+  ).toBe(404)
+  expect(
+    await (await context.request.get('/api/lead-notifications')).json(),
+  ).toMatchObject({ transport: 'polling' })
+  expect(
+    await (
+      await context.request.get('/api/lead-notifications?leadSsePrototype=true')
+    ).json(),
+  ).toMatchObject({ transport: 'sse' })
+  const alerts: string[] = []
+  await context.exposeBinding('recordAlert', (_source, title: string) =>
+    alerts.push(title),
+  )
+  await context.addInitScript(() => {
+    Object.defineProperty(window, 'Notification', {
+      configurable: true,
+      value: class {
+        static permission = 'granted'
+        constructor(title: string) {
+          const recorder = Reflect.get(window, 'recordAlert')
+          recorder(title)
+        }
+        close() {}
+      },
+    })
+  })
+  let streams = 0
+  let polls = 0
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname === '/api/lead-notifications/stream')
+      streams++
+    if (new URL(request.url()).pathname === '/api/lead-notifications') polls++
+  })
+  const pool = new Pool({ connectionString: databaseUrl })
+  try {
+    const [opened] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === '/api/lead-notifications/stream',
+      ),
+      page.goto('/issues?leadSsePrototype=true'),
+    ])
+    expect(opened.status()).toBe(200)
+    expect(streams).toBe(1)
+    await pool.query('UPDATE "User" SET email=$1 WHERE id=$2', [
+      'withdrawn@example.test',
+      userId,
+    ])
+    await pool.query(
+      `INSERT INTO lead_notifications
+      (id,recipient_id,assignee_id,assignee_email,assignment_event_id,company_name,lead_url,lead_created_at)
+      VALUES ('99610-leads',$1,'301-users','creative-studio@example.test','99610-events','SSE withdrawn backlog','https://app.nutshell.com/lead/99610',now())`,
+      [userId],
+    )
+    await expect(
+      page.getByRole('link', { name: /SSE withdrawn backlog/ }),
+    ).toBeVisible({ timeout: 25_000 })
+    const afterRecovery = polls
+    await expect
+      .poll(() => polls, { timeout: 20_000 })
+      .toBeGreaterThan(afterRecovery)
+    expect(streams).toBe(1)
+    expect(alerts).toEqual([])
+    await expect(
+      page.getByRole('status').filter({ hasText: 'Updates unavailable' }),
+    ).toHaveCount(0)
+    expect((await context.request.get(streamUrl)).status()).toBe(404)
+  } finally {
+    await page.close()
+    await pool.query('UPDATE "User" SET email=$1 WHERE id=$2', [
+      'creative-studio@example.test',
+      userId,
+    ])
+    await pool.query("DELETE FROM lead_notifications WHERE id='99610-leads'")
+    await pool.end()
+  }
+})
+
 test('local SSE keeps recovery silent and synchronizes Clear across real tabs', async ({
   page,
   context,

@@ -62,6 +62,7 @@ function frame(
 ) {
   return {
     userId: 'rep-1',
+    transport: 'sse',
     serverTime: new Date().toISOString(),
     connectionId,
     sequence,
@@ -285,6 +286,7 @@ it('ignores a late fallback response after a new live baseline', async () => {
 })
 
 it('stops reconnecting and hands off silently when SSE eligibility is withdrawn', async () => {
+  const usePolling = vi.fn()
   vi.stubGlobal(
     'fetch',
     vi.fn().mockResolvedValue(
@@ -294,14 +296,35 @@ it('stops reconnecting and hands off silently when SSE eligibility is withdrawn'
       }),
     ),
   )
-  client = startPrototypeStream('rep-1', accepted, disconnected, () => false)
+  client = startPrototypeStream(
+    'rep-1',
+    accepted,
+    disconnected,
+    () => false,
+    usePolling,
+  )
   const previous = Stream.current
   previous.send(frame(0, ['old']))
   previous.onerror?.()
   await vi.advanceTimersByTimeAsync(60_000)
+  window.dispatchEvent(new Event('focus'))
+  expect(usePolling).toHaveBeenCalledExactlyOnceWith()
   expect(Stream.current).toBe(previous)
   expect(banners).toEqual([])
   expect(
     accepted.mock.lastCall?.[0].notifications.map((n: { id: string }) => n.id),
   ).toEqual(['recovered'])
+})
+
+it('keeps arrivals in a rotation gap silent but alerts on subsequent live arrivals', async () => {
+  client = startPrototypeStream('rep-1', accepted, disconnected, () => false)
+  const previous = Stream.current
+  previous.send(frame(0))
+  previous.dispatchEvent(new Event('rotate'))
+  previous.send(frame(1, ['gap']))
+  Stream.current.send(frame(0, ['gap'], 'connection-2'))
+  expect(banners).toEqual([])
+  await vi.advanceTimersByTimeAsync(10000)
+  Stream.current.send(frame(1, ['gap', 'fresh'], 'connection-2'))
+  expect(banners).toEqual(['Company fresh'])
 })

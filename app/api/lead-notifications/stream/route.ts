@@ -1,4 +1,4 @@
-// THROWAWAY local transport experiment. Never enabled in a deployed runtime.
+// Preview-only, page-owned delivery. Every connection starts silently.
 import { cookies } from 'next/headers'
 import { eq } from 'drizzle-orm'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -12,22 +12,17 @@ export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 export const maxDuration = 300
 
-function prototypeEnabled() {
-  return (
-    process.env.NODE_ENV === 'development' &&
-    process.env.PLAYWRIGHT_TEST === '1'
-  )
-}
-
-async function canRead(token: string, accountId: string) {
+async function canRead(token: string, accountId: string, localOptIn: boolean) {
   const identity = await verifyJWT(token)
+  if (identity?.userId !== accountId) return false
   const db = await getDb()
   const [account] = await db
-    .select({ id: user.id })
+    .select({ email: user.email })
     .from(user)
     .where(eq(user.id, accountId))
   return Boolean(
-    identity && account && serverConfig.nutshell.notificationsEnabled,
+    account &&
+    serverConfig.leadNotifications.canStream(account.email, localOptIn),
   )
 }
 
@@ -36,6 +31,7 @@ async function sendSnapshots(
   token: string,
   accountId: string,
   signal: AbortSignal,
+  localOptIn: boolean,
 ) {
   const encoder = new TextEncoder()
   const connectionId = crypto.randomUUID()
@@ -43,12 +39,14 @@ async function sendSnapshots(
   let sequence = 0
   let kind = 'baseline'
   while (!signal.aborted) {
-    if (!(await canRead(token, accountId))) break
+    if (!(await canRead(token, accountId, localOptIn))) break
+    signal.throwIfAborted()
     if (Date.now() - started >= 240_000) {
       controller.enqueue(encoder.encode('event: rotate\ndata: {}\n\n'))
       break
     }
     const notifications = await listNotifications(accountId)
+    signal.throwIfAborted()
     const frame = {
       connectionId,
       sequence,
@@ -64,14 +62,26 @@ async function sendSnapshots(
   }
 }
 
-function openStream(request: Request, token: string, accountId: string) {
+function openStream(
+  request: Request,
+  token: string,
+  accountId: string,
+  localOptIn: boolean,
+) {
   const lifetime = new AbortController()
   const abort = () => lifetime.abort()
   request.signal.addEventListener('abort', abort, { once: true })
+  if (request.signal.aborted) abort()
   return new ReadableStream({
     async start(controller) {
       try {
-        await sendSnapshots(controller, token, accountId, lifetime.signal)
+        await sendSnapshots(
+          controller,
+          token,
+          accountId,
+          lifetime.signal,
+          localOptIn,
+        )
       } catch {
         // Closing forces a silent baseline; no error details cross this stream.
       } finally {
@@ -91,10 +101,19 @@ async function streamIdentity() {
 }
 
 export async function GET(request: Request) {
-  if (!prototypeEnabled()) return new Response(null, { status: 404 })
+  const headers = { 'Cache-Control': 'private, no-store' }
   const identity = await streamIdentity()
-  if (!identity) return new Response(null, { status: 401 })
-  const stream = openStream(request, identity.token, identity.accountId)
+  if (!identity) return new Response(null, { status: 401, headers })
+  const localOptIn =
+    new URL(request.url).searchParams.get('leadSsePrototype') === 'true'
+  if (!(await canRead(identity.token, identity.accountId, localOptIn)))
+    return new Response(null, { status: 404, headers })
+  const stream = openStream(
+    request,
+    identity.token,
+    identity.accountId,
+    localOptIn,
+  )
   return new Response(stream, {
     headers: {
       'Content-Type': 'text/event-stream',

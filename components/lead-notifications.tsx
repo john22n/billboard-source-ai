@@ -47,17 +47,15 @@ function elapsedTime(age: number) {
 
 type Connection = 'loading' | 'connected' | 'disconnected' | 'signed-out'
 
-async function readInbox(userId: string, signal: AbortSignal) {
-  const response = await fetch('/api/lead-notifications', {
-    cache: 'no-store',
-    signal,
-  })
+async function readInbox(userId: string, signal: AbortSignal, url: string) {
+  const response = await fetch(url, { cache: 'no-store', signal })
   if (response.status === 401) return null
   if (!response.ok) throw new Error('Unavailable')
   const data: {
     userId: string
     notifications: LeadNotification[]
     serverTime: string
+    transport?: 'sse' | 'polling'
   } = await response.json()
   return data.userId === userId ? data : null
 }
@@ -144,6 +142,12 @@ function useLeadNotifications(userId: string) {
     let hasSnapshot = false
     let lastSuccess = 0
     let known = new Set<string>()
+    let stream: ReturnType<typeof startPrototypeStream> | null = null
+    const localOptIn =
+      process.env.NODE_ENV === 'development' &&
+      new URLSearchParams(window.location.search).get('leadSsePrototype') ===
+        'true'
+    const inboxUrl = `/api/lead-notifications${localOptIn ? '?leadSsePrototype=true' : ''}`
     const desktopAlerts = createDesktopAlerts(userId, (id) =>
       cleared.current.has(id),
     )
@@ -180,45 +184,45 @@ function useLeadNotifications(userId: string) {
       hasSnapshot = true
       lastSuccess = Date.now()
     }
-    async function poll() {
-      if (busy || disposed) return
-      busy = true
-      try {
-        const data = await readInbox(
-          userId,
-          AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]),
-        )
+    function selectTransport(data: Awaited<ReturnType<typeof readInbox>>) {
+      if (disposed) return
+      if (data?.transport !== 'sse') {
         acceptSnapshot(data)
-      } catch {
-        offline()
-      } finally {
-        busy = false
+        return
       }
-    }
-    refresh.current = () => {
-      void poll()
-    }
-    // THROWAWAY: ordinary URLs retain the unchanged polling implementation.
-    if (
-      process.env.NODE_ENV === 'development' &&
-      new URLSearchParams(window.location.search).get('leadSsePrototype') ===
-        'true'
-    ) {
-      const prototype = startPrototypeStream(
+      hasSnapshot = false
+      desktopAlerts.reset()
+      acceptSnapshot(data, true)
+      stream = startPrototypeStream(
         userId,
-        (data) => acceptSnapshot(data, true),
+        (snapshot) => acceptSnapshot(snapshot, true),
         offline,
         (id) => cleared.current.has(id),
+        () => {
+          stream = null
+          hasSnapshot = false
+          void poll()
+        },
+        localOptIn,
       )
-      refresh.current = prototype.clear
-      const clock = setInterval(() => setNow(Date.now() + offset), 1_000)
-      return () => {
-        disposed = true
-        prototype.dispose()
-        clearInterval(clock)
-        controller.abort()
-        desktopAlerts.reset()
-      }
+    }
+    function poll() {
+      if (busy || disposed || stream) return
+      busy = true
+      return readInbox(
+        userId,
+        AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]),
+        inboxUrl,
+      )
+        .then(selectTransport)
+        .catch(offline)
+        .finally(() => {
+          busy = false
+        })
+    }
+    refresh.current = (id) => {
+      if (stream) stream.clear(id)
+      else void poll()
     }
     void poll()
     const polling = setInterval(() => {
@@ -238,6 +242,7 @@ function useLeadNotifications(userId: string) {
     document.addEventListener('visibilitychange', resume)
     return () => {
       disposed = true
+      stream?.dispose()
       controller.abort()
       clearInterval(polling)
       clearInterval(clock)

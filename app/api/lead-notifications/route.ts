@@ -4,7 +4,7 @@ import { listNotifications } from '@/lib/lead-notifications/store'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET() {
+export async function GET(request: Request) {
   const headers = { 'Cache-Control': 'private, no-store' }
   const user = await getCurrentUser()
   if (!user)
@@ -14,7 +14,17 @@ export async function GET() {
       ? await listNotifications(user.id)
       : []
     return Response.json(
-      { notifications, userId: user.id, serverTime: new Date().toISOString() },
+      {
+        notifications,
+        userId: user.id,
+        serverTime: new Date().toISOString(),
+        transport: serverConfig.leadNotifications.canStream(
+          user.email,
+          new URL(request.url).searchParams.get('leadSsePrototype') === 'true',
+        )
+          ? 'sse'
+          : 'polling',
+      },
       { headers },
     )
   } catch {
