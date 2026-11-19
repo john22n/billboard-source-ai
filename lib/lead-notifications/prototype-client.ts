@@ -43,14 +43,6 @@ function readFrame(data: string) {
   }
 }
 
-function clearChannel(userId: string) {
-  try {
-    return new BroadcastChannel(`lead-notifications:${userId}`)
-  } catch {
-    return null
-  }
-}
-
 async function readFallback(signal: AbortSignal, localOptIn: boolean) {
   const response = await fetch(
     `/api/lead-notifications${localOptIn ? '?leadSsePrototype=true' : ''}`,
@@ -87,15 +79,11 @@ export function startPrototypeStream(
   let monotonic = 0
   let offset = 0
   let uncertainty = Infinity
-  let latest: Snapshot | null = null
-  const acknowledged = new Set<string>()
-  const channel = clearChannel(userId)
   const candidates = new Map<string, { epoch: number; expires: number }>()
   const alerts = createDesktopAlerts(userId, (id) => {
     const candidate = candidates.get(id)
     return (
       isCleared(id) ||
-      acknowledged.has(id) ||
       !known.has(id) ||
       !candidate ||
       candidate.epoch !== epoch ||
@@ -104,26 +92,13 @@ export function startPrototypeStream(
     )
   })
   function publish(snapshot: Snapshot) {
-    latest = {
+    accept({
       ...snapshot,
       notifications: snapshot.notifications.filter(
-        (item) => !acknowledged.has(item.id) && !isCleared(item.id),
+        (item) => !isCleared(item.id),
       ),
-    }
-    accept(latest)
+    })
   }
-  function acknowledge(id: string) {
-    if (disposed) return
-    acknowledged.add(id)
-    candidates.delete(id)
-    if (latest) publish(latest)
-  }
-  channel?.addEventListener('message', (event) => {
-    const data = z
-      .object({ type: z.literal('clear'), id: z.string().min(1) })
-      .safeParse(event.data)
-    if (data.success) acknowledge(data.data.id)
-  })
   function invalidate() {
     epoch++
     sequence = -1
@@ -144,7 +119,6 @@ export function startPrototypeStream(
   }
   function signOut() {
     dispose()
-    latest = null
     accept(null)
   }
   function acceptFallback(snapshot: Snapshot | null, request: AbortController) {
@@ -289,11 +263,15 @@ export function startPrototypeStream(
   const resume = () => {
     if (!source || (wall && Date.now() - wall >= 30_000)) connect()
   }
+  const revalidate = () => {
+    stopFallback()
+    recover()
+  }
   window.addEventListener('offline', suspend)
   window.addEventListener('online', resume)
   window.addEventListener('pagehide', suspend)
   window.addEventListener('pageshow', resume)
-  window.addEventListener('focus', resume)
+  window.addEventListener('focus', revalidate)
   document.addEventListener('freeze', suspend)
   document.addEventListener('resume', resume)
   connect()
@@ -301,25 +279,16 @@ export function startPrototypeStream(
     disposed = true
     stop()
     stopFallback()
-    channel?.close()
     window.removeEventListener('offline', suspend)
     window.removeEventListener('online', resume)
     window.removeEventListener('pagehide', suspend)
     window.removeEventListener('pageshow', resume)
-    window.removeEventListener('focus', resume)
+    window.removeEventListener('focus', revalidate)
     document.removeEventListener('freeze', suspend)
     document.removeEventListener('resume', resume)
   }
   return {
     refresh: connect,
-    clear(id: string) {
-      acknowledge(id)
-      try {
-        channel?.postMessage({ type: 'clear', id })
-      } catch {
-        /* Other tabs still reconcile through their next snapshot. */
-      }
-    },
     dispose,
   }
 }

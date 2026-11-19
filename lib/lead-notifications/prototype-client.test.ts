@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { startPrototypeStream } from './prototype-client'
+import { createNotificationSync } from './cross-tab'
 
 class Stream extends EventTarget {
   static current: Stream
@@ -229,22 +230,41 @@ it('propagates acknowledged Clear to another tab and cancels its queued banner',
       },
     },
   })
-  client = startPrototypeStream('rep-1', accepted, disconnected, () => false)
+  const cleared = new Set<string>()
+  const peerCleared = new Set<string>()
+  const pageSync = createNotificationSync(
+    'rep-1',
+    (id) => cleared.add(id),
+    () => {},
+  )
+  const peerSync = createNotificationSync(
+    'rep-1',
+    (id) => peerCleared.add(id),
+    () => {},
+  )
+  client = startPrototypeStream('rep-1', accepted, disconnected, (id) =>
+    cleared.has(id),
+  )
   const first = Stream.current
   first.send(frame(0))
   const peerAccepted = vi.fn()
-  peer = startPrototypeStream('rep-1', peerAccepted, disconnected, () => false)
+  peer = startPrototypeStream('rep-1', peerAccepted, disconnected, (id) =>
+    peerCleared.has(id),
+  )
   Stream.current.send(frame(0))
   await vi.advanceTimersByTimeAsync(10000)
   first.send(frame(1, ['clear-me']))
   Stream.current.send(frame(1, ['clear-me']))
-  client.clear('clear-me')
+  // The page still broadcasts after its SSE transport has been disposed.
+  client.dispose()
+  pageSync.clear('clear-me')
   pending.forEach((run) => run())
-  expect(peerAccepted.mock.lastCall?.[0].notifications).toEqual([])
   expect(banners).toEqual([])
   // An already in-flight snapshot cannot resurrect the acknowledged card.
   Stream.current.send(frame(2, ['clear-me']))
   expect(peerAccepted.mock.lastCall?.[0].notifications).toEqual([])
+  pageSync.dispose()
+  peerSync.dispose()
 })
 
 it('rejects a future-dated live frame rather than extending its alert lifetime', async () => {

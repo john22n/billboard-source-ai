@@ -130,6 +130,136 @@ async function signIn(context: BrowserContext, accountId = userId) {
   await context.addCookies([{ name: 'auth_token', value: token, url: baseUrl }])
 }
 
+test('a polling tab Clear cancels a streaming peer banner queued behind its lock', async ({
+  page,
+  context,
+}) => {
+  test.setTimeout(90_000)
+  await signIn(context)
+  await context.addInitScript(() => {
+    Object.defineProperty(window, 'Notification', {
+      value: class {
+        static permission = 'granted'
+        constructor(title: string) {
+          localStorage.setItem('mixed-alert', title)
+        }
+        close() {}
+      },
+    })
+  })
+  const pool = new Pool({ connectionString: databaseUrl })
+  const peer = await context.newPage()
+  const lock = `lead-alerts:${userId}`
+  try {
+    await page.goto('/issues')
+    await Promise.all([
+      peer.waitForResponse(
+        (r) => new URL(r.url()).pathname === '/api/lead-notifications/stream',
+      ),
+      peer.goto('/issues?leadSsePrototype=true'),
+    ])
+    await page.evaluate((name) => {
+      void navigator.locks.request(
+        name,
+        () =>
+          new Promise<void>((resolve) => {
+            window.addEventListener('release-mixed-lock', () => resolve(), {
+              once: true,
+            })
+          }),
+      )
+    }, lock)
+    await expect
+      .poll(() =>
+        page.evaluate(
+          async (name) =>
+            (await navigator.locks.query()).held?.some((l) => l.name === name),
+          lock,
+        ),
+      )
+      .toBe(true)
+    await pool.query(
+      `INSERT INTO lead_notifications
+      (id,recipient_id,assignee_id,assignee_email,assignment_event_id,company_name,lead_url,lead_created_at)
+      VALUES ('99620-leads',$1,'301-users','creative-studio@example.test','99620-events','Mixed transport Clear','https://app.nutshell.com/lead/99620',now())`,
+      [userId],
+    )
+    await expect(
+      peer.getByRole('link', { name: /Mixed transport Clear/ }),
+    ).toBeVisible({ timeout: 20_000 })
+    await expect
+      .poll(() =>
+        page.evaluate(
+          async (name) =>
+            (await navigator.locks.query()).pending?.some(
+              (l) => l.name === name,
+            ),
+          lock,
+        ),
+      )
+      .toBe(true)
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await expect(
+      page.getByRole('button', {
+        name: 'Clear Mixed transport Clear',
+        exact: true,
+      }),
+    ).toBeVisible()
+    await page
+      .getByRole('button', { name: 'Clear Mixed transport Clear', exact: true })
+      .click()
+    await expect(
+      page.getByRole('link', { name: /Mixed transport Clear/ }),
+    ).toHaveCount(0)
+    await expect(
+      peer.getByRole('link', { name: /Mixed transport Clear/ }),
+    ).toHaveCount(0, { timeout: 1500 })
+    await page.evaluate(async (name) => {
+      window.dispatchEvent(new Event('release-mixed-lock'))
+      await navigator.locks.request(name, () => {})
+    }, lock)
+    expect(
+      await page.evaluate(() => localStorage.getItem('mixed-alert')),
+    ).toBeNull()
+  } finally {
+    await page.close()
+    await peer.close()
+    await pool.query("DELETE FROM lead_notifications WHERE id='99620-leads'")
+    await pool.end()
+  }
+})
+
+test('signing out in another tab immediately removes an active SSE inbox without disconnecting', async ({
+  page,
+  context,
+}) => {
+  await signIn(context)
+  const peer = await context.newPage()
+  await page.goto('/dashboard')
+  await Promise.all([
+    peer.waitForResponse(
+      (r) => new URL(r.url()).pathname === '/api/lead-notifications/stream',
+    ),
+    peer.goto('/issues?leadSsePrototype=true'),
+  ])
+  await expect(
+    peer.getByRole('region', { name: 'Contact Us leads' }),
+  ).toHaveCount(1)
+  await page
+    .getByRole('button', { name: 'Toggle Sidebar', exact: true })
+    .first()
+    .click()
+  await page
+    .getByRole('button', { name: /creative-studio@example.test/ })
+    .click()
+  await page.getByRole('menuitem').filter({ hasText: 'Log out' }).click()
+  await expect(page).toHaveURL(/\/login/)
+  await expect(
+    peer.getByRole('region', { name: 'Contact Us leads' }),
+  ).toHaveCount(0)
+  await peer.close()
+})
+
 test('SSE enforces session eligibility and returns to silent polling after withdrawal', async ({
   page,
   context,

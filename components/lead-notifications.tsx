@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dialog'
 import { createDesktopAlerts } from '@/lib/lead-notifications/desktop'
 import { startPrototypeStream } from '@/lib/lead-notifications/prototype-client'
+import { createNotificationSync } from '@/lib/lead-notifications/cross-tab'
 import { useNotificationPermission } from '@/hooks/useNotificationPermission'
 
 interface LeadNotification {
@@ -152,6 +153,26 @@ function useLeadNotifications(userId: string) {
       cleared.current.has(id),
     )
     const controller = new AbortController()
+    const sync = createNotificationSync(
+      userId,
+      (id) => {
+        if (disposed) return
+        cleared.current.add(id)
+        setNotifications((items) => items.filter((item) => item.id !== id))
+      },
+      () => {
+        // This page belongs to the previous session. Reload to resume delivery.
+        disposed = true
+        stream?.dispose()
+        controller.abort()
+        desktopAlerts.reset()
+        setNotifications([])
+        setConnection('signed-out')
+        clearInterval(polling)
+        clearInterval(clock)
+        sync.dispose()
+      },
+    )
     function acceptSnapshot(
       data: Awaited<ReturnType<typeof readInbox>>,
       silent = false,
@@ -221,8 +242,9 @@ function useLeadNotifications(userId: string) {
         })
     }
     refresh.current = (id) => {
-      if (stream) stream.clear(id)
-      else void poll()
+      if (disposed) return
+      sync.clear(id)
+      if (!stream) void poll()
     }
     void poll()
     const polling = setInterval(() => {
@@ -243,6 +265,7 @@ function useLeadNotifications(userId: string) {
     return () => {
       disposed = true
       stream?.dispose()
+      sync.dispose()
       controller.abort()
       clearInterval(polling)
       clearInterval(clock)
