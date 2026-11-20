@@ -1,7 +1,7 @@
 'use server'
 
 import { createOpenAI } from '@ai-sdk/openai'
-import { generateText, streamText, generateObject } from 'ai'
+import { generateText, streamText, Output } from 'ai'
 import { z } from 'zod'
 import OpenAI from 'openai'
 import { serverConfig } from '@/lib/config'
@@ -172,16 +172,18 @@ export async function generateStructuredResponse(prompt: string) {
     if (denied) return denied
     const input = textSchema.safeParse(prompt)
     if (!input.success) return { success: false, error: 'Input too large' }
-    const { object } = await generateObject({
+    const { output } = await generateText({
       model: getOpenAIProvider()(aiModels.text),
-      schema: z.object({
-        summary: z.string().describe('A brief summary of the response'),
-        keyPoints: z
-          .array(z.string())
-          .describe('Key points from the conversation'),
-        sentiment: z
-          .enum(['positive', 'neutral', 'negative'])
-          .describe('Overall sentiment'),
+      output: Output.object({
+        schema: z.object({
+          summary: z.string().describe('A brief summary of the response'),
+          keyPoints: z
+            .array(z.string())
+            .describe('Key points from the conversation'),
+          sentiment: z
+            .enum(['positive', 'neutral', 'negative'])
+            .describe('Overall sentiment'),
+        }),
       }),
       prompt: input.data,
       temperature: 0.2,
@@ -189,7 +191,7 @@ export async function generateStructuredResponse(prompt: string) {
 
     return {
       success: true,
-      data: object,
+      data: output,
     }
   } catch {
     console.error('Error generating structured response')
