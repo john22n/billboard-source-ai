@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { generateObject } from 'ai'
+import { generateText } from 'ai'
 import sharp from 'sharp'
 import { renderBillboard } from './render'
 
-vi.mock('ai', () => ({
-  generateObject: vi.fn(async () => ({ object: { top: 80 } })),
+vi.mock('ai', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('ai')>()),
+  generateText: vi.fn(async () => ({ output: { top: 80 } })),
 }))
 
 const jpeg = 'data:image/jpeg;base64,/9j/2Q=='
@@ -32,7 +33,7 @@ beforeEach(() => {
   vi.stubEnv('OPENAI_API_KEY', 'direct-test-key')
   vi.stubGlobal('fetch', fetcher)
   fetcher.mockClear()
-  vi.mocked(generateObject).mockClear()
+  vi.mocked(generateText).mockClear()
 })
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -94,6 +95,57 @@ it('rejects image requests before fetching when the OpenAI key is missing', asyn
   expect(fetcher).not.toHaveBeenCalled()
 })
 
+it('sends crop pixels through the real AI SDK without deprecation warnings', async () => {
+  const ai = await vi.importActual<typeof import('ai')>('ai')
+  vi.mocked(generateText).mockImplementationOnce(ai.generateText)
+  const warnings = vi.fn()
+  vi.stubGlobal('AI_SDK_LOG_WARNINGS', warnings)
+  fetcher
+    .mockImplementationOnce(async () =>
+      Response.json({
+        data: [{ b64_json: canvas.toString('base64') }],
+      }),
+    )
+    .mockImplementationOnce(async (input, init) => {
+      const request = new Request(input, init)
+      expect(await request.json()).toMatchObject({
+        input: expect.arrayContaining([
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'input_image',
+                image_url: `data:image/png;base64,${canvas.toString('base64')}`,
+              },
+            ],
+          },
+        ]),
+        text: { format: { type: 'json_schema', strict: true } },
+      })
+      return Response.json({
+        id: 'resp_test',
+        created_at: 1,
+        model: 'gpt-5.4-mini',
+        output: [
+          {
+            id: 'msg_test',
+            type: 'message',
+            role: 'assistant',
+            content: [
+              { type: 'output_text', text: '{"top":80}', annotations: [] },
+            ],
+          },
+        ],
+        usage: { input_tokens: 30, output_tokens: 5 },
+      })
+    })
+  const output = await renderBillboard('Alpine billboard', [])
+  expect(
+    await sharp(Buffer.from(output.split(',')[1], 'base64')).metadata(),
+  ).toMatchObject({ width: 2304, height: 672 })
+  expect(warnings.mock.calls.flatMap(([event]) => event.warnings)).toEqual([])
+})
+
 it('returns a 2304×672 bulletin using the AI-selected off-center crop without stretching', async () => {
   // Asymmetric markers: centering, reversing the offset or resizing loses them.
   const source = await sharp(
@@ -132,9 +184,9 @@ it('returns a 2304×672 bulletin using the AI-selected off-center crop without s
 it.each([0, 96])(
   'accepts crop boundary %s with exact decoded dimensions',
   async (top) => {
-    vi.mocked(generateObject).mockResolvedValueOnce({
-      object: { top },
-    } as Awaited<ReturnType<typeof generateObject>>)
+    vi.mocked(generateText).mockResolvedValueOnce({
+      output: { top },
+    } as Awaited<ReturnType<typeof generateText>>)
     const output = await renderBillboard('Alpine', [jpeg])
     expect(
       await sharp(Buffer.from(output.split(',')[1], 'base64')).metadata(),
@@ -145,8 +197,8 @@ it.each([0, 96])(
 it.each([{ top: -1 }, { top: 97 }, { top: 48.5 }, { top: '80' }, {}, null])(
   'rejects invalid AI crop %j without falling back to center or returning a wrong ratio',
   async (object) => {
-    vi.mocked(generateObject).mockResolvedValueOnce({ object } as Awaited<
-      ReturnType<typeof generateObject>
+    vi.mocked(generateText).mockResolvedValueOnce({ output: object } as Awaited<
+      ReturnType<typeof generateText>
     >)
     await expect(renderBillboard('Alpine', [])).rejects.toThrow(
       'Invalid bulletin crop position',
@@ -155,7 +207,7 @@ it.each([{ top: -1 }, { top: 97 }, { top: 48.5 }, { top: '80' }, {}, null])(
 )
 
 it('fails explicitly when vision refuses or times out', async () => {
-  vi.mocked(generateObject).mockRejectedValueOnce(
+  vi.mocked(generateText).mockRejectedValueOnce(
     new Error('No object generated'),
   )
   await expect(renderBillboard('Alpine', [])).rejects.toThrow(
@@ -180,7 +232,7 @@ it('generates the poster at 2496×1152 without a crop', async () => {
   expect(
     await sharp(Buffer.from(output.split(',')[1], 'base64')).metadata(),
   ).toMatchObject({ format: 'jpeg', width: 2496, height: 1152 })
-  expect(generateObject).not.toHaveBeenCalled()
+  expect(generateText).not.toHaveBeenCalled()
 })
 
 it('rejects a provider canvas with the wrong dimensions instead of resizing it', async () => {

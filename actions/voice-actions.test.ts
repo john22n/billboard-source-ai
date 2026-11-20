@@ -10,9 +10,46 @@ vi.mock('@/lib/config', () => ({
   serverConfig: { openai: { requireApiKey: () => 'test-key' } },
 }))
 
-import { chatCompletion } from './voice-actions'
+import { chatCompletion, generateStructuredResponse } from './voice-actions'
 
 afterEach(() => vi.unstubAllGlobals())
+
+it('returns validated structured output without SDK deprecation warnings', async () => {
+  const warnings = vi.fn()
+  vi.stubGlobal('AI_SDK_LOG_WARNINGS', warnings)
+  const output = {
+    summary: 'The customer requested pricing.',
+    keyPoints: ['Send a quote'],
+    sentiment: 'positive',
+  }
+  vi.stubGlobal('fetch', async () =>
+    Response.json({
+      id: 'resp_test',
+      created_at: 1,
+      model: 'gpt-4o-mini',
+      output: [
+        {
+          id: 'msg_test',
+          type: 'message',
+          role: 'assistant',
+          content: [
+            {
+              type: 'output_text',
+              text: JSON.stringify(output),
+              annotations: [],
+            },
+          ],
+        },
+      ],
+      usage: { input_tokens: 30, output_tokens: 20 },
+    }),
+  )
+  expect(await generateStructuredResponse('Please send pricing.')).toEqual({
+    success: true,
+    data: output,
+  })
+  expect(warnings.mock.calls.flatMap(([event]) => event.warnings)).toEqual([])
+})
 
 it('keeps accepting system instructions in chat history across SDK upgrades', async () => {
   let sent: Request | undefined
