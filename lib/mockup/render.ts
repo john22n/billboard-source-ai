@@ -1,6 +1,6 @@
 import OpenAI, { toFile } from 'openai'
 import { createOpenAI } from '@ai-sdk/openai'
-import { generateObject } from 'ai'
+import { generateText, Output } from 'ai'
 import sharp, { type Sharp } from 'sharp'
 import { z } from 'zod'
 import { serverConfig } from '@/lib/config'
@@ -12,16 +12,21 @@ const cropSchema = z.object({ top: z.number().int().min(0).max(96) }).strict()
 
 async function selectBulletinCrop(source: Buffer) {
   const provider = createOpenAI({ apiKey: serverConfig.openai.requireApiKey() })
-  const result = await generateObject({
+  const result = await generateText({
     model: provider(aiModels.mockup),
-    schema: cropSchema,
+    output: Output.object({ schema: cropSchema }),
     providerOptions: { openai: { strictJsonSchema: true } },
     maxRetries: 0,
     abortSignal: AbortSignal.timeout(60_000),
     system: cropInstructions,
-    messages: [{ role: 'user', content: [{ type: 'image', image: source }] }],
+    messages: [
+      {
+        role: 'user',
+        content: [{ type: 'file', data: source, mediaType: 'image' }],
+      },
+    ],
   })
-  const crop = cropSchema.safeParse(result.object)
+  const crop = cropSchema.safeParse(result.output)
   if (!crop.success) throw new Error('Invalid bulletin crop position')
   return crop.data.top
 }

@@ -77,8 +77,8 @@ export function referenceMessages(
             text: referenceLabelInstructions(attachmentLabel(file)),
           },
           {
-            type: 'image' as const,
-            image: Uint8Array.from(atob(file.dataUrl.split(',')[1]), (char) =>
+            type: 'file' as const,
+            data: Uint8Array.from(atob(file.dataUrl.split(',')[1]), (char) =>
               char.charCodeAt(0),
             ),
             mediaType: file.dataUrl.slice(5, file.dataUrl.indexOf(';')),

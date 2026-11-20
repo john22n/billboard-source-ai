@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createOpenAI } from '@ai-sdk/openai'
-import { generateObject } from 'ai'
+import { generateText, Output } from 'ai'
 import { getSession } from '@/lib/auth'
 import { serverConfig } from '@/lib/config'
 import { rateLimit } from '@/lib/rate-limit'
@@ -42,9 +42,9 @@ export async function POST(request: Request) {
     const provider = createOpenAI({
       apiKey: serverConfig.openai.requireApiKey(),
     })
-    const result = await generateObject({
+    const result = await generateText({
       model: provider(aiModels.mockup),
-      schema: pdfSearchResultSchema,
+      output: Output.object({ schema: pdfSearchResultSchema }),
       providerOptions: { openai: { strictJsonSchema: true } },
       maxRetries: 0,
       abortSignal: AbortSignal.timeout(60_000),
@@ -60,10 +60,10 @@ export async function POST(request: Request) {
         })),
       ),
     })
-    const { pageNumber } = result.object
+    const { pageNumber } = result.output
     if (pageNumber !== null && (pageNumber < 1 || pageNumber > pages.length))
       throw new Error('Invalid selected page')
-    return NextResponse.json(result.object, {
+    return NextResponse.json(result.output, {
       headers: { 'Cache-Control': 'no-store' },
     })
   } catch {

@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => {
     callsList,
     eventsList,
     createOpenAI: vi.fn(),
-    generateObject: vi.fn(),
+    generateText: vi.fn(),
     logOpenAITokenUsage: vi.fn(),
     openaiProvider: vi.fn(() => 'direct-openai-model'),
     requireOpenAIKey: vi.fn(),
@@ -32,7 +32,10 @@ vi.mock('server-only', () => ({}))
 vi.mock('@ai-sdk/openai', () => ({
   createOpenAI: mocks.createOpenAI,
 }))
-vi.mock('ai', () => ({ generateObject: mocks.generateObject }))
+vi.mock('ai', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('ai')>()),
+  generateText: mocks.generateText,
+}))
 vi.mock('twilio', () => ({ default: vi.fn(() => mocks.twilioClient) }))
 vi.mock('@/lib/config', async () => ({
   ...(await import('./config-core')),
@@ -245,8 +248,8 @@ describe('issue reporting diagnostics', () => {
       },
     ])
     mocks.eventsList.mockResolvedValue([])
-    mocks.generateObject.mockResolvedValue({
-      object: {
+    mocks.generateText.mockResolvedValue({
+      output: {
         severity: 'high',
         summary: 'Likely callback failure for alice@example.com <!channel>.',
         evidence: [{ source: 'twilio', detail: 'Error 11200 was recorded.' }],
@@ -325,7 +328,7 @@ describe('issue reporting diagnostics', () => {
       },
     })
 
-    const modelPrompt = mocks.generateObject.mock.calls[0][0].prompt as string
+    const modelPrompt = mocks.generateText.mock.calls[0][0].prompt as string
     expect(mocks.createOpenAI).toHaveBeenCalledWith({ apiKey: 'openai-key' })
     expect(mocks.openaiProvider).toHaveBeenCalledWith('gpt-4o-mini')
     expect(modelPrompt).toContain('alice@example.com')
@@ -397,8 +400,8 @@ describe('issue reporting diagnostics', () => {
   })
 
   it('still sends the logs to Slack when OpenAI can explain the reason', async () => {
-    mocks.generateObject.mockResolvedValue({
-      object: {
+    mocks.generateText.mockResolvedValue({
+      output: {
         severity: 'low',
         summary: 'The worker was offline when TaskRouter attempted assignment.',
         evidence: [
@@ -455,8 +458,8 @@ describe('issue reporting diagnostics', () => {
   })
 
   it('rejects the report when Slack does not accept the message', async () => {
-    mocks.generateObject.mockResolvedValue({
-      object: {
+    mocks.generateText.mockResolvedValue({
+      output: {
         severity: 'low',
         summary: 'The worker was offline when TaskRouter attempted assignment.',
         evidence: [],
@@ -544,7 +547,7 @@ describe('issue reporting diagnostics', () => {
     mocks.requireVercelCredentials.mockImplementation(() => {
       throw new Error('Vercel unavailable')
     })
-    mocks.generateObject.mockRejectedValue(new Error('OpenAI unavailable'))
+    mocks.generateText.mockRejectedValue(new Error('OpenAI unavailable'))
     vi.stubGlobal(
       'fetch',
       vi.fn(async () =>
@@ -598,8 +601,8 @@ describe('issue reporting diagnostics', () => {
         reason: 'required value is not set',
       })
     })
-    mocks.generateObject.mockResolvedValue({
-      object: {
+    mocks.generateText.mockResolvedValue({
+      output: {
         severity: 'low',
         summary: 'The worker was offline.',
         evidence: [],
@@ -636,7 +639,7 @@ describe('issue reporting diagnostics', () => {
       'https://slack.com/api/chat.postMessage',
     )
     expect(result.unavailableSources).toEqual(['Vercel'])
-    const [{ prompt, system }] = mocks.generateObject.mock.calls[0]
+    const [{ prompt, system }] = mocks.generateText.mock.calls[0]
     expect(prompt).toContain(
       'Vercel runtime logs were skipped because VERCEL_TEAM_ID is not set in the deployment environment.',
     )
@@ -650,8 +653,8 @@ describe('issue reporting diagnostics', () => {
       deploymentId: null,
       teamId: 'team-1',
     })
-    mocks.generateObject.mockResolvedValue({
-      object: {
+    mocks.generateText.mockResolvedValue({
+      output: {
         severity: 'low',
         summary: 'The worker was offline.',
         evidence: [],
@@ -695,7 +698,7 @@ describe('issue reporting diagnostics', () => {
     expect(vercelUrl.searchParams.get('projectId')).toBe('project-1')
     expect(vercelUrl.searchParams.get('ownerId')).toBe('team-1')
     expect(vercelUrl.searchParams.has('deploymentId')).toBe(false)
-    const [{ prompt }] = mocks.generateObject.mock.calls[0]
+    const [{ prompt }] = mocks.generateText.mock.calls[0]
     expect(prompt).toContain('"deploymentId": null')
   })
 
@@ -706,7 +709,7 @@ describe('issue reporting diagnostics', () => {
     mocks.requireVercelCredentials.mockImplementation(() => {
       throw new Error('Vercel unavailable')
     })
-    mocks.generateObject.mockRejectedValue(new Error('OpenAI unavailable'))
+    mocks.generateText.mockRejectedValue(new Error('OpenAI unavailable'))
     vi.stubGlobal(
       'fetch',
       vi.fn(async () =>

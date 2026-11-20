@@ -58,7 +58,7 @@ vi.mock('@/db', () => {
 vi.mock('ai', async (importOriginal) => ({
   ...(await importOriginal<typeof import('ai')>()),
   streamText: mocks.streamText,
-  generateObject: mocks.crop,
+  generateText: mocks.crop,
 }))
 import { POST } from './route'
 
@@ -353,7 +353,7 @@ it('returns a signed bulletin and matching poster, using the bulletin as the pos
   mocks.streamText.mockImplementationOnce(
     streams(async ({ tools, messages }) => {
       expect(messages.at(-1)?.content[1].text).toContain('logo.png')
-      expect(messages.at(-1)?.content[2].type).toBe('image')
+      expect(messages.at(-1)?.content[2].type).toBe('file')
       const result = await tools.generate_billboard.execute({
         advertiser: '  Alpine Dental ',
         prompt: 'Headline "Smile Bigger" in navy',
@@ -509,7 +509,7 @@ it.each([false, true])(
     >('@/lib/mockup/template')
     mocks.compose.mockImplementation(composeMockup)
     mocks.revision.mockImplementation(revisionArtwork)
-    mocks.crop.mockResolvedValue({ object: { top: 80 } })
+    mocks.crop.mockResolvedValue({ output: { top: 80 } })
     const canvases = await Promise.all([
       sharp(
         Buffer.from(

@@ -1,7 +1,7 @@
 // app/api/transcribe-file/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
-import { generateObject } from 'ai'
+import { generateText, Output } from 'ai'
 import { createOpenAI } from '@ai-sdk/openai'
 import { z } from 'zod'
 import { getSession } from '@/lib/auth'
@@ -142,9 +142,9 @@ export async function POST(req: NextRequest) {
     console.log('✅ Transcription complete, analyzing...')
 
     // Step 2: Single LLM call for all analysis (4x more efficient than parallel calls)
-    const analysisResult = await generateObject({
+    const analysisResult = await generateText({
       model: openaiProvider(aiModels.text),
-      schema: fullAnalysisSchema,
+      output: Output.object({ schema: fullAnalysisSchema }),
       system: `You are a sales call analyst. Analyze this sales call transcript and extract all relevant information.
 Be thorough and only include information that was explicitly mentioned. Use null for missing fields.`,
       prompt: transcript,
@@ -156,7 +156,7 @@ Be thorough and only include information that was explicitly mentioned. Use null
       usage: analysisResult.usage,
       sessionId: 'transcribe-file:analysis',
     })
-    const analysis = analysisResult.object
+    const analysis = analysisResult.output
 
     console.log('✅ Analysis complete')
 

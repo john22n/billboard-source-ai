@@ -9,12 +9,60 @@ import { isValidTwilioWebhook } from '@/lib/twilio-webhook'
  * Worker reset is handled by reservation.canceled in events/route.ts.
  */
 import twilio from 'twilio'
+import { z } from 'zod'
 import { recordMissedAttempt } from '@/lib/call-attempt-outcomes'
 import { computeMissedAttemptRouting } from '@/lib/taskrouter-retry-routing'
 import { serverConfig } from '@/lib/config'
-import { recordCallAnswer } from '@/lib/taskrouter-call-state'
+import { readCallOffer, recordCallAnswer } from '@/lib/taskrouter-call-state'
 
 type TwilioClient = ReturnType<typeof twilio>
+
+const providerErrorSchema = z.object({
+  status: z.number().optional(),
+  code: z.number().optional(),
+})
+const handoffSchema = z.object({
+  conferenceSid: z.string(),
+  delivered: z.boolean(),
+  leaseUntil: z.number(),
+})
+
+type ConferenceEnd = {
+  client: TwilioClient
+  conferenceSid: string
+  taskSid: string
+  workspaceSid: string
+  workerSid: string | null
+  reservationSid: string
+  appUrl: string
+}
+
+function providerError(error: unknown) {
+  return providerErrorSchema.safeParse(error).data ?? {}
+}
+
+function taskVersion(client: TwilioClient) {
+  // Never silently turn a conditional task write into an unconditional one.
+  return z.string().min(1).parse(client.httpClient.lastResponse?.headers.etag)
+}
+
+function shouldDeliverHandoff(
+  value: unknown,
+  conferenceSid: string,
+  status: string,
+) {
+  const handoff = handoffSchema.safeParse(value).data
+  if (!handoff || handoff.conferenceSid !== conferenceSid)
+    return isActiveTask(status)
+  if (handoff.delivered) return false
+  if (!['assigned', 'wrapping', 'completed'].includes(status)) return false
+  // Concurrent deliveries wait; an abandoned lease expires after one minute.
+  if (handoff.leaseUntil > Date.now())
+    throw Object.assign(new Error('Conference handoff is in progress'), {
+      status: 503,
+    })
+  return true
+}
 
 function logConferenceEvent(details: {
   statusCallbackEvent: string
@@ -52,8 +100,14 @@ async function redirectActiveCaller(
       method: 'POST',
     })
     console.log('✅ Caller redirected to retry-or-overflow')
-  } catch {
-    console.error('❌ Failed to redirect caller to retry-or-overflow')
+  } catch (error) {
+    // The caller can hang up between fetch and update. Twilio rejects a
+    // redirect of a finished call with 21220; no further action is needed.
+    if (providerError(error).code === 21220) {
+      console.log('ℹ️ Caller hung up during redirect — skipping redirect')
+      return
+    }
+    throw error
   }
 }
 
@@ -79,101 +133,138 @@ function buildRetryUrl(options: {
   return retryUrl
 }
 
-async function handleConferenceEnd(options: {
-  client: TwilioClient
-  conferenceSid: string
-  taskSid: string
-  workspaceSid: string
-  workerSid: string | null
-  reservationSid: string
-  appUrl: string
-}) {
-  const {
-    client,
-    conferenceSid,
-    taskSid,
-    workspaceSid,
-    workerSid,
-    reservationSid,
-    appUrl,
-  } = options
-
-  try {
-    const task = await client.taskrouter.v1
-      .workspaces(workspaceSid)
-      .tasks(taskSid)
-      .fetch()
-    const taskAttributes = JSON.parse(task.attributes || '{}')
-    const callerCallSid = taskAttributes.call_sid as string | undefined
-
-    // Twilio can redeliver conference-end. Only the first active delivery may
-    // perform side effects, preventing duplicate redirects and re-enqueues.
-    if (!isActiveTask(task.assignmentStatus)) {
-      console.log(
-        `ℹ️ Task is ${task.assignmentStatus}, skipping conference-end side effects`,
-      )
-      return
-    }
-
-    const participants = await client
-      .conferences(conferenceSid)
-      .participants.list()
-    const wasAnswered = participants.length >= 2
-    console.log(`📊 Participants count: ${participants.length}`)
-    console.log(`📊 wasAnswered: ${wasAnswered}`)
-
-    if (wasAnswered) {
-      await client.taskrouter.v1
-        .workspaces(workspaceSid)
-        .tasks(taskSid)
-        .update({
-          assignmentStatus: 'completed',
-          reason: 'Conference ended',
-        })
-      console.log('✅ Conference was answered — task completed, no retry')
-      return
-    }
-
-    console.log(
-      '📤 Conference ended unanswered — advancing to next Sales Rep or overflow',
-    )
-    if (workerSid) {
-      await recordMissedAttempt({ reservationSid, workerSid })
-    }
-
-    const routing = computeMissedAttemptRouting(taskAttributes, workerSid)
-    await client.taskrouter.v1
-      .workspaces(workspaceSid)
-      .tasks(taskSid)
-      .update({
-        attributes: JSON.stringify(routing.nextTaskAttributes),
+async function claimConferenceHandoff(options: ConferenceEnd) {
+  const { client, workspaceSid, taskSid, conferenceSid, workerSid } = options
+  const task = client.taskrouter.v1.workspaces(workspaceSid).tasks(taskSid)
+  const current = await task.fetch()
+  const etag = taskVersion(client)
+  const attributes = JSON.parse(current.attributes || '{}')
+  const active = isActiveTask(current.assignmentStatus)
+  // Participants only lists active calls, not historical answers.
+  if (readCallOffer(attributes)?.status === 'answered') {
+    if (active)
+      await task.update({
+        ifMatch: etag,
         assignmentStatus: 'completed',
-        reason: routing.shouldOverflow
+        reason: 'Conference ended',
+      })
+    return null
+  }
+  if (
+    !shouldDeliverHandoff(
+      attributes.conference_handoff,
+      conferenceSid,
+      current.assignmentStatus,
+    )
+  )
+    return null
+  const routing = computeMissedAttemptRouting(attributes, workerSid)
+  const claimed: Record<string, unknown> & {
+    conference_handoff: z.infer<typeof handoffSchema>
+  } = {
+    ...routing.nextTaskAttributes,
+    conference_handoff: {
+      conferenceSid,
+      delivered: false,
+      leaseUntil: Date.now() + 60_000,
+    },
+  }
+  await task.update({ ifMatch: etag, attributes: JSON.stringify(claimed) })
+  return {
+    task,
+    attributes: claimed,
+    etag: taskVersion(client),
+    active,
+    shouldOverflow: routing.shouldOverflow,
+  }
+}
+
+async function deliverConferenceHandoff(
+  options: ConferenceEnd,
+  claim: NonNullable<Awaited<ReturnType<typeof claimConferenceHandoff>>>,
+) {
+  const { client, workerSid, reservationSid } = options
+  const { task, attributes } = claim
+  let etag = claim.etag
+  let delivered = false
+  try {
+    // Twilio requires separate requests for attributes and terminal status.
+    if (claim.active) {
+      await task.update({
+        ifMatch: etag,
+        assignmentStatus: 'completed',
+        reason: claim.shouldOverflow
           ? 'Conference ended unanswered — overflow'
           : 'Conference ended unanswered — retrying distinct rep',
       })
-    console.log(
-      `✅ Task ${taskSid} completed (attempt ${routing.attemptCount}, shouldOverflow=${routing.shouldOverflow})`,
-    )
-
-    if (!callerCallSid) {
-      console.log(
-        '⚠️ Conference ended unanswered but no callerCallSid available',
-      )
-      return
+      etag = taskVersion(client)
     }
-
-    const retryUrl = buildRetryUrl({
-      appUrl,
-      taskSid,
-      workspaceSid,
-      workerSid,
-      callerCallSid,
-      callerFrom: taskAttributes.from as string | undefined,
+    if (workerSid) await recordMissedAttempt({ reservationSid, workerSid })
+    const callerCallSid = attributes.call_sid as string | undefined
+    if (callerCallSid) {
+      await redirectActiveCaller(
+        client,
+        callerCallSid,
+        buildRetryUrl({
+          ...options,
+          callerCallSid,
+          callerFrom: attributes.from as string | undefined,
+        }),
+      )
+    } else {
+      console.log(
+        '⚠️ Conference ended without a callerCallSid — skipping redirect',
+      )
+    }
+    delivered = true
+    await task.update({
+      ifMatch: etag,
+      attributes: JSON.stringify({
+        ...attributes,
+        conference_handoff: {
+          ...attributes.conference_handoff,
+          delivered: true,
+          leaseUntil: 0,
+        },
+      }),
     })
-    await redirectActiveCaller(client, callerCallSid, retryUrl)
-  } catch {
-    console.error('❌ Failed to handle conference-end')
+  } catch (error) {
+    // Do not clear another callback's lease or a concurrently saved answer.
+    // If the redirect succeeded but acknowledgement failed, retain the lease;
+    // cross-API delivery is not an exactly-once transaction.
+    if (!delivered)
+      await task
+        .update({
+          ifMatch: etag,
+          attributes: JSON.stringify({
+            ...attributes,
+            conference_handoff: {
+              ...attributes.conference_handoff,
+              leaseUntil: 0,
+            },
+          }),
+        })
+        .catch(() => {})
+    throw error
+  }
+}
+
+async function handleConferenceEnd(options: ConferenceEnd) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let claimed = false
+    try {
+      const claim = await claimConferenceHandoff(options)
+      if (!claim) return
+      claimed = true
+      await deliverConferenceHandoff(options, claim)
+      return
+    } catch (error) {
+      const { status } = providerError(error)
+      // Re-read on a version conflict, or a task transition rejected before
+      // claiming. Never turn a call-redirect error into a successful callback.
+      if (attempt === 2 || !(status === 412 || (!claimed && status === 400)))
+        throw error
+    }
   }
 }
 
@@ -230,8 +321,10 @@ export async function POST(req: Request) {
     }
 
     return new Response('OK', { status: 200 })
-  } catch {
-    console.error('❌ Conference status callback failed')
+  } catch (error) {
+    // Provider messages may contain phone numbers or request URLs. Retain only
+    // numeric diagnostics so unexpected failures remain actionable and private.
+    console.error('❌ Conference status callback failed', providerError(error))
     return new Response('Error', { status: 500 })
   }
 }
