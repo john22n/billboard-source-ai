@@ -11,18 +11,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { createDesktopAlerts } from '@/lib/lead-notifications/desktop'
-import { startPrototypeStream } from '@/lib/lead-notifications/prototype-client'
-import { createNotificationSync } from '@/lib/lead-notifications/cross-tab'
+import {
+  createLeadInboxClient,
+  type InboxConnection,
+  type LeadInboxClient,
+  type LeadNotification,
+} from '@/lib/lead-notifications/inbox-client'
 import { useNotificationPermission } from '@/hooks/useNotificationPermission'
-
-interface LeadNotification {
-  id: string
-  companyName: string
-  leadUrl: string
-  leadCreatedAt: string
-  createdAt: string
-}
 
 const urgencyLevels = [
   {
@@ -44,21 +39,6 @@ function elapsedTime(age: number) {
   return minutes < 60
     ? `${minutes}m`
     : `${Math.floor(minutes / 60)}h ${minutes % 60}m`
-}
-
-type Connection = 'loading' | 'connected' | 'disconnected' | 'signed-out'
-
-async function readInbox(userId: string, signal: AbortSignal, url: string) {
-  const response = await fetch(url, { cache: 'no-store', signal })
-  if (response.status === 401) return null
-  if (!response.ok) throw new Error('Unavailable')
-  const data: {
-    userId: string
-    notifications: LeadNotification[]
-    serverTime: string
-    transport?: 'sse' | 'polling'
-  } = await response.json()
-  return data.userId === userId ? data : null
 }
 
 function LeadNotificationItem({
@@ -129,173 +109,51 @@ function LeadNotificationItem({
 
 function useLeadNotifications(userId: string) {
   const [notifications, setNotifications] = useState<LeadNotification[]>([])
-  const [connection, setConnection] = useState<Connection>('loading')
+  const [connection, setConnection] = useState<InboxConnection>('loading')
   const [now, setNow] = useState(0)
   const [clearing, setClearing] = useState<string | null>(null)
   const [error, setError] = useState('')
-  const cleared = useRef(new Set<string>())
-  const refresh = useRef<(clearedId: string) => void>(() => {})
+  const offsetRef = useRef(0)
+  const clientRef = useRef<LeadInboxClient | null>(null)
 
   useEffect(() => {
-    let disposed = false
-    let busy = false
-    let offset = 0
-    let hasSnapshot = false
-    let lastSuccess = 0
-    let known = new Set<string>()
-    let stream: ReturnType<typeof startPrototypeStream> | null = null
     const localOptIn =
       process.env.NODE_ENV === 'development' &&
       new URLSearchParams(window.location.search).get('leadSsePrototype') ===
         'true'
-    const inboxUrl = `/api/lead-notifications${localOptIn ? '?leadSsePrototype=true' : ''}`
-    const desktopAlerts = createDesktopAlerts(userId, (id) =>
-      cleared.current.has(id),
-    )
-    const controller = new AbortController()
-    const sync = createNotificationSync(
+    const client = createLeadInboxClient({
       userId,
-      (id) => {
-        if (disposed) return
-        cleared.current.add(id)
-        setNotifications((items) => items.filter((item) => item.id !== id))
+      localOptIn,
+      onStateChange(next) {
+        offsetRef.current = next.serverOffset
+        setNow(Date.now() + next.serverOffset)
+        setNotifications(next.notifications)
+        setConnection(next.connection)
       },
-      () => {
-        // This page belongs to the previous session. Reload to resume delivery.
-        disposed = true
-        stream?.dispose()
-        controller.abort()
-        desktopAlerts.reset()
-        setNotifications([])
-        setConnection('signed-out')
-        clearInterval(polling)
-        clearInterval(clock)
-        sync.dispose()
-      },
+    })
+    clientRef.current = client
+    const clock = setInterval(
+      () => setNow(Date.now() + offsetRef.current),
+      1_000,
     )
-    function acceptSnapshot(
-      data: Awaited<ReturnType<typeof readInbox>>,
-      silent = false,
-    ) {
-      if (disposed) return
-      if (data === null) {
-        hasSnapshot = false
-        desktopAlerts.reset()
-        setNotifications([])
-        setConnection('signed-out')
-        return
-      }
-      if (!silent) announceArrivals(data.notifications)
-      offset = Date.parse(data.serverTime) - Date.now()
-      setNow(Date.now() + offset)
-      setNotifications(
-        data.notifications.filter((item) => !cleared.current.has(item.id)),
-      )
-      setConnection('connected')
-    }
-    function announceArrivals(items: LeadNotification[]) {
-      // First/recovery snapshots are silent, including after a suspended tab.
-      const arrivals = items.filter((item) => !known.has(item.id))
-      if (hasSnapshot && Date.now() - lastSuccess < 45_000) {
-        arrivals.forEach((item) => {
-          void desktopAlerts.show(item)
-        })
-      }
-      known = new Set(items.map((item) => item.id))
-      hasSnapshot = true
-      lastSuccess = Date.now()
-    }
-    function selectTransport(data: Awaited<ReturnType<typeof readInbox>>) {
-      if (disposed) return
-      if (data?.transport !== 'sse') {
-        acceptSnapshot(data)
-        return
-      }
-      hasSnapshot = false
-      desktopAlerts.reset()
-      acceptSnapshot(data, true)
-      stream = startPrototypeStream(
-        userId,
-        (snapshot) => acceptSnapshot(snapshot, true),
-        offline,
-        (id) => cleared.current.has(id),
-        () => {
-          stream = null
-          hasSnapshot = false
-          void poll()
-        },
-        localOptIn,
-      )
-    }
-    function poll() {
-      if (busy || disposed || stream) return
-      busy = true
-      return readInbox(
-        userId,
-        AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]),
-        inboxUrl,
-      )
-        .then(selectTransport)
-        .catch(offline)
-        .finally(() => {
-          busy = false
-        })
-    }
-    refresh.current = (id) => {
-      if (disposed) return
-      sync.clear(id)
-      if (!stream) void poll()
-    }
-    void poll()
-    const polling = setInterval(() => {
-      void poll()
-    }, 15_000)
-    const clock = setInterval(() => setNow(Date.now() + offset), 1_000)
-    function offline() {
-      hasSnapshot = false
-      if (!disposed) setConnection('disconnected')
-    }
-    const resume = () => {
-      void poll()
-    }
-    window.addEventListener('online', resume)
-    window.addEventListener('offline', offline)
-    window.addEventListener('focus', resume)
-    document.addEventListener('visibilitychange', resume)
     return () => {
-      disposed = true
-      stream?.dispose()
-      sync.dispose()
-      controller.abort()
-      clearInterval(polling)
       clearInterval(clock)
-      desktopAlerts.reset()
-      window.removeEventListener('online', resume)
-      window.removeEventListener('offline', offline)
-      window.removeEventListener('focus', resume)
-      document.removeEventListener('visibilitychange', resume)
+      client.dispose()
+      if (clientRef.current === client) clientRef.current = null
     }
   }, [userId])
 
   async function clear(item: LeadNotification) {
+    if (!clientRef.current) return
     setClearing(item.id)
     setError('')
     try {
-      const response = await fetch(
-        `/api/lead-notifications/${encodeURIComponent(item.id)}/clear`,
-        {
-          method: 'POST',
-          signal: AbortSignal.timeout(10_000),
-        },
-      )
-      if (!response.ok) throw new Error('Unavailable')
-      cleared.current.add(item.id)
-      setNotifications((current) => current.filter((n) => n.id !== item.id))
-      refresh.current(item.id)
-    } catch {
-      setError(
-        'Could not clear this lead. It is still in your inbox. Please try again.',
-      )
+      const ok = await clientRef.current.clear(item.id)
+      if (!ok) {
+        setError(
+          'Could not clear this notification. It is still in your inbox. Please try again.',
+        )
+      }
     } finally {
       setClearing(null)
     }
@@ -373,7 +231,7 @@ export function LeadNotifications({ userId }: { userId: string }) {
   )
 }
 
-function InboxStatus({ connection }: { connection: Connection }) {
+function InboxStatus({ connection }: { connection: InboxConnection }) {
   if (connection === 'disconnected')
     return (
       <div

@@ -10,7 +10,7 @@ export async function GET(request: Request) {
   if (!user)
     return Response.json({ error: 'Unauthorized' }, { status: 401, headers })
   try {
-    const notifications = serverConfig.nutshell.notificationsEnabled
+    const notifications = serverConfig.leadNotifications.inboxEnabled
       ? await listNotifications(user.id)
       : []
     return Response.json(

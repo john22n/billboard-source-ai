@@ -1,8 +1,8 @@
-import { createHash, timingSafeEqual } from 'node:crypto'
 import { after } from 'next/server'
 import { z } from 'zod'
 import { serverConfig } from '@/lib/config'
 import { nutshellWebhookInbox } from '@/db/schema'
+import { leadIdPattern, secretsMatch } from '@/lib/lead-notifications/store'
 
 export const runtime = 'nodejs'
 export const maxDuration = 30
@@ -22,10 +22,7 @@ const envelope = z.object({
 const leadCreated = z.object({
   id: z.string().regex(/^[1-9]\d{0,19}-events$/),
   links: z.object({
-    payloads: z
-      .array(z.string().regex(/^[1-9]\d{0,19}-leads$/))
-      .min(1)
-      .max(1000),
+    payloads: z.array(z.string().regex(leadIdPattern)).min(1).max(1000),
   }),
 })
 
@@ -81,8 +78,7 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Webhook unavailable' }, { status: 503 })
 
   const tokens = new URL(request.url).searchParams.getAll('token')
-  const hash = (value: string) => createHash('sha256').update(value).digest()
-  if (tokens.length !== 1 || !timingSafeEqual(hash(tokens[0]), hash(secret)))
+  if (tokens.length !== 1 || !secretsMatch(tokens[0], secret))
     return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
   const parsed = await readEnvelope(request)

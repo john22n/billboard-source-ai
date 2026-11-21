@@ -12,7 +12,7 @@ export default async function AuthenticatedLayout({
 }) {
   const session = await getSession()
   const showNotifications =
-    session && serverConfig.nutshell.notificationsEnabled
+    session && serverConfig.leadNotifications.inboxEnabled
   return (
     <WorkerStatusProvider>
       <AvailableWorkersProvider>

@@ -537,7 +537,9 @@ test('lead inbox shows ages, opens without clearing, and retains failed clears',
   await (await popup).close()
   await expect(lead).toBeVisible()
   await panel.getByRole('button', { name: 'Clear Northstar Outdoor' }).click()
-  await expect(panel.getByRole('alert')).toContainText('Could not clear')
+  await expect(panel.getByRole('alert')).toContainText(
+    'Could not clear this notification',
+  )
   await expect(lead).toBeVisible()
   failClear = false
   await panel.getByRole('button', { name: 'Clear Northstar Outdoor' }).click()
@@ -1225,6 +1227,99 @@ test('real processor delivers only to the initial recipient and Clear survives r
     )
     await pool.query(
       "DELETE FROM \"User\" WHERE id IN ('notification-alpha','notification-beta')",
+    )
+    await pool.end()
+  }
+})
+
+test('focusing a healthy SSE tab revalidates silently without flashing disconnected or restarting the stream', async ({
+  page,
+  context,
+}) => {
+  test.setTimeout(60_000)
+  const pool = new Pool({ connectionString: databaseUrl })
+  try {
+    await pool.query(
+      `INSERT INTO lead_notifications
+      (id,recipient_id,assignee_id,assignee_email,assignment_event_id,company_name,lead_url,lead_created_at)
+      VALUES ('99801-leads',$1,'301-users','creative-studio@example.test','99801-events','Focus Healthy Outdoor','https://app.nutshell.com/lead/99801',now())`,
+      [userId],
+    )
+    await signIn(context)
+    const alerts: string[] = []
+    await context.exposeBinding('recordFocusAlert', (_source, title: string) =>
+      alerts.push(title),
+    )
+    await context.addInitScript(() => {
+      Object.defineProperty(window, 'Notification', {
+        configurable: true,
+        value: class {
+          static permission = 'granted'
+          constructor(title: string) {
+            const recorder = Reflect.get(window, 'recordFocusAlert')
+            recorder(title)
+          }
+          close() {}
+        },
+      })
+    })
+    let streamCount = 0
+    page.on('request', (request) => {
+      if (new URL(request.url()).pathname === '/api/lead-notifications/stream')
+        streamCount++
+    })
+    const [opened] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === '/api/lead-notifications/stream',
+      ),
+      page.goto('/issues?leadSsePrototype=true'),
+    ])
+    expect(opened.status()).toBe(200)
+    await expect(
+      page.getByRole('link', { name: /Focus Healthy Outdoor/ }),
+    ).toBeVisible()
+
+    const revalidated = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === '/api/lead-notifications' &&
+        response.status() === 200,
+    )
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await revalidated
+    await expect(
+      page
+        .getByRole('region', { name: 'Contact Us leads' })
+        .getByRole('status'),
+    ).toHaveCount(0)
+    expect(streamCount).toBe(1)
+
+    await pool.query(
+      `INSERT INTO lead_notifications
+      (id,recipient_id,assignee_id,assignee_email,assignment_event_id,company_name,lead_url,lead_created_at)
+      VALUES ('99802-leads',$1,'301-users','creative-studio@example.test','99802-events','Focus Live Arrival','https://app.nutshell.com/lead/99802',now())`,
+      [userId],
+    )
+    await expect(
+      page.getByRole('link', { name: /Focus Live Arrival/ }),
+    ).toBeVisible({ timeout: 25_000 })
+    await expect.poll(() => alerts).toEqual(['Focus Live Arrival'])
+    expect(streamCount).toBe(1)
+
+    await context.clearCookies()
+    const expired = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === '/api/lead-notifications' &&
+        response.status() === 401,
+    )
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await expired
+    await expect(
+      page.getByRole('region', { name: 'Contact Us leads' }),
+    ).toHaveCount(0)
+  } finally {
+    await pool.query(
+      "DELETE FROM lead_notifications WHERE id IN ('99801-leads','99802-leads')",
     )
     await pool.end()
   }

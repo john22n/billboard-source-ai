@@ -1,6 +1,6 @@
-import { createHash, timingSafeEqual } from 'node:crypto'
 import { serverConfig } from '@/lib/config'
 import { processLeadNotifications } from '@/lib/lead-notifications/processor'
+import { secretsMatch } from '@/lib/lead-notifications/store'
 
 export const runtime = 'nodejs'
 export const maxDuration = 30
@@ -14,11 +14,10 @@ export async function GET(request: Request) {
       { error: 'Retry unavailable' },
       { status: 503, headers },
     )
-  const digest = (value: string) => createHash('sha256').update(value).digest()
   if (
-    !timingSafeEqual(
-      digest(request.headers.get('authorization') ?? ''),
-      digest(`Bearer ${secret}`),
+    !secretsMatch(
+      request.headers.get('authorization') ?? '',
+      `Bearer ${secret}`,
     )
   )
     return Response.json({ error: 'Unauthorized' }, { status: 401, headers })

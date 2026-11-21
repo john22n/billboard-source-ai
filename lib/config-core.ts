@@ -165,9 +165,9 @@ export interface ServerConfig {
     apiKey: string | null
     requireApiKey: () => string
     webhookSecret: string | null
-    notificationsEnabled: boolean
   }
   leadNotifications: {
+    inboxEnabled: boolean
     enabled: boolean
     canStream: (email: string, localOptIn?: boolean) => boolean
     launchCutoff: Date | null
@@ -467,9 +467,6 @@ export function createServerConfig(env: EnvSource): ServerConfig {
   }
 
   const nutshell = {
-    get notificationsEnabled() {
-      return optionalString(env, 'NUTSHELL_NOTIFICATIONS_ENABLED') === 'true'
-    },
     get apiKey() {
       return optionalString(env, 'NUTSHELL_API_KEY')
     },
@@ -685,6 +682,9 @@ export function createServerConfig(env: EnvSource): ServerConfig {
     voicemail,
     nutshell,
     leadNotifications: {
+      get inboxEnabled() {
+        return optionalString(env, 'NUTSHELL_NOTIFICATIONS_ENABLED') === 'true'
+      },
       canStream(email, localOptIn = false) {
         const preview =
           optionalString(env, 'VERCEL_ENV') === 'preview' &&
@@ -696,7 +696,7 @@ export function createServerConfig(env: EnvSource): ServerConfig {
           env.NODE_ENV === 'development' &&
           env.PLAYWRIGHT_TEST === '1'
         return (
-          nutshell.notificationsEnabled &&
+          this.inboxEnabled &&
           (preview || fixture) &&
           this.recipientAllowlist.includes(email.trim().toLowerCase())
         )
@@ -727,7 +727,7 @@ export function createServerConfig(env: EnvSource): ServerConfig {
       },
       get enabled() {
         return (
-          nutshell.notificationsEnabled &&
+          this.inboxEnabled &&
           this.launchCutoff !== null &&
           nutshell.apiKey !== null &&
           /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(this.integrationEmail) &&

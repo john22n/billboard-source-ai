@@ -1,14 +1,25 @@
 import { and, asc, eq, inArray, isNull, lte, sql } from 'drizzle-orm'
 import { serverConfig, type ServerConfig } from '@/lib/config'
 import { leadNotifications, nutshellWebhookInbox, user } from '@/db/schema'
-import { hydrateLead } from './hydrate'
+import {
+  hydrateLead,
+  type HydrationExclusionReason,
+  type HydrationPendingReason,
+} from './hydrate'
 
 type Database = Awaited<ReturnType<typeof import('@/db').getDb>>
 type InboxEntry = typeof nutshellWebhookInbox.$inferSelect
 type Notification = typeof leadNotifications.$inferSelect
+type ProcessingReason =
+  | HydrationPendingReason
+  | HydrationExclusionReason
+  | 'recipient_not_allowlisted'
+  | 'app_identity_ambiguous'
+  | 'app_identity_unmatched'
+  | 'processing_unavailable'
 type ProcessingOutcome = {
   status: 'pending' | 'excluded' | 'processed'
-  reason: string | null
+  reason: ProcessingReason | null
 }
 type ProcessingContext = {
   config: ServerConfig
@@ -38,6 +49,7 @@ async function deliverSnapshot(
   db: Database,
   snapshot: Notification,
   allowlist: string[],
+  attempts: number,
 ): Promise<ProcessingOutcome> {
   if (snapshot.recipientId || snapshot.clearedAt)
     return { status: 'processed', reason: null }
@@ -48,13 +60,22 @@ async function deliverSnapshot(
     .from(user)
     .where(sql`lower(trim(${user.email})) = ${snapshot.assigneeEmail}`)
     .limit(2)
-  if (matches.length !== 1)
-    return {
-      status: 'pending',
-      reason: matches.length
-        ? 'app_identity_ambiguous'
-        : 'app_identity_unmatched',
-    }
+  if (matches.length !== 1) {
+    const reason = matches.length
+      ? 'app_identity_ambiguous'
+      : 'app_identity_unmatched'
+    // Actionable non-PII diagnostic for operators without exposing emails.
+    console.warn(
+      JSON.stringify({
+        event: 'lead_notification_identity_pending',
+        leadId: snapshot.id,
+        assignmentEventId: snapshot.assignmentEventId,
+        reason,
+        attempts,
+      }),
+    )
+    return { status: 'pending', reason }
+  }
   await db
     .update(leadNotifications)
     .set({ recipientId: matches[0].id, createdAt: new Date() })
@@ -70,9 +91,10 @@ async function deliverSnapshot(
 
 async function processClaimedLead(
   db: Database,
-  leadId: string,
+  claimed: InboxEntry,
   context: ProcessingContext,
 ): Promise<ProcessingOutcome> {
+  const { leadId, attempts } = claimed
   const { config, cutoff, deadline, fetcher } = context
   const settings = config.leadNotifications
   let [snapshot] = await db
@@ -111,7 +133,7 @@ async function processClaimedLead(
       .where(eq(leadNotifications.id, leadId))
   }
   if (!snapshot) return { status: 'pending', reason: null }
-  return deliverSnapshot(db, snapshot, settings.recipientAllowlist)
+  return deliverSnapshot(db, snapshot, settings.recipientAllowlist, attempts)
 }
 
 async function recordProcessingOutcome(
@@ -177,7 +199,7 @@ export async function processLeadNotifications(
     if (!claimed) continue
     let outcome: ProcessingOutcome
     try {
-      outcome = await processClaimedLead(db, claimed.leadId, {
+      outcome = await processClaimedLead(db, claimed, {
         config,
         cutoff,
         deadline,

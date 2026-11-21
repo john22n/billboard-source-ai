@@ -65,8 +65,8 @@ describe('server config', () => {
         .leadNotifications.enabled,
     ).toBe(false)
     expect(
-      createServerConfig({ NUTSHELL_NOTIFICATIONS_ENABLED: 'true' }).nutshell
-        .notificationsEnabled,
+      createServerConfig({ NUTSHELL_NOTIFICATIONS_ENABLED: 'true' })
+        .leadNotifications.inboxEnabled,
     ).toBe(true)
     const config = createServerConfig({
       NUTSHELL_NOTIFICATIONS_ENABLED: 'true',

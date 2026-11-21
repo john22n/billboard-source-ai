@@ -1,5 +1,31 @@
 import { z } from 'zod'
 import { isDeepStrictEqual } from 'node:util'
+import { isLeadId } from './store'
+
+export type HydrationExclusionReason = 'source_or_cutoff'
+export type HydrationPendingReason =
+  | 'invalid_lead_id'
+  | 'unsafe_lead_url'
+  | 'lead_join_missing'
+  | 'company_join_missing'
+  | 'display_name_missing'
+  | 'unsafe_history_cursor'
+  | 'history_id_conflict'
+  | 'history_no_progress'
+  | 'history_incomplete'
+  | 'creation_anchor_missing'
+  | 'history_cursor_loop'
+  | 'assignment_unsupported'
+  | 'assignment_join_missing'
+  | 'assignment_chain_invalid'
+  | 'assignment_ambiguous_or_missing'
+  | 'assignee_email_ambiguous'
+  | 'assignee_email_missing'
+  | 'rest_unavailable_or_invalid'
+
+function parseNumericPrefix(entityId: string) {
+  return BigInt(entityId.split('-')[0])
+}
 
 const id = z
   .string()
@@ -70,7 +96,8 @@ export type EligibleLead = {
 }
 export type HydrationResult =
   | EligibleLead
-  | { status: 'pending' | 'excluded'; reason: string }
+  | { status: 'pending'; reason: HydrationPendingReason }
+  | { status: 'excluded'; reason: HydrationExclusionReason }
 
 type HydrationOptions = {
   cutoff: Date
@@ -90,7 +117,11 @@ type HistoryBoundary = { id: bigint; time: number }
 type RestReader = (path: string) => Promise<unknown>
 
 // Expected evidence failures carry only a non-PII reason to the public boundary.
-class PendingEvidence extends Error {}
+class PendingEvidence extends Error {
+  constructor(readonly reason: HydrationPendingReason) {
+    super(reason)
+  }
+}
 
 function createRestReader(options: HydrationOptions): RestReader {
   return async (path) => {
@@ -132,7 +163,7 @@ function resolveLeadDisplay(raw: unknown, leadId: string, cutoff: Date) {
   const lead = matches[0]
   const leadCreatedAt = new Date(lead.createdTime.timestamp * 1000)
   if (!lead.links.sources.includes('35-sources') || leadCreatedAt < cutoff)
-    return { status: 'excluded' as const, reason: 'source_or_cutoff' }
+    return { status: 'excluded' as const, reason: 'source_or_cutoff' as const }
   const leadUrl = leadBrowserUrl(lead.htmlUrl)
   const firstAccount = lead.links.accounts[0]
   const accounts = data.accounts.filter(
@@ -193,7 +224,7 @@ function olderHistoryPath(
   const { params, values } = parseHistoryCursor(previous)
   if (values.entity_id !== leadId || (!values.max_id && !values.max_time))
     throw new PendingEvidence('unsafe_history_cursor')
-  if (values.max_id && BigInt(values.max_id.split('-')[0]) > oldest.id)
+  if (values.max_id && parseNumericPrefix(values.max_id) > oldest.id)
     throw new PendingEvidence('unsafe_history_cursor')
   if (values.max_time && Number(values.max_time) > oldest.time)
     throw new PendingEvidence('unsafe_history_cursor')
@@ -225,13 +256,10 @@ function mergeHistoryPage(
   if (!page.events.length || history.events.size === previousCount)
     throw new PendingEvidence('history_no_progress')
   const boundary = {
-    id: page.events.reduce(
-      (min, event) => {
-        const value = BigInt(event.id.split('-')[0])
-        return value < min ? value : min
-      },
-      BigInt(page.events[0].id.split('-')[0]),
-    ),
+    id: page.events.reduce((min, event) => {
+      const value = parseNumericPrefix(event.id)
+      return value < min ? value : min
+    }, parseNumericPrefix(page.events[0].id)),
     time: Math.min(...page.events.map((event) => event.createdTime)),
   }
   if (oldest && boundary.id >= oldest.id && boundary.time >= oldest.time)
@@ -386,8 +414,7 @@ export async function hydrateLead(
   leadId: string,
   options: HydrationOptions,
 ): Promise<HydrationResult> {
-  if (!/^[1-9]\d{0,19}-leads$/.test(leadId))
-    return { status: 'pending', reason: 'invalid_lead_id' }
+  if (!isLeadId(leadId)) return { status: 'pending', reason: 'invalid_lead_id' }
   const read = createRestReader(options)
   try {
     const display = resolveLeadDisplay(
@@ -408,7 +435,7 @@ export async function hydrateLead(
       status: 'pending',
       reason:
         error instanceof PendingEvidence
-          ? error.message
+          ? error.reason
           : 'rest_unavailable_or_invalid',
     }
   }

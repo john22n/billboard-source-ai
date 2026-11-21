@@ -5,10 +5,15 @@ const mocks = vi.hoisted(() => ({
   clear: vi.fn(),
 }))
 vi.mock('@/lib/dal', () => ({ getCurrentUser: mocks.currentUser }))
-vi.mock('@/lib/lead-notifications/store', () => ({
-  listNotifications: mocks.list,
-  clearNotification: mocks.clear,
-}))
+vi.mock('@/lib/lead-notifications/store', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/lib/lead-notifications/store')>()
+  return {
+    ...actual,
+    listNotifications: mocks.list,
+    clearNotification: mocks.clear,
+  }
+})
 import { GET } from './route'
 import { POST } from './[id]/clear/route'
 const request = () =>
