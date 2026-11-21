@@ -32,7 +32,7 @@
     "taskrouter:update-workflow:prod": "dotenv -e .env -- tsx scripts/update-workflow.ts",
     "taskrouter:setup-voicemail:prod": "dotenv -e .env -- tsx scripts/setup-voicemail-worker.ts",
     "typecheck": "tsc",
-    "prepare": "husky",
+    "prepare": "node -e \"if (process.env.VERCEL !== '1') import('husky').then(({ default: install }) => process.stdout.write(install()))\"",
     "fallow:audit": "fallow audit"
   },
   "dependencies": {

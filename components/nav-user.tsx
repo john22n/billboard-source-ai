@@ -30,6 +30,7 @@ import { PasskeyManager } from '@/components/passkey-manager'
 import { useTwilioContext } from '@/components/providers/TwilioProvider'
 import { clearPersistedIssueReport } from '@/lib/issue-report-storage'
 import { clearMockupSession } from '@/stores/mockupStore'
+import { announceNotificationSessionChange } from '@/lib/lead-notifications/cross-tab'
 
 export function NavUser({
   user,
@@ -48,6 +49,7 @@ export function NavUser({
   const { destroyDevice } = useTwilioContext()
 
   const handleLogout = () => {
+    announceNotificationSessionChange()
     startTransition(async () => {
       // Set worker status to offline before logout
       try {

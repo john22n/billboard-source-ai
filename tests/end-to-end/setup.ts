@@ -67,9 +67,14 @@ export default async function setup() {
       )
       await pool.query(`CREATE TABLE art_wizard_settings (
         id integer PRIMARY KEY DEFAULT 1,
-        system_prompt text NOT NULL,
-        image_settings jsonb
+        system_prompt text NOT NULL
       )`)
+      await pool.query(
+        readFileSync(
+          join(process.cwd(), 'drizzle/0012_preserve_neon_dev_data.sql'),
+          'utf8',
+        ),
+      )
       await pool.query(
         readFileSync(
           new URL(

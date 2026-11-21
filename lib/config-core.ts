@@ -164,6 +164,15 @@ export interface ServerConfig {
   nutshell: {
     apiKey: string | null
     requireApiKey: () => string
+    webhookSecret: string | null
+  }
+  leadNotifications: {
+    inboxEnabled: boolean
+    enabled: boolean
+    canStream: (email: string, localOptIn?: boolean) => boolean
+    launchCutoff: Date | null
+    integrationEmail: string
+    recipientAllowlist: string[]
   }
   passkey: {
     rpName: string
@@ -461,6 +470,9 @@ export function createServerConfig(env: EnvSource): ServerConfig {
     get apiKey() {
       return optionalString(env, 'NUTSHELL_API_KEY')
     },
+    get webhookSecret() {
+      return optionalString(env, 'NUTSHELL_WEBHOOK_SECRET')
+    },
     requireApiKey() {
       return requiredString(
         env,
@@ -669,6 +681,60 @@ export function createServerConfig(env: EnvSource): ServerConfig {
     email,
     voicemail,
     nutshell,
+    leadNotifications: {
+      get inboxEnabled() {
+        return optionalString(env, 'NUTSHELL_NOTIFICATIONS_ENABLED') === 'true'
+      },
+      canStream(email, localOptIn = false) {
+        const preview =
+          optionalString(env, 'VERCEL_ENV') === 'preview' &&
+          optionalString(env, 'LEAD_NOTIFICATIONS_SSE_ENABLED') === 'true'
+        const fixture =
+          localOptIn &&
+          !optionalString(env, 'VERCEL_ENV') &&
+          !optionalString(env, 'VERCEL') &&
+          env.NODE_ENV === 'development' &&
+          env.PLAYWRIGHT_TEST === '1'
+        return (
+          this.inboxEnabled &&
+          (preview || fixture) &&
+          this.recipientAllowlist.includes(email.trim().toLowerCase())
+        )
+      },
+      get launchCutoff() {
+        const value = optionalString(env, 'LEAD_NOTIFICATIONS_LAUNCH_CUTOFF')
+        if (
+          !value ||
+          !/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(value)
+        )
+          return null
+        const date = new Date(value)
+        return Number.isFinite(date.getTime()) ? date : null
+      },
+      get integrationEmail() {
+        return (
+          optionalString(env, 'NUTSHELL_INTEGRATION_EMAIL') ??
+          'sky@billboardsource.com'
+        )
+      },
+      get recipientAllowlist() {
+        return (
+          optionalString(env, 'LEAD_NOTIFICATIONS_RECIPIENT_ALLOWLIST') ?? ''
+        )
+          .split(',')
+          .map((email) => email.trim().toLowerCase())
+          .filter(Boolean)
+      },
+      get enabled() {
+        return (
+          this.inboxEnabled &&
+          this.launchCutoff !== null &&
+          nutshell.apiKey !== null &&
+          /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(this.integrationEmail) &&
+          (isProductionDeployment || this.recipientAllowlist.length > 0)
+        )
+      },
+    },
     passkey,
     app,
     vercel,

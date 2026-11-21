@@ -1,0 +1,273 @@
+'use client'
+
+import { useEffect, useRef, useState } from 'react'
+import { Bell, ExternalLink } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  createLeadInboxClient,
+  type InboxConnection,
+  type LeadInboxClient,
+  type LeadNotification,
+} from '@/lib/lead-notifications/inbox-client'
+import { useNotificationPermission } from '@/hooks/useNotificationPermission'
+
+const urgencyLevels = [
+  {
+    label: 'Under 1 hour',
+    colors: 'border-l-emerald-600 text-emerald-800 dark:text-emerald-300',
+  },
+  {
+    label: '1–4 hours',
+    colors: 'border-l-amber-500 text-amber-800 dark:text-amber-300',
+  },
+  {
+    label: 'Over 4 hours',
+    colors: 'border-l-red-600 text-red-800 dark:text-red-300',
+  },
+]
+
+function elapsedTime(age: number) {
+  const minutes = Math.floor(age / 60_000)
+  return minutes < 60
+    ? `${minutes}m`
+    : `${Math.floor(minutes / 60)}h ${minutes % 60}m`
+}
+
+function LeadNotificationItem({
+  item,
+  now,
+  clearing,
+  onClear,
+}: {
+  item: LeadNotification
+  now: number
+  clearing: string | null
+  onClear: (item: LeadNotification) => void
+}) {
+  const age = Math.max(0, now - Date.parse(item.leadCreatedAt))
+  const urgency = urgencyLevels[age < 3_600_000 ? 0 : age <= 14_400_000 ? 1 : 2]
+  return (
+    <li
+      className={`rounded-xl border border-l-4 bg-card/85 p-3 shadow-md backdrop-blur-md ${urgency.colors}`}
+    >
+      <div className="mb-1.5 flex items-center justify-between gap-2 text-xs font-medium">
+        <span className="flex items-center gap-1.5">
+          <Bell className="size-3.5" aria-hidden="true" />
+          {urgency.label}
+        </span>
+        <span className="tabular-nums">{elapsedTime(age)} elapsed</span>
+      </div>
+      <a
+        href={item.leadUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-start justify-between gap-3 rounded-sm text-sm font-semibold text-foreground underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-4"
+      >
+        <span className="break-words [overflow-wrap:anywhere]">
+          {item.companyName}
+        </span>
+        <ExternalLink
+          className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+          aria-hidden="true"
+        />
+        <span className="sr-only">Open in Nutshell (new tab)</span>
+      </a>
+      <div className="mt-1.5 flex items-center justify-between gap-3">
+        <p className="text-xs text-muted-foreground">
+          Created{' '}
+          <time dateTime={item.leadCreatedAt}>
+            {new Date(item.leadCreatedAt).toLocaleString(undefined, {
+              month: 'short',
+              day: 'numeric',
+              hour: 'numeric',
+              minute: '2-digit',
+            })}
+          </time>
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 px-2 text-xs"
+          aria-label={`Clear ${item.companyName}`}
+          disabled={clearing !== null}
+          onClick={() => onClear(item)}
+        >
+          {clearing === item.id ? 'Clearing…' : 'Clear'}
+        </Button>
+      </div>
+    </li>
+  )
+}
+
+function useLeadNotifications(userId: string) {
+  const [notifications, setNotifications] = useState<LeadNotification[]>([])
+  const [connection, setConnection] = useState<InboxConnection>('loading')
+  const [now, setNow] = useState(0)
+  const [clearing, setClearing] = useState<string | null>(null)
+  const [error, setError] = useState('')
+  const offsetRef = useRef(0)
+  const clientRef = useRef<LeadInboxClient | null>(null)
+
+  useEffect(() => {
+    const localOptIn =
+      process.env.NODE_ENV === 'development' &&
+      new URLSearchParams(window.location.search).get('leadSsePrototype') ===
+        'true'
+    const client = createLeadInboxClient({
+      userId,
+      localOptIn,
+      onStateChange(next) {
+        offsetRef.current = next.serverOffset
+        setNow(Date.now() + next.serverOffset)
+        setNotifications(next.notifications)
+        setConnection(next.connection)
+      },
+    })
+    clientRef.current = client
+    const clock = setInterval(
+      () => setNow(Date.now() + offsetRef.current),
+      1_000,
+    )
+    return () => {
+      clearInterval(clock)
+      client.dispose()
+      if (clientRef.current === client) clientRef.current = null
+    }
+  }, [userId])
+
+  async function clear(item: LeadNotification) {
+    if (!clientRef.current) return
+    setClearing(item.id)
+    setError('')
+    try {
+      const ok = await clientRef.current.clear(item.id)
+      if (!ok) {
+        setError(
+          'Could not clear this notification. It is still in your inbox. Please try again.',
+        )
+      }
+    } finally {
+      setClearing(null)
+    }
+  }
+
+  return {
+    notifications,
+    connection,
+    now,
+    clearing,
+    error,
+    clear,
+  }
+}
+
+export function LeadNotifications({ userId }: { userId: string }) {
+  const { notifications, connection, now, clearing, error, clear } =
+    useLeadNotifications(userId)
+  const { shouldPrompt, requestPermission, dismissPrompt } =
+    useNotificationPermission()
+  if (connection === 'signed-out') return null
+
+  return (
+    <section
+      aria-label="Contact Us leads"
+      className="pointer-events-none fixed right-3 top-16 z-40 w-[calc(100%-1.5rem)] max-w-xs sm:right-4"
+    >
+      <div className="pointer-events-auto max-h-[calc(100dvh-9rem)] space-y-2 overflow-y-auto rounded-2xl">
+        <InboxStatus connection={connection} />
+        {error && (
+          <p
+            role="alert"
+            className="rounded-xl border bg-card p-3 text-sm text-destructive shadow-lg"
+          >
+            {error}
+          </p>
+        )}
+        <LeadNotificationList
+          notifications={notifications}
+          now={now}
+          clearing={clearing}
+          onClear={clear}
+        />
+      </div>
+      <Dialog
+        open={shouldPrompt && connection === 'connected'}
+        onOpenChange={(open) => {
+          if (!open) dismissPrompt()
+        }}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Enable lead notifications?</DialogTitle>
+            <DialogDescription>
+              Get desktop alerts for new Contact Us leads assigned to you while
+              the app is open. Your browser will ask for permission next. In-app
+              notifications work either way.
+            </DialogDescription>
+          </DialogHeader>
+          <p className="text-xs text-muted-foreground">
+            We’ll only ask once in this browser. You can change notification
+            permission later in your browser’s site settings.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={dismissPrompt}>
+              Not now
+            </Button>
+            <Button onClick={() => void requestPermission()}>
+              Enable notifications
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </section>
+  )
+}
+
+function InboxStatus({ connection }: { connection: InboxConnection }) {
+  if (connection === 'disconnected')
+    return (
+      <div
+        role="status"
+        className="mb-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100"
+      >
+        Updates unavailable. This list may be out of date. We’ll retry
+        automatically.
+      </div>
+    )
+  return null
+}
+
+function LeadNotificationList({
+  notifications,
+  now,
+  clearing,
+  onClear,
+}: {
+  notifications: LeadNotification[]
+  now: number
+  clearing: string | null
+  onClear: (item: LeadNotification) => void
+}) {
+  if (notifications.length === 0) return null
+  return (
+    <ul className="space-y-2" aria-label="Active lead notifications">
+      {notifications.map((item) => (
+        <LeadNotificationItem
+          key={item.id}
+          item={item}
+          now={now}
+          clearing={clearing}
+          onClear={onClear}
+        />
+      ))}
+    </ul>
+  )
+}

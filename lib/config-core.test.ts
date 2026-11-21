@@ -7,6 +7,78 @@ import {
 } from './config-core'
 
 describe('server config', () => {
+  it('limits SSE to explicitly enabled preview recipients or isolated local fixtures', () => {
+    const env = {
+      VERCEL_ENV: 'preview',
+      NUTSHELL_NOTIFICATIONS_ENABLED: 'true',
+      LEAD_NOTIFICATIONS_SSE_ENABLED: 'true',
+      LEAD_NOTIFICATIONS_RECIPIENT_ALLOWLIST: ' Sky@BillboardSource.com ',
+    }
+    const eligible = (
+      overrides = {},
+      email = 'sky@billboardsource.com',
+      local = false,
+    ) =>
+      createServerConfig({ ...env, ...overrides }).leadNotifications.canStream(
+        email,
+        local,
+      )
+    expect(eligible()).toBe(true)
+    expect(eligible({}, 'other@example.test')).toBe(false)
+    for (const overrides of [
+      {
+        VERCEL_ENV: 'production',
+        NODE_ENV: 'development',
+        PLAYWRIGHT_TEST: '1',
+      },
+      { VERCEL_ENV: undefined },
+      { LEAD_NOTIFICATIONS_SSE_ENABLED: undefined },
+      { LEAD_NOTIFICATIONS_RECIPIENT_ALLOWLIST: '' },
+      { NUTSHELL_NOTIFICATIONS_ENABLED: 'false' },
+    ])
+      expect(eligible(overrides)).toBe(false)
+    const fixture = {
+      VERCEL_ENV: '',
+      VERCEL: '',
+      NODE_ENV: 'development',
+      PLAYWRIGHT_TEST: '1',
+      LEAD_NOTIFICATIONS_SSE_ENABLED: '',
+    }
+    expect(eligible(fixture)).toBe(false)
+    expect(eligible(fixture, 'sky@billboardsource.com', true)).toBe(true)
+    expect(
+      eligible(
+        { ...fixture, VERCEL_ENV: 'production' },
+        'sky@billboardsource.com',
+        true,
+      ),
+    ).toBe(false)
+    expect(
+      eligible({ ...fixture, VERCEL: '1' }, 'sky@billboardsource.com', true),
+    ).toBe(false)
+  })
+
+  it('keeps notification processing off without explicit enablement and an absolute cutoff', () => {
+    expect(createServerConfig({}).leadNotifications.enabled).toBe(false)
+    expect(
+      createServerConfig({ NUTSHELL_NOTIFICATIONS_ENABLED: 'true' })
+        .leadNotifications.enabled,
+    ).toBe(false)
+    expect(
+      createServerConfig({ NUTSHELL_NOTIFICATIONS_ENABLED: 'true' })
+        .leadNotifications.inboxEnabled,
+    ).toBe(true)
+    const config = createServerConfig({
+      NUTSHELL_NOTIFICATIONS_ENABLED: 'true',
+      LEAD_NOTIFICATIONS_LAUNCH_CUTOFF: '2026-11-09T00:00:00Z',
+      NUTSHELL_API_KEY: 'test',
+      LEAD_NOTIFICATIONS_RECIPIENT_ALLOWLIST: ' Rep@Example.test ',
+    }).leadNotifications
+    expect(config.enabled).toBe(true)
+    expect(config.integrationEmail).toBe('sky@billboardsource.com')
+    expect(config.recipientAllowlist).toEqual(['rep@example.test'])
+  })
+
   const cloudSqlEnv = {
     VERCEL: '1',
     VERCEL_ENV: 'preview',
