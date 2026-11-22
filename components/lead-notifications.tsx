@@ -172,9 +172,16 @@ function useLeadNotifications(userId: string) {
 export function LeadNotifications({ userId }: { userId: string }) {
   const { notifications, connection, now, clearing, error, clear } =
     useLeadNotifications(userId)
-  const { shouldPrompt, requestPermission, dismissPrompt } =
-    useNotificationPermission()
+  const {
+    shouldPrompt,
+    showDeniedGuidance,
+    requestPermission,
+    dismissPrompt,
+    dismissDeniedGuidance,
+  } = useNotificationPermission(notifications.length > 0)
   if (connection === 'signed-out') return null
+
+  const connected = connection === 'connected'
 
   return (
     <section
@@ -182,67 +189,131 @@ export function LeadNotifications({ userId }: { userId: string }) {
       className="pointer-events-none fixed right-3 top-16 z-40 w-[calc(100%-1.5rem)] max-w-xs sm:right-4"
     >
       <div className="pointer-events-auto max-h-[calc(100dvh-9rem)] space-y-2 overflow-y-auto rounded-2xl">
-        <InboxStatus connection={connection} />
-        {error && (
-          <p
-            role="alert"
-            className="rounded-xl border bg-card p-3 text-sm text-destructive shadow-lg"
-          >
-            {error}
-          </p>
-        )}
+        <InboxStatus connection={connection} error={error} />
         <LeadNotificationList
           notifications={notifications}
           now={now}
           clearing={clearing}
           onClear={clear}
         />
+        <DeniedPermissionGuidance
+          visible={showDeniedGuidance && connected}
+          onDismiss={dismissDeniedGuidance}
+        />
       </div>
-      <Dialog
-        open={shouldPrompt && connection === 'connected'}
-        onOpenChange={(open) => {
-          if (!open) dismissPrompt()
-        }}
-      >
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Enable lead notifications?</DialogTitle>
-            <DialogDescription>
-              Get desktop alerts for new Contact Us leads assigned to you while
-              the app is open. Your browser will ask for permission next. In-app
-              notifications work either way.
-            </DialogDescription>
-          </DialogHeader>
-          <p className="text-xs text-muted-foreground">
-            We’ll only ask once in this browser. You can change notification
-            permission later in your browser’s site settings.
-          </p>
-          <DialogFooter>
-            <Button variant="outline" onClick={dismissPrompt}>
-              Not now
-            </Button>
-            <Button onClick={() => void requestPermission()}>
-              Enable notifications
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <PermissionPromptDialog
+        open={shouldPrompt && connected}
+        onDismiss={dismissPrompt}
+        onEnable={() => void requestPermission()}
+      />
     </section>
   )
 }
 
-function InboxStatus({ connection }: { connection: InboxConnection }) {
-  if (connection === 'disconnected')
-    return (
-      <div
-        role="status"
-        className="mb-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100"
-      >
-        Updates unavailable. This list may be out of date. We’ll retry
-        automatically.
+function PermissionPromptDialog({
+  open,
+  onDismiss,
+  onEnable,
+}: {
+  open: boolean
+  onDismiss: () => void
+  onEnable: () => void
+}) {
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onDismiss()
+      }}
+    >
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Enable lead notifications?</DialogTitle>
+          <DialogDescription>
+            Get desktop alerts for new Contact Us leads assigned to you while
+            the app is open. Your browser will ask for permission next. In-app
+            notifications work either way.
+          </DialogDescription>
+        </DialogHeader>
+        <p className="text-xs text-muted-foreground">
+          We’ll only ask once in this browser. You can change notification
+          permission later in your browser’s site settings.
+        </p>
+        <DialogFooter>
+          <Button variant="outline" onClick={onDismiss}>
+            Not now
+          </Button>
+          <Button onClick={onEnable}>Enable notifications</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function DeniedPermissionGuidance({
+  visible,
+  onDismiss,
+}: {
+  visible: boolean
+  onDismiss: () => void
+}) {
+  if (!visible) return null
+  return (
+    <aside
+      aria-label="Browser notification settings"
+      className="rounded-xl border bg-card/90 p-3 text-xs text-card-foreground shadow-md backdrop-blur-md"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <p className="font-semibold text-foreground">
+          Desktop notifications are blocked
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 shrink-0 px-2 text-xs"
+          aria-label="Dismiss notification settings guidance"
+          onClick={onDismiss}
+        >
+          Dismiss
+        </Button>
       </div>
-    )
-  return null
+      <p className="mt-1.5 text-muted-foreground">
+        To turn them on in Chrome, click the tune or lock icon next to the
+        address bar, open Site settings, set Notifications to Allow, and reload.
+        In-app notifications still appear here.
+      </p>
+    </aside>
+  )
+}
+
+function InboxStatus({
+  connection,
+  error,
+}: {
+  connection: InboxConnection
+  error: string
+}) {
+  return (
+    <>
+      {connection === 'disconnected' && (
+        <div
+          role="status"
+          className="mb-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100"
+        >
+          Updates unavailable. This list may be out of date. We’ll retry
+          automatically.
+        </div>
+      )}
+      {error && (
+        <p
+          role="alert"
+          className="rounded-xl border bg-card p-3 text-sm text-destructive shadow-lg"
+        >
+          {error}
+        </p>
+      )}
+    </>
+  )
 }
 
 function LeadNotificationList({

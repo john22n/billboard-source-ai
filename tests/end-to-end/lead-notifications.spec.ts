@@ -744,10 +744,32 @@ for (const choice of ['Not now', 'denied', 'default'] as const) {
       .click()
     await expect(prompt).toHaveCount(0)
     await expect(second.getByRole('dialog')).toHaveCount(0)
+    const guidance = page.getByRole('complementary', {
+      name: 'Browser notification settings',
+    })
+    if (choice === 'denied') {
+      await expect(guidance).toBeVisible()
+      await expect(guidance).toContainText('Site settings')
+      await expect(guidance).toContainText('Notifications to Allow')
+      await guidance
+        .getByRole('button', {
+          name: 'Dismiss notification settings guidance',
+        })
+        .click()
+      await expect(guidance).toHaveCount(0)
+      await expect(
+        second.getByRole('complementary', {
+          name: 'Browser notification settings',
+        }),
+      ).toHaveCount(0)
+    } else {
+      await expect(guidance).toHaveCount(0)
+    }
     await page.reload()
     await expect(
       page.getByRole('link', { name: /In-app lead remains available/ }),
     ).toBeVisible()
+    await expect(guidance).toHaveCount(0)
     await page.evaluate(() => window.dispatchEvent(new Event('focus')))
     await expect(prompt).toHaveCount(0)
     expect(requests).toBe(choice === 'Not now' ? 0 : 1)
@@ -938,6 +960,12 @@ test('urgency boundaries tick without refresh and the inbox handles denied permi
   await expect(panel.getByText('Desktop alerts', { exact: true })).toHaveCount(
     0,
   )
+  const guidance = panel.getByRole('complementary', {
+    name: 'Browser notification settings',
+  })
+  await expect(guidance).toBeVisible()
+  await expect(guidance).toContainText('Desktop notifications are blocked')
+  await expect(guidance).toContainText('Site settings')
   await page.screenshot({
     path: testInfo.outputPath('active-denied.png'),
     animations: 'disabled',
@@ -951,6 +979,7 @@ test('urgency boundaries tick without refresh and the inbox handles denied permi
   ).toBeVisible()
   await page.setViewportSize({ width: 375, height: 900 })
   await expect(panel).toBeVisible()
+  await expect(guidance).toBeVisible()
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= window.innerWidth,
@@ -963,6 +992,7 @@ test('urgency boundaries tick without refresh and the inbox handles denied permi
   disconnected = true
   await page.evaluate(() => window.dispatchEvent(new Event('offline')))
   await expect(panel.getByRole('status')).toContainText('Updates unavailable')
+  await expect(guidance).toHaveCount(0)
   await page.screenshot({
     path: testInfo.outputPath('disconnected.png'),
     animations: 'disabled',
@@ -972,11 +1002,32 @@ test('urgency boundaries tick without refresh and the inbox handles denied permi
   await page.evaluate(() => window.dispatchEvent(new Event('online')))
   await expect(panel.getByRole('listitem')).toHaveCount(0)
   await expect(panel.getByRole('status')).toHaveCount(0)
+  await expect(guidance).toHaveCount(0)
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.screenshot({
     path: testInfo.outputPath('empty.png'),
     animations: 'disabled',
   })
+  // When an active lead arrives while blocked, guidance reappears and clears once granted.
+  notifications = [
+    {
+      id: '5',
+      companyName: 'Permission recovery lead',
+      leadUrl: 'https://app.nutshell.com/lead/5',
+      leadCreatedAt: now.toISOString(),
+      createdAt: now.toISOString(),
+    },
+  ]
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(guidance).toBeVisible()
+  await page.evaluate(() => {
+    Object.defineProperty(Notification, 'permission', {
+      value: 'granted',
+      configurable: true,
+    })
+    window.dispatchEvent(new Event('focus'))
+  })
+  await expect(guidance).toHaveCount(0)
 })
 
 test('real processor delivers only to the initial recipient and Clear survives replay and sign-out', async ({
