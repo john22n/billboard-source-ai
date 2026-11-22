@@ -48,12 +48,12 @@ async function claimInboxEntry(
 async function deliverSnapshot(
   db: Database,
   snapshot: Notification,
-  allowlist: string[],
+  settings: ServerConfig['leadNotifications'],
   attempts: number,
 ): Promise<ProcessingOutcome> {
   if (snapshot.recipientId || snapshot.clearedAt)
     return { status: 'processed', reason: null }
-  if (allowlist.length > 0 && !allowlist.includes(snapshot.assigneeEmail))
+  if (!settings.allowsRecipient(snapshot.assigneeEmail))
     return { status: 'pending', reason: 'recipient_not_allowlisted' }
   const matches = await db
     .select({ id: user.id })
@@ -133,7 +133,7 @@ async function processClaimedLead(
       .where(eq(leadNotifications.id, leadId))
   }
   if (!snapshot) return { status: 'pending', reason: null }
-  return deliverSnapshot(db, snapshot, settings.recipientAllowlist, attempts)
+  return deliverSnapshot(db, snapshot, settings, attempts)
 }
 
 async function recordProcessingOutcome(

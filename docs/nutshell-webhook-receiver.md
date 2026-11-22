@@ -27,7 +27,7 @@ The local implementation adds authoritative REST hydration, a durable processor,
 | `LEAD_NOTIFICATIONS_LAUNCH_CUTOFF`       | Absolute ISO timestamp with timezone; required for processing                                                                             |
 | `NUTSHELL_API_KEY`                       | Server-only REST credential                                                                                                               |
 | `NUTSHELL_INTEGRATION_EMAIL`             | Optional integration identity; defaults to `sky@billboardsource.com`                                                                      |
-| `LEAD_NOTIFICATIONS_RECIPIENT_ALLOWLIST` | Comma-separated recipient emails; required outside production, honored in production if set                                               |
+| `LEAD_NOTIFICATIONS_RECIPIENT_ALLOWLIST` | Comma-separated recipient emails (or `*` for all recipients); required outside production, honored in production if set                   |
 | `LEAD_NOTIFICATIONS_SSE_ENABLED=true`    | Opt into SSE only in `VERCEL_ENV=preview`, with notifications enabled and an explicitly allowlisted recipient; absent/false keeps polling |
 | `CRON_SECRET`                            | Bearer credential for the retry endpoint                                                                                                  |
 

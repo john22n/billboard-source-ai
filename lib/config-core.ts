@@ -169,6 +169,7 @@ export interface ServerConfig {
   leadNotifications: {
     inboxEnabled: boolean
     enabled: boolean
+    allowsRecipient: (email: string) => boolean
     canStream: (email: string, localOptIn?: boolean) => boolean
     launchCutoff: Date | null
     integrationEmail: string
@@ -685,6 +686,14 @@ export function createServerConfig(env: EnvSource): ServerConfig {
       get inboxEnabled() {
         return optionalString(env, 'NUTSHELL_NOTIFICATIONS_ENABLED') === 'true'
       },
+      allowsRecipient(email) {
+        const normalized = email.trim().toLowerCase()
+        if (!normalized) return false
+        const allowlist = this.recipientAllowlist
+        if (allowlist.includes('*')) return true
+        if (allowlist.length === 0) return isProductionDeployment
+        return allowlist.includes(normalized)
+      },
       canStream(email, localOptIn = false) {
         const preview =
           optionalString(env, 'VERCEL_ENV') === 'preview' &&
@@ -698,7 +707,7 @@ export function createServerConfig(env: EnvSource): ServerConfig {
         return (
           this.inboxEnabled &&
           (preview || fixture) &&
-          this.recipientAllowlist.includes(email.trim().toLowerCase())
+          this.allowsRecipient(email)
         )
       },
       get launchCutoff() {

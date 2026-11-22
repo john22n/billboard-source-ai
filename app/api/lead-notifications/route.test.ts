@@ -93,6 +93,12 @@ it('advertises SSE only to an allowed preview session, regardless of URL opt-in'
   expect(await (await GET(request())).json()).toMatchObject({
     transport: 'polling',
   })
+  vi.stubEnv('LEAD_NOTIFICATIONS_RECIPIENT_ALLOWLIST', '*')
+  expect(
+    await (
+      await GET(new Request('http://localhost/api/lead-notifications'))
+    ).json(),
+  ).toMatchObject({ transport: 'sse' })
 })
 it('scopes clear to the session and returns 404 for another or missing notice', async () => {
   mocks.clear.mockResolvedValue(false)
