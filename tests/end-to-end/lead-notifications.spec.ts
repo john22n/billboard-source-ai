@@ -1,0 +1,1388 @@
+import { SignJWT } from 'jose'
+import { expect, test, type BrowserContext } from 'playwright/test'
+import { Pool } from 'pg'
+import { createServerConfig } from '../../lib/config-core'
+import { baseUrl, databaseUrl, jwtSecret, userId } from './environment'
+
+test('scoped processing leaves older unrelated pending leads untouched', async () => {
+  process.env.DATABASE_URL = databaseUrl
+  process.env.DATABASE_DRIVER = 'postgres'
+  const { processLeadNotifications } =
+    await import('../../lib/lead-notifications/processor')
+  const pool = new Pool({ connectionString: databaseUrl })
+  const config = createServerConfig({
+    NUTSHELL_NOTIFICATIONS_ENABLED: 'true',
+    LEAD_NOTIFICATIONS_LAUNCH_CUTOFF: '2026-01-01T00:00:00Z',
+    LEAD_NOTIFICATIONS_RECIPIENT_ALLOWLIST: 'creative-studio@example.test',
+    NUTSHELL_API_KEY: 'synthetic-local-test-key',
+  })
+  const leadIds = ['78001-leads', '78002-leads']
+  const allIds = ['78000-leads', ...leadIds]
+  try {
+    for (const leadId of allIds) {
+      await pool.query(
+        `INSERT INTO nutshell_webhook_inbox(event_id, lead_id, next_attempt_at)
+         VALUES ($1, $2, now() - interval '1 day')`,
+        [leadId.replace('-leads', '-events'), leadId],
+      )
+      await pool.query(
+        `INSERT INTO lead_notifications
+         (id, assignee_id, assignee_email, assignment_event_id, company_name,
+          lead_url, lead_created_at, recipient_id)
+         VALUES ($1, '301-users', 'creative-studio@example.test', '301-events',
+                 'Scoped test company', 'https://app.nutshell.com/lead/78001', now(), $2)`,
+        [leadId, userId],
+      )
+    }
+    const options = {
+      config,
+      leadIds,
+      fetcher: async () => {
+        throw new Error('Frozen snapshots must not require CRM reads')
+      },
+    }
+    expect(await processLeadNotifications({ ...options, leadIds: [] })).toEqual(
+      {
+        enabled: true,
+        processed: 0,
+      },
+    )
+    expect(await processLeadNotifications(options)).toEqual({
+      enabled: true,
+      processed: 2,
+    })
+    expect(
+      (
+        await pool.query(
+          `SELECT lead_id, status, attempts FROM nutshell_webhook_inbox
+           WHERE lead_id = ANY($1) ORDER BY lead_id`,
+          [allIds],
+        )
+      ).rows,
+    ).toEqual([
+      { lead_id: '78000-leads', status: 'pending', attempts: 0 },
+      { lead_id: '78001-leads', status: 'processed', attempts: 1 },
+      { lead_id: '78002-leads', status: 'processed', attempts: 1 },
+    ])
+    expect(await processLeadNotifications(options)).toEqual({
+      enabled: true,
+      processed: 0,
+    })
+    const clearedAt = new Date('2026-11-18T00:00:00Z')
+    await pool.query(
+      'UPDATE lead_notifications SET cleared_at = $1 WHERE id = $2',
+      [clearedAt, leadIds[0]],
+    )
+    await pool.query(
+      `UPDATE nutshell_webhook_inbox SET status = 'pending', next_attempt_at = now() - interval '1 second'
+       WHERE lead_id = $1`,
+      [leadIds[0]],
+    )
+    expect(await processLeadNotifications(options)).toEqual({
+      enabled: true,
+      processed: 1,
+    })
+    expect(
+      (
+        await pool.query(
+          'SELECT cleared_at FROM lead_notifications WHERE id = $1',
+          [leadIds[0]],
+        )
+      ).rows[0].cleared_at,
+    ).toEqual(clearedAt)
+    expect(
+      (
+        await pool.query(
+          'SELECT status, attempts FROM nutshell_webhook_inbox WHERE lead_id = $1',
+          [allIds[0]],
+        )
+      ).rows[0],
+    ).toEqual({ status: 'pending', attempts: 0 })
+    expect(
+      await processLeadNotifications({ config, fetcher: options.fetcher }),
+    ).toEqual({ enabled: true, processed: 1 })
+    expect(
+      (
+        await pool.query(
+          'SELECT status, attempts FROM nutshell_webhook_inbox WHERE lead_id = $1',
+          [allIds[0]],
+        )
+      ).rows[0],
+    ).toEqual({ status: 'processed', attempts: 1 })
+  } finally {
+    await pool.query('DELETE FROM lead_notifications WHERE id = ANY($1)', [
+      allIds,
+    ])
+    await pool.query(
+      'DELETE FROM nutshell_webhook_inbox WHERE lead_id = ANY($1)',
+      [allIds],
+    )
+    await pool.end()
+  }
+})
+
+async function signIn(context: BrowserContext, accountId = userId) {
+  const token = await new SignJWT({ userId: accountId })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime('1h')
+    .sign(new TextEncoder().encode(jwtSecret))
+  await context.addCookies([{ name: 'auth_token', value: token, url: baseUrl }])
+}
+
+test('a polling tab Clear cancels a streaming peer banner queued behind its lock', async ({
+  page,
+  context,
+}) => {
+  test.setTimeout(90_000)
+  await signIn(context)
+  await context.addInitScript(() => {
+    Object.defineProperty(window, 'Notification', {
+      value: class {
+        static permission = 'granted'
+        constructor(title: string) {
+          localStorage.setItem('mixed-alert', title)
+        }
+        close() {}
+      },
+    })
+  })
+  const pool = new Pool({ connectionString: databaseUrl })
+  const peer = await context.newPage()
+  const lock = `lead-alerts:${userId}`
+  try {
+    await page.goto('/issues')
+    await Promise.all([
+      peer.waitForResponse(
+        (r) => new URL(r.url()).pathname === '/api/lead-notifications/stream',
+      ),
+      peer.goto('/issues?leadSsePrototype=true'),
+    ])
+    await page.evaluate((name) => {
+      void navigator.locks.request(
+        name,
+        () =>
+          new Promise<void>((resolve) => {
+            window.addEventListener('release-mixed-lock', () => resolve(), {
+              once: true,
+            })
+          }),
+      )
+    }, lock)
+    await expect
+      .poll(() =>
+        page.evaluate(
+          async (name) =>
+            (await navigator.locks.query()).held?.some((l) => l.name === name),
+          lock,
+        ),
+      )
+      .toBe(true)
+    await pool.query(
+      `INSERT INTO lead_notifications
+      (id,recipient_id,assignee_id,assignee_email,assignment_event_id,company_name,lead_url,lead_created_at)
+      VALUES ('99620-leads',$1,'301-users','creative-studio@example.test','99620-events','Mixed transport Clear','https://app.nutshell.com/lead/99620',now())`,
+      [userId],
+    )
+    await expect(
+      peer.getByRole('link', { name: /Mixed transport Clear/ }),
+    ).toBeVisible({ timeout: 20_000 })
+    await expect
+      .poll(() =>
+        page.evaluate(
+          async (name) =>
+            (await navigator.locks.query()).pending?.some(
+              (l) => l.name === name,
+            ),
+          lock,
+        ),
+      )
+      .toBe(true)
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await expect(
+      page.getByRole('button', {
+        name: 'Clear Mixed transport Clear',
+        exact: true,
+      }),
+    ).toBeVisible()
+    await page
+      .getByRole('button', { name: 'Clear Mixed transport Clear', exact: true })
+      .click()
+    await expect(
+      page.getByRole('link', { name: /Mixed transport Clear/ }),
+    ).toHaveCount(0)
+    await expect(
+      peer.getByRole('link', { name: /Mixed transport Clear/ }),
+    ).toHaveCount(0, { timeout: 1500 })
+    await page.evaluate(async (name) => {
+      window.dispatchEvent(new Event('release-mixed-lock'))
+      await navigator.locks.request(name, () => {})
+    }, lock)
+    expect(
+      await page.evaluate(() => localStorage.getItem('mixed-alert')),
+    ).toBeNull()
+  } finally {
+    await page.close()
+    await peer.close()
+    await pool.query("DELETE FROM lead_notifications WHERE id='99620-leads'")
+    await pool.end()
+  }
+})
+
+test('signing out in another tab immediately removes an active SSE inbox without disconnecting', async ({
+  page,
+  context,
+}) => {
+  await signIn(context)
+  const peer = await context.newPage()
+  await page.goto('/dashboard')
+  await Promise.all([
+    peer.waitForResponse(
+      (r) => new URL(r.url()).pathname === '/api/lead-notifications/stream',
+    ),
+    peer.goto('/issues?leadSsePrototype=true'),
+  ])
+  await expect(peer.getByRole('region', { name: 'Web leads' })).toHaveCount(1)
+  await page
+    .getByRole('button', { name: 'Toggle Sidebar', exact: true })
+    .first()
+    .click()
+  await page
+    .getByRole('button', { name: /creative-studio@example.test/ })
+    .click()
+  await page.getByRole('menuitem').filter({ hasText: 'Log out' }).click()
+  await expect(page).toHaveURL(/\/login/)
+  await expect(peer.getByRole('region', { name: 'Web leads' })).toHaveCount(0)
+  await peer.close()
+})
+
+test('SSE enforces session eligibility and returns to silent polling after withdrawal', async ({
+  page,
+  context,
+}) => {
+  test.setTimeout(90_000)
+  const streamUrl = '/api/lead-notifications/stream?leadSsePrototype=true'
+  expect((await context.request.get(streamUrl)).status()).toBe(401)
+  await signIn(context, 'e2e-studio-admin')
+  expect((await context.request.get(streamUrl)).status()).toBe(404)
+  await signIn(context)
+  expect(
+    (await context.request.get('/api/lead-notifications/stream')).status(),
+  ).toBe(404)
+  expect(
+    await (await context.request.get('/api/lead-notifications')).json(),
+  ).toMatchObject({ transport: 'polling' })
+  expect(
+    await (
+      await context.request.get('/api/lead-notifications?leadSsePrototype=true')
+    ).json(),
+  ).toMatchObject({ transport: 'sse' })
+  const alerts: string[] = []
+  await context.exposeBinding('recordAlert', (_source, title: string) =>
+    alerts.push(title),
+  )
+  await context.addInitScript(() => {
+    Object.defineProperty(window, 'Notification', {
+      configurable: true,
+      value: class {
+        static permission = 'granted'
+        constructor(title: string) {
+          const recorder = Reflect.get(window, 'recordAlert')
+          recorder(title)
+        }
+        close() {}
+      },
+    })
+  })
+  let streams = 0
+  let polls = 0
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname === '/api/lead-notifications/stream')
+      streams++
+    if (new URL(request.url()).pathname === '/api/lead-notifications') polls++
+  })
+  const pool = new Pool({ connectionString: databaseUrl })
+  try {
+    const [opened] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === '/api/lead-notifications/stream',
+      ),
+      page.goto('/issues?leadSsePrototype=true'),
+    ])
+    expect(opened.status()).toBe(200)
+    expect(streams).toBe(1)
+    await pool.query('UPDATE "User" SET email=$1 WHERE id=$2', [
+      'withdrawn@example.test',
+      userId,
+    ])
+    await pool.query(
+      `INSERT INTO lead_notifications
+      (id,recipient_id,assignee_id,assignee_email,assignment_event_id,company_name,lead_url,lead_created_at)
+      VALUES ('99610-leads',$1,'301-users','creative-studio@example.test','99610-events','SSE withdrawn backlog','https://app.nutshell.com/lead/99610',now())`,
+      [userId],
+    )
+    await expect(
+      page.getByRole('link', { name: /SSE withdrawn backlog/ }),
+    ).toBeVisible({ timeout: 25_000 })
+    const afterRecovery = polls
+    await expect
+      .poll(() => polls, { timeout: 20_000 })
+      .toBeGreaterThan(afterRecovery)
+    expect(streams).toBe(1)
+    expect(alerts).toEqual([])
+    await expect(
+      page.getByRole('status').filter({ hasText: 'Updates unavailable' }),
+    ).toHaveCount(0)
+    expect((await context.request.get(streamUrl)).status()).toBe(404)
+  } finally {
+    await page.close()
+    await pool.query('UPDATE "User" SET email=$1 WHERE id=$2', [
+      'creative-studio@example.test',
+      userId,
+    ])
+    await pool.query("DELETE FROM lead_notifications WHERE id='99610-leads'")
+    await pool.end()
+  }
+})
+
+test('local SSE keeps recovery silent and synchronizes Clear across real tabs', async ({
+  page,
+  context,
+}) => {
+  test.setTimeout(90_000)
+  const pool = new Pool({ connectionString: databaseUrl })
+  const alerts: string[] = []
+  await context.exposeBinding('recordSseAlert', (_source, title: string) =>
+    alerts.push(title),
+  )
+  await context.addInitScript(() => {
+    const callbacks = window as unknown as {
+      recordSseAlert: (title: string) => void
+    }
+    Object.defineProperty(window, 'Notification', {
+      configurable: true,
+      value: class {
+        static permission = 'granted'
+        constructor(title: string) {
+          callbacks.recordSseAlert(title)
+        }
+        close() {}
+      },
+    })
+  })
+  const seed = (id: number, title: string) =>
+    pool.query(
+      `INSERT INTO lead_notifications (id, recipient_id, assignee_id, assignee_email, assignment_event_id, company_name, lead_url, lead_created_at)
+     VALUES ($1,$2,'301-users','creative-studio@example.test',$3,$4,'https://app.nutshell.com/lead/99600',now())`,
+      [`${id}-leads`, userId, `${id}-events`, title],
+    )
+  const second = await context.newPage()
+  try {
+    await signIn(context)
+    await seed(99600, 'SSE initial backlog')
+    await page.goto('/issues?leadSsePrototype=true')
+    await second.goto('/issues?leadSsePrototype=true')
+    await expect(
+      second.getByRole('link', { name: /SSE initial backlog/ }),
+    ).toBeVisible()
+    expect(alerts).toEqual([])
+    await seed(99601, 'SSE live arrival')
+    await expect(
+      page.getByRole('link', { name: /SSE live arrival/ }),
+    ).toBeVisible({ timeout: 20_000 })
+    await expect(
+      second.getByRole('link', { name: /SSE live arrival/ }),
+    ).toBeVisible({ timeout: 20_000 })
+    await expect.poll(() => alerts).toEqual(['SSE live arrival'])
+    const [cleared] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.url().endsWith('/99601-leads/clear') &&
+          response.request().method() === 'POST',
+      ),
+      page
+        .getByRole('button', { name: 'Clear SSE live arrival', exact: true })
+        .click(),
+    ])
+    expect(cleared.ok()).toBe(true)
+    await expect(
+      second.getByRole('link', { name: /SSE live arrival/ }),
+    ).toHaveCount(0, { timeout: 1500 })
+
+    await context.setOffline(true)
+    await expect(
+      page.getByRole('status').filter({ hasText: 'Updates unavailable' }),
+    ).toBeVisible()
+    await seed(99602, 'SSE offline backlog')
+    await context.setOffline(false)
+    await expect(
+      page.getByRole('link', { name: /SSE offline backlog/ }),
+    ).toBeVisible({ timeout: 20_000 })
+    await expect(
+      second.getByRole('link', { name: /SSE offline backlog/ }),
+    ).toBeVisible({ timeout: 20_000 })
+    await seed(99603, 'SSE after recovery')
+    await expect
+      .poll(() => alerts, { timeout: 20_000 })
+      .toEqual(['SSE live arrival', 'SSE after recovery'])
+    await page.close()
+    await second.close()
+    await seed(99604, 'SSE closed backlog')
+    const reopened = await context.newPage()
+    await reopened.goto('/issues?leadSsePrototype=true')
+    await expect(
+      reopened.getByRole('link', { name: /SSE closed backlog/ }),
+    ).toBeVisible()
+    await expect(
+      reopened.getByRole('link', { name: /SSE live arrival/ }),
+    ).toHaveCount(0)
+    expect(alerts).toEqual(['SSE live arrival', 'SSE after recovery'])
+    // Reconnecting without a session must discard the previous account's cards.
+    await context.setOffline(true)
+    await context.clearCookies()
+    await context.setOffline(false)
+    await expect(
+      reopened.getByRole('region', { name: 'Web leads' }),
+    ).toHaveCount(0, { timeout: 20_000 })
+  } finally {
+    await context.setOffline(false)
+    await pool.query(
+      "DELETE FROM lead_notifications WHERE id LIKE '9960%-leads'",
+    )
+    await pool.end()
+  }
+})
+
+test.beforeEach(async ({ context }) => {
+  await context.route('**/api/taskrouter/worker-status', (route) =>
+    route.fulfill({ json: { status: 'offline', success: true } }),
+  )
+  await context.route('**/api/twilio-token', (route) =>
+    route.fulfill({
+      status: 503,
+      json: { error: 'Telephony disabled in tests' },
+    }),
+  )
+  await context.route('https://app.nutshell.com/**', (route) =>
+    route.fulfill({ body: 'Synthetic Nutshell lead page' }),
+  )
+})
+
+test('lead inbox shows ages, opens without clearing, and retains failed clears', async ({
+  page,
+  context,
+}, testInfo) => {
+  await signIn(context)
+  const now = new Date('2026-11-09T12:00:00Z')
+  await page.clock.install({ time: now })
+  let notifications = [
+    {
+      id: '1',
+      companyName: 'Northstar Outdoor',
+      leadUrl: 'https://app.nutshell.com/lead/10',
+      leadCreatedAt: '2026-11-09T07:59:59Z',
+      createdAt: now.toISOString(),
+    },
+    {
+      id: '2',
+      companyName: 'Yellow Company',
+      leadUrl: 'https://app.nutshell.com/lead/11',
+      leadCreatedAt: '2026-11-09T11:00:00Z',
+      createdAt: now.toISOString(),
+    },
+    {
+      id: '3',
+      companyName: 'Fresh Lead',
+      leadUrl: 'https://app.nutshell.com/lead/12',
+      leadCreatedAt: '2026-11-09T11:30:00Z',
+      createdAt: now.toISOString(),
+    },
+  ]
+  await page.route('**/api/lead-notifications', (route) =>
+    route.fulfill({
+      json: { notifications, serverTime: now.toISOString(), userId },
+    }),
+  )
+  let failClear = true
+  await page.route('**/api/lead-notifications/1/clear', (route) => {
+    if (failClear)
+      return route.fulfill({ status: 503, json: { error: 'Unavailable' } })
+    notifications = notifications.filter((n) => n.id !== '1')
+    return route.fulfill({ json: { success: true } })
+  })
+  await page.goto('/issues')
+  const panel = page.getByRole('region', { name: 'Web leads' })
+  await expect(panel.getByRole('listitem')).toHaveCount(3)
+  await expect(
+    page.getByRole('button', { name: /Lead notifications,/ }),
+  ).toHaveCount(0)
+  await expect(page.getByRole('dialog', { name: 'Web leads' })).toHaveCount(0)
+  const first = await panel.getByRole('listitem').nth(0).boundingBox()
+  const second = await panel.getByRole('listitem').nth(1).boundingBox()
+  expect(second!.y).toBeGreaterThanOrEqual(first!.y + first!.height)
+  await expect(panel.getByText('Over 4 hours', { exact: true })).toBeVisible()
+  await expect(panel.getByText('1–4 hours', { exact: true })).toBeVisible()
+  await expect(panel.getByText('Under 1 hour', { exact: true })).toBeVisible()
+  const lead = panel.getByRole('link', { name: /Northstar Outdoor/ })
+  await expect(lead).toHaveAttribute('target', '_blank')
+  const popup = page.waitForEvent('popup')
+  await lead.click()
+  await (await popup).close()
+  await expect(lead).toBeVisible()
+  await panel.getByRole('button', { name: 'Clear Northstar Outdoor' }).click()
+  await expect(panel.getByRole('alert')).toContainText(
+    'Could not clear this notification',
+  )
+  await expect(lead).toBeVisible()
+  failClear = false
+  await panel.getByRole('button', { name: 'Clear Northstar Outdoor' }).click()
+  await expect(lead).toHaveCount(0)
+  await page.reload()
+  await expect(panel.getByRole('listitem')).toHaveCount(2)
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto('/dashboard')
+  await expect(panel.getByRole('listitem')).toHaveCount(2)
+  const main = page.getByRole('main')
+  await expect(main).toBeVisible()
+  const bounds = await main.boundingBox()
+  expect(bounds!.y).toBe(0)
+  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(900)
+  await page.screenshot({
+    path: testInfo.outputPath('dashboard-inbox.png'),
+    animations: 'disabled',
+  })
+  notifications = notifications.slice(0, 1)
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(panel.getByRole('listitem')).toHaveCount(1)
+  await page.screenshot({
+    path: testInfo.outputPath('single.png'),
+    animations: 'disabled',
+  })
+})
+
+test('desktop alerts require opt-in, deduplicate tabs, and do not replay on reload or reconnect', async ({
+  page,
+  context,
+}, testInfo) => {
+  await signIn(context)
+  const alerts: Array<{ title: string; icon?: string; body?: string }> = []
+  let permissionRequests = 0
+  await context.exposeBinding(
+    'recordLeadAlert',
+    (_source, alert: { title: string; icon?: string; body?: string }) => {
+      alerts.push(alert)
+    },
+  )
+  await context.exposeBinding('recordPermissionRequest', () => {
+    permissionRequests++
+  })
+  await context.addInitScript(() => {
+    const callbacks = window as unknown as {
+      recordLeadAlert: (alert: {
+        title: string
+        icon?: string
+        body?: string
+      }) => void
+      recordPermissionRequest: () => void
+    }
+    class TestNotification {
+      static permission = 'default'
+      static async requestPermission() {
+        callbacks.recordPermissionRequest()
+        this.permission = 'granted'
+        return 'granted'
+      }
+      constructor(title: string, options?: NotificationOptions) {
+        callbacks.recordLeadAlert({
+          title,
+          icon: options?.icon,
+          body: options?.body,
+        })
+      }
+      close() {}
+    }
+    Object.defineProperty(window, 'Notification', {
+      value: TestNotification,
+      configurable: true,
+    })
+  })
+  let time = Date.now()
+  const item = (id: string) => ({
+    id,
+    companyName: `Company ${id}`,
+    leadUrl: `https://app.nutshell.com/lead/${id}`,
+    leadCreatedAt: new Date(time).toISOString(),
+    createdAt: new Date(time).toISOString(),
+  })
+  const notifications = [item('1')]
+  let disconnected = false
+  await context.route('**/api/lead-notifications', (route) =>
+    disconnected
+      ? route.abort()
+      : route.fulfill({
+          json: {
+            notifications,
+            serverTime: new Date(time).toISOString(),
+            userId,
+          },
+        }),
+  )
+  await page.goto('/issues')
+  const cards = (p: typeof page) =>
+    p.getByRole('region', { name: 'Web leads' }).getByRole('listitem')
+  const prompt = page.getByRole('dialog', {
+    name: 'Enable lead notifications?',
+  })
+  await expect(prompt).toBeVisible()
+  await page.screenshot({
+    path: testInfo.outputPath('permission-prompt.png'),
+    animations: 'disabled',
+  })
+  expect(permissionRequests).toBe(0)
+  expect(alerts).toEqual([])
+  await prompt.getByRole('button', { name: 'Enable notifications' }).click()
+  await expect(prompt).toHaveCount(0)
+  await expect(cards(page)).toHaveCount(1)
+  await expect(page.getByText('Desktop alerts', { exact: true })).toHaveCount(0)
+  await expect.poll(() => permissionRequests).toBe(1)
+  const second = await context.newPage()
+  await second.goto('/issues')
+  await expect(cards(second)).toHaveCount(1)
+  await second.evaluate(() => {
+    Object.defineProperty(Notification, 'permission', {
+      value: 'granted',
+      configurable: true,
+    })
+  })
+  time += 1000
+  // A transaction may commit after a snapshot with an earlier createdAt.
+  notifications.push({
+    ...item('2'),
+    createdAt: new Date(time - 1000).toISOString(),
+  })
+  await Promise.all(
+    [page, second].map((p) =>
+      p.evaluate(() => window.dispatchEvent(new Event('focus'))),
+    ),
+  )
+  const expectedAlert = [
+    {
+      title: 'Company 2',
+      icon: '/favicon.ico',
+      body: 'New web lead assigned to you',
+    },
+  ]
+  await expect.poll(() => alerts).toEqual(expectedAlert)
+  const favicon = await context.request.get('/favicon.ico')
+  expect(favicon.status()).toBe(200)
+  expect(favicon.headers()['content-type']).toMatch(/^image\//)
+  for (const p of [page, second]) await expect(cards(p)).toHaveCount(2)
+  await page.reload()
+  await expect(cards(page)).toHaveCount(2)
+  await expect(prompt).toHaveCount(0)
+  expect(permissionRequests).toBe(1)
+  expect(alerts).toEqual(expectedAlert)
+  await second.close()
+  disconnected = true
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(
+    page.getByRole('region', { name: 'Web leads' }).getByRole('status'),
+  ).toContainText('Updates unavailable')
+  time += 1000
+  notifications.push(item('3'))
+  disconnected = false
+  await page.evaluate(() => window.dispatchEvent(new Event('online')))
+  await expect(cards(page)).toHaveCount(3)
+  expect(alerts).toEqual(expectedAlert)
+})
+
+for (const choice of ['Not now', 'denied', 'default'] as const) {
+  test(`notification onboarding does not repeat after ${choice}`, async ({
+    page,
+    context,
+  }) => {
+    await signIn(context)
+    let requests = 0
+    await context.exposeBinding('permissionRequested', () => {
+      requests++
+    })
+    await context.addInitScript(
+      (result) => {
+        class TestNotification {
+          static permission = 'default'
+          static async requestPermission() {
+            await (
+              window as unknown as { permissionRequested: () => Promise<void> }
+            ).permissionRequested()
+            this.permission = result
+            return result
+          }
+        }
+        Object.defineProperty(window, 'Notification', {
+          value: TestNotification,
+        })
+      },
+      choice === 'denied' ? 'denied' : 'default',
+    )
+    await context.route('**/api/lead-notifications', (route) =>
+      route.fulfill({
+        json: {
+          userId,
+          notifications: [
+            {
+              id: '10',
+              companyName: 'In-app lead remains available',
+              leadUrl: 'https://app.nutshell.com/lead/10',
+              leadCreatedAt: new Date().toISOString(),
+              createdAt: new Date().toISOString(),
+            },
+          ],
+          serverTime: new Date().toISOString(),
+        },
+      }),
+    )
+    await page.goto('/issues')
+    const prompt = page.getByRole('dialog', {
+      name: 'Enable lead notifications?',
+    })
+    await expect(prompt).toBeVisible()
+    const second = await context.newPage()
+    await second.goto('/issues')
+    await expect(
+      second.getByRole('dialog', { name: 'Enable lead notifications?' }),
+    ).toBeVisible()
+    await prompt
+      .getByRole('button', {
+        name: choice === 'Not now' ? 'Not now' : 'Enable notifications',
+      })
+      .click()
+    await expect(prompt).toHaveCount(0)
+    await expect(second.getByRole('dialog')).toHaveCount(0)
+    const guidance = page.getByRole('complementary', {
+      name: 'Browser notification settings',
+    })
+    if (choice === 'denied') {
+      await expect(guidance).toBeVisible()
+      await expect(guidance).toContainText('Site settings')
+      await expect(guidance).toContainText('Notifications to Allow')
+      await guidance
+        .getByRole('button', {
+          name: 'Dismiss notification settings guidance',
+        })
+        .click()
+      await expect(guidance).toHaveCount(0)
+      await expect(
+        second.getByRole('complementary', {
+          name: 'Browser notification settings',
+        }),
+      ).toHaveCount(0)
+    } else {
+      await expect(guidance).toHaveCount(0)
+    }
+    await page.reload()
+    await expect(
+      page.getByRole('link', { name: /In-app lead remains available/ }),
+    ).toBeVisible()
+    await expect(guidance).toHaveCount(0)
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await expect(prompt).toHaveCount(0)
+    expect(requests).toBe(choice === 'Not now' ? 0 : 1)
+    await second.close()
+  })
+}
+
+for (const identityLoss of ['sign-out', 'account-switch'] as const) {
+  test(`queued desktop alerts are discarded after ${identityLoss}, even if the original account returns`, async ({
+    page,
+    context,
+  }) => {
+    await signIn(context)
+    await context.addInitScript(() => {
+      class TestNotification {
+        static permission = 'granted'
+        constructor(title: string) {
+          const titles = JSON.parse(localStorage.getItem('test-alerts') || '[]')
+          localStorage.setItem(
+            'test-alerts',
+            JSON.stringify([...titles, title]),
+          )
+        }
+        close() {}
+      }
+      Object.defineProperty(window, 'Notification', { value: TestNotification })
+    })
+    const item = (id: string) => ({
+      id,
+      companyName: `Company ${id}`,
+      leadUrl: `https://app.nutshell.com/lead/${id}`,
+      leadCreatedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    })
+    const notifications = [item('1')]
+    let lostIdentity = false
+    await page.route('**/api/lead-notifications', (route) =>
+      lostIdentity && identityLoss === 'sign-out'
+        ? route.fulfill({ status: 401, json: { error: 'Unauthorized' } })
+        : route.fulfill({
+            json: {
+              notifications,
+              userId: lostIdentity ? 'another-account' : userId,
+              serverTime: new Date().toISOString(),
+            },
+          }),
+    )
+    await page.goto('/issues')
+    const panel = page.getByRole('region', { name: 'Web leads' })
+    await expect(panel.getByRole('listitem')).toHaveCount(1)
+    const lockName = `lead-alerts:${userId}`
+    await page.evaluate((name) => {
+      void navigator.locks.request(
+        name,
+        () =>
+          new Promise<void>((resolve) => {
+            window.addEventListener('release-alert-lock', () => resolve(), {
+              once: true,
+            })
+          }),
+      )
+    }, lockName)
+    await expect
+      .poll(() =>
+        page.evaluate(
+          async (name) =>
+            (await navigator.locks.query()).held?.some(
+              (lock) => lock.name === name,
+            ),
+          lockName,
+        ),
+      )
+      .toBe(true)
+    notifications.push(item('2'))
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await expect(panel.getByRole('listitem')).toHaveCount(2)
+    await expect
+      .poll(() =>
+        page.evaluate(
+          async (name) =>
+            (await navigator.locks.query()).pending?.some(
+              (lock) => lock.name === name,
+            ),
+          lockName,
+        ),
+      )
+      .toBe(true)
+    lostIdentity = true
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await expect(panel).toHaveCount(0)
+    lostIdentity = false
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await expect(panel.getByRole('listitem')).toHaveCount(2)
+    await page.evaluate(async (name) => {
+      window.dispatchEvent(new Event('release-alert-lock'))
+      await navigator.locks.request(name, () => {})
+    }, lockName)
+    expect(
+      await page.evaluate(() =>
+        JSON.parse(localStorage.getItem('test-alerts') || '[]'),
+      ),
+    ).toEqual([])
+    notifications.push(item('3'))
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          JSON.parse(localStorage.getItem('test-alerts') || '[]'),
+        ),
+      )
+      .toEqual(['Company 3'])
+  })
+}
+
+test('urgency boundaries tick without refresh and the inbox handles denied permission and disconnection', async ({
+  page,
+  context,
+}, testInfo) => {
+  await signIn(context)
+  await page.setViewportSize({ width: 1280, height: 900 })
+  const now = new Date('2026-11-09T12:00:00Z')
+  await page.clock.install({ time: now })
+  await page.clock.pauseAt(now)
+  await context.addInitScript(() => {
+    Object.defineProperty(window, 'Notification', {
+      value: class {
+        static permission = 'denied'
+      },
+      configurable: true,
+    })
+  })
+  let notifications = [
+    {
+      id: '4',
+      companyName: 'Weekend assignment',
+      leadUrl: 'https://app.nutshell.com/lead/4',
+      leadCreatedAt: '2026-11-06T12:00:00Z',
+      createdAt: now.toISOString(),
+    },
+    {
+      id: '3',
+      companyName: 'Exactly four hours',
+      leadUrl: 'https://app.nutshell.com/lead/3',
+      leadCreatedAt: '2026-11-09T08:00:00Z',
+      createdAt: now.toISOString(),
+    },
+    {
+      id: '2',
+      companyName: 'Exactly one hour',
+      leadUrl: 'https://app.nutshell.com/lead/2',
+      leadCreatedAt: '2026-11-09T11:00:00Z',
+      createdAt: now.toISOString(),
+    },
+    {
+      id: '1',
+      companyName: 'Just under one hour',
+      leadUrl: 'https://app.nutshell.com/lead/1',
+      leadCreatedAt: '2026-11-09T11:00:00.001Z',
+      createdAt: now.toISOString(),
+    },
+  ]
+  let disconnected = false
+  await page.route('**/api/lead-notifications', (route) =>
+    disconnected
+      ? route.abort()
+      : route.fulfill({
+          json: { notifications, userId, serverTime: now.toISOString() },
+        }),
+  )
+  await page.goto('/issues')
+  const panel = page.getByRole('region', { name: 'Web leads' })
+  await expect(panel.getByRole('listitem')).toHaveCount(4)
+  const row = (name: string) =>
+    panel
+      .getByRole('listitem')
+      .filter({ has: page.getByRole('link', { name: new RegExp(name) }) })
+  await expect(
+    row('Exactly four hours').getByText('1–4 hours', { exact: true }),
+  ).toBeVisible()
+  await expect(
+    row('Exactly one hour').getByText('1–4 hours', { exact: true }),
+  ).toBeVisible()
+  await expect(
+    row('Just under one hour').getByText('Under 1 hour', { exact: true }),
+  ).toBeVisible()
+  await expect(row('Weekend assignment')).toContainText('72h 0m elapsed')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(panel.getByText('Desktop alerts', { exact: true })).toHaveCount(
+    0,
+  )
+  const guidance = panel.getByRole('complementary', {
+    name: 'Browser notification settings',
+  })
+  await expect(guidance).toBeVisible()
+  await expect(guidance).toContainText('Desktop notifications are blocked')
+  await expect(guidance).toContainText('Site settings')
+  await page.screenshot({
+    path: testInfo.outputPath('active-denied.png'),
+    animations: 'disabled',
+  })
+  await page.clock.runFor(1000)
+  await expect(
+    row('Exactly four hours').getByText('Over 4 hours', { exact: true }),
+  ).toBeVisible()
+  await expect(
+    row('Just under one hour').getByText('1–4 hours', { exact: true }),
+  ).toBeVisible()
+  await page.setViewportSize({ width: 375, height: 900 })
+  await expect(panel).toBeVisible()
+  await expect(guidance).toBeVisible()
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true)
+  await page.screenshot({
+    path: testInfo.outputPath('mobile-active.png'),
+    animations: 'disabled',
+  })
+  disconnected = true
+  await page.evaluate(() => window.dispatchEvent(new Event('offline')))
+  await expect(panel.getByRole('status')).toContainText('Updates unavailable')
+  await expect(guidance).toHaveCount(0)
+  await page.screenshot({
+    path: testInfo.outputPath('disconnected.png'),
+    animations: 'disabled',
+  })
+  notifications = []
+  disconnected = false
+  await page.evaluate(() => window.dispatchEvent(new Event('online')))
+  await expect(panel.getByRole('listitem')).toHaveCount(0)
+  await expect(panel.getByRole('status')).toHaveCount(0)
+  await expect(guidance).toHaveCount(0)
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.screenshot({
+    path: testInfo.outputPath('empty.png'),
+    animations: 'disabled',
+  })
+  // When an active lead arrives while blocked, guidance reappears and clears once granted.
+  notifications = [
+    {
+      id: '5',
+      companyName: 'Permission recovery lead',
+      leadUrl: 'https://app.nutshell.com/lead/5',
+      leadCreatedAt: now.toISOString(),
+      createdAt: now.toISOString(),
+    },
+  ]
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(guidance).toBeVisible()
+  await page.evaluate(() => {
+    Object.defineProperty(Notification, 'permission', {
+      value: 'granted',
+      configurable: true,
+    })
+    window.dispatchEvent(new Event('focus'))
+  })
+  await expect(guidance).toHaveCount(0)
+})
+
+test('real processor delivers only to the initial recipient and Clear survives replay and sign-out', async ({
+  page,
+  context,
+  browser,
+}) => {
+  process.env.DATABASE_URL = databaseUrl
+  const { processLeadNotifications } =
+    await import('../../lib/lead-notifications/processor')
+  const pool = new Pool({ connectionString: databaseUrl })
+  const other = await browser.newContext({ baseURL: baseUrl })
+  const config = createServerConfig({
+    NUTSHELL_NOTIFICATIONS_ENABLED: 'true',
+    LEAD_NOTIFICATIONS_LAUNCH_CUTOFF: '2026-01-01T00:00:00Z',
+    LEAD_NOTIFICATIONS_RECIPIENT_ALLOWLIST:
+      'alpha@example.test,beta@example.test',
+    NUTSHELL_API_KEY: 'synthetic-local-test-key',
+  })
+  let assignmentReady = false
+  const sourceByLead: Record<string, string> = {
+    '77002-leads': '115-sources',
+    '77003-leads': '111-sources',
+  }
+  const fetcher: typeof fetch = async (input) => {
+    const url = new URL(String(input))
+    const leadId = url.pathname.startsWith('/rest/leads/')
+      ? url.pathname.split('/').at(-1)!
+      : url.searchParams.get('entity_id')!
+    const number = leadId.split('-')[0]
+    const secondRep = leadId === '77002-leads'
+    const assignee = secondRep
+      ? { id: '302-users', emails: ['BETA@example.test'] }
+      : { id: '301-users', emails: ['ALPHA@example.test'] }
+    const replacementAssignee = secondRep
+      ? { id: '301-users', emails: ['ALPHA@example.test'] }
+      : { id: '302-users', emails: ['BETA@example.test'] }
+    const created = leadId === '77004-leads' ? 1700000000 : 1794225600
+    if (url.pathname.startsWith('/rest/leads/'))
+      return Response.json({
+        leads: [
+          {
+            id: leadId,
+            name: `Fallback ${number}`,
+            htmlUrl: `https://app.nutshell.com/lead/${number}`,
+            createdTime: { timestamp: created },
+            links: {
+              sources: [sourceByLead[leadId] ?? '35-sources'],
+              accounts: secondRep ? [] : ['8-accounts'],
+              owner: '999-users',
+            },
+          },
+        ],
+        accounts: [{ id: '8-accounts', name: 'Northstar Outdoor' }],
+        owners: [{ id: '999-users', emails: ['wrong-owner@example.test'] }],
+      })
+    expect(url.pathname).toBe('/rest/events')
+    expect(url.searchParams.get('events')).toBe('assignments')
+    return Response.json({
+      meta: { next: null, previous: null },
+      events: [
+        {
+          id: `${number}1-events`,
+          createdTime: created,
+          payloadType: 'leads',
+          action: 'create',
+          links: { payloads: [leadId] },
+        },
+        ...(assignmentReady
+          ? [
+              // The API can list a same-second replacement before its predecessor.
+              {
+                id: `${number}3-events`,
+                createdTime: created + 1,
+                payloadType: 'assignments',
+                action: 'create',
+                links: { payloads: [`${number}9-assignments`] },
+              },
+              {
+                id: `${number}2-events`,
+                createdTime: created + 1,
+                payloadType: 'assignments',
+                action: 'create',
+                links: { payloads: [`${number}-assignments`] },
+              },
+            ]
+          : []),
+      ],
+      payloads: [
+        {
+          id: `${number}-assignments`,
+          type: 'assignments',
+          links: {
+            assignmentEntity: leadId,
+            assigneeEntity: assignee.id,
+            replacedEntityAssignment: null,
+          },
+        },
+        {
+          id: `${number}9-assignments`,
+          type: 'assignments',
+          links: {
+            assignmentEntity: leadId,
+            assigneeEntity: replacementAssignee.id,
+            replacedEntityAssignment: `${number}-assignments`,
+          },
+        },
+      ],
+      assigneeEntity: [
+        {
+          ...assignee,
+          type: 'users',
+        },
+        {
+          ...replacementAssignee,
+          type: 'users',
+        },
+      ],
+    })
+  }
+  const processBatch = () => processLeadNotifications({ config, fetcher })
+  try {
+    await pool.query(
+      'INSERT INTO "User" (id,email,role) VALUES ($1,$2,$3),($4,$5,$3)',
+      [
+        'notification-alpha',
+        'Alpha@example.test',
+        'user',
+        'notification-beta',
+        'not-matched-yet@example.test',
+      ],
+    )
+    await signIn(context, 'notification-alpha')
+    await signIn(other, 'notification-beta')
+    for (const number of [77001, 77002, 77003, 77004]) {
+      const response = await context.request.post(
+        '/api/webhooks/nutshell?token=playwright-nutshell-webhook-local-only',
+        {
+          data: {
+            events: [
+              {
+                id: `${number}-events`,
+                payloadType: 'leads',
+                action: 'create',
+                links: { payloads: [`${number}-leads`] },
+              },
+            ],
+          },
+        },
+      )
+      expect(response.status()).toBe(202)
+    }
+    await processBatch()
+    expect(
+      (await (await context.request.get('/api/lead-notifications')).json())
+        .notifications,
+    ).toEqual([])
+    assignmentReady = true
+    await pool.query(
+      "UPDATE nutshell_webhook_inbox SET next_attempt_at=now() - interval '1 second' WHERE lead_id LIKE '7700%-leads'",
+    )
+    await Promise.all([processBatch(), processBatch()])
+    const list = await (
+      await context.request.get('/api/lead-notifications')
+    ).json()
+    expect(list.notifications).toMatchObject([
+      {
+        id: '77001-leads',
+        companyName: 'Northstar Outdoor',
+        leadUrl: 'https://app.nutshell.com/lead/77001',
+      },
+    ])
+    expect(list.notifications).toHaveLength(1)
+    expect(
+      (await (await other.request.get('/api/lead-notifications')).json())
+        .notifications,
+    ).toEqual([])
+    await pool.query('UPDATE "User" SET email=$1 WHERE id=$2', [
+      'beta@example.test',
+      'notification-beta',
+    ])
+    await pool.query(
+      "UPDATE nutshell_webhook_inbox SET next_attempt_at=now() - interval '1 second' WHERE lead_id='77002-leads'",
+    )
+    await processLeadNotifications({
+      config,
+      fetcher: async () => {
+        throw new Error('Frozen identity retry must not depend on CRM')
+      },
+    })
+    expect(
+      (await (await other.request.get('/api/lead-notifications')).json())
+        .notifications,
+    ).toMatchObject([{ id: '77002-leads', companyName: 'Fallback 77002' }])
+    expect(
+      (
+        await other.request.post('/api/lead-notifications/77001-leads/clear')
+      ).status(),
+    ).toBe(404)
+    await page.goto('/issues')
+    await expect(
+      page.getByRole('link', { name: /Northstar Outdoor/ }),
+    ).toBeVisible()
+    await page.reload()
+    await page.getByRole('button', { name: 'Clear Northstar Outdoor' }).click()
+    await expect(
+      page.getByRole('link', { name: /Northstar Outdoor/ }),
+    ).toHaveCount(0)
+    await pool.query(
+      "INSERT INTO nutshell_webhook_inbox(event_id,lead_id) VALUES ('770019-events','77001-leads')",
+    )
+    await processBatch()
+    await context.clearCookies()
+    expect(
+      (await context.request.get('/api/lead-notifications')).status(),
+    ).toBe(401)
+    expect(
+      (
+        await context.request.post('/api/lead-notifications/77001-leads/clear')
+      ).status(),
+    ).toBe(401)
+    await signIn(context, 'notification-alpha')
+    expect(
+      (await (await context.request.get('/api/lead-notifications')).json())
+        .notifications,
+    ).toEqual([])
+    await page.reload()
+    await expect(
+      page.getByRole('region', { name: 'Web leads' }).getByRole('listitem'),
+    ).toHaveCount(0)
+    // Clearing one account never clears another account's backlog.
+    await other.clearCookies()
+    expect((await other.request.get('/api/lead-notifications')).status()).toBe(
+      401,
+    )
+    await signIn(other, 'notification-beta')
+    expect(
+      (await (await other.request.get('/api/lead-notifications')).json())
+        .notifications,
+    ).toHaveLength(1)
+  } finally {
+    await other.close()
+    await pool.query(
+      "DELETE FROM lead_notifications WHERE id LIKE '7700%-leads'",
+    )
+    await pool.query(
+      "DELETE FROM nutshell_webhook_inbox WHERE lead_id LIKE '7700%-leads'",
+    )
+    await pool.query(
+      "DELETE FROM \"User\" WHERE id IN ('notification-alpha','notification-beta')",
+    )
+    await pool.end()
+  }
+})
+
+test('focusing a healthy SSE tab revalidates silently without flashing disconnected or restarting the stream', async ({
+  page,
+  context,
+}) => {
+  test.setTimeout(60_000)
+  const pool = new Pool({ connectionString: databaseUrl })
+  try {
+    await pool.query(
+      `INSERT INTO lead_notifications
+      (id,recipient_id,assignee_id,assignee_email,assignment_event_id,company_name,lead_url,lead_created_at)
+      VALUES ('99801-leads',$1,'301-users','creative-studio@example.test','99801-events','Focus Healthy Outdoor','https://app.nutshell.com/lead/99801',now())`,
+      [userId],
+    )
+    await signIn(context)
+    const alerts: string[] = []
+    await context.exposeBinding('recordFocusAlert', (_source, title: string) =>
+      alerts.push(title),
+    )
+    await context.addInitScript(() => {
+      Object.defineProperty(window, 'Notification', {
+        configurable: true,
+        value: class {
+          static permission = 'granted'
+          constructor(title: string) {
+            const recorder = Reflect.get(window, 'recordFocusAlert')
+            recorder(title)
+          }
+          close() {}
+        },
+      })
+    })
+    let streamCount = 0
+    page.on('request', (request) => {
+      if (new URL(request.url()).pathname === '/api/lead-notifications/stream')
+        streamCount++
+    })
+    const [opened] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === '/api/lead-notifications/stream',
+      ),
+      page.goto('/issues?leadSsePrototype=true'),
+    ])
+    expect(opened.status()).toBe(200)
+    await expect(
+      page.getByRole('link', { name: /Focus Healthy Outdoor/ }),
+    ).toBeVisible()
+
+    const revalidated = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === '/api/lead-notifications' &&
+        response.status() === 200,
+    )
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await revalidated
+    await expect(
+      page.getByRole('region', { name: 'Web leads' }).getByRole('status'),
+    ).toHaveCount(0)
+    expect(streamCount).toBe(1)
+
+    await pool.query(
+      `INSERT INTO lead_notifications
+      (id,recipient_id,assignee_id,assignee_email,assignment_event_id,company_name,lead_url,lead_created_at)
+      VALUES ('99802-leads',$1,'301-users','creative-studio@example.test','99802-events','Focus Live Arrival','https://app.nutshell.com/lead/99802',now())`,
+      [userId],
+    )
+    await expect(
+      page.getByRole('link', { name: /Focus Live Arrival/ }),
+    ).toBeVisible({ timeout: 25_000 })
+    await expect.poll(() => alerts).toEqual(['Focus Live Arrival'])
+    expect(streamCount).toBe(1)
+
+    await context.clearCookies()
+    const expired = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === '/api/lead-notifications' &&
+        response.status() === 401,
+    )
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await expired
+    await expect(page.getByRole('region', { name: 'Web leads' })).toHaveCount(0)
+  } finally {
+    await pool.query(
+      "DELETE FROM lead_notifications WHERE id IN ('99801-leads','99802-leads')",
+    )
+    await pool.end()
+  }
+})

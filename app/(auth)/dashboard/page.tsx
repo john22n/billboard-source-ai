@@ -39,6 +39,7 @@ export default async function Page() {
   return (
     <SidebarProvider
       defaultOpen={false}
+      className="min-h-0"
       style={
         {
           '--sidebar-width': 'calc(var(--spacing) * 72)',

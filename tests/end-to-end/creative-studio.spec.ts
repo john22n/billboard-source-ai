@@ -135,6 +135,7 @@ const test = base.extend<{ wizard: Wizard }>({
     })
     // Real local authentication/session; only external services are mocked.
     await page.route('**/api/mockup/session', (route) => route.continue())
+    await page.route('**/api/lead-notifications', (route) => route.continue())
     for (const [path, response] of Object.entries({
       '/api/taskrouter/worker-status': {
         json: { status: 'offline', success: true },

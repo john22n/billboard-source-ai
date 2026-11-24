@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { signIn } from '@/actions/auth'
+import { announceNotificationSessionChange } from '@/lib/lead-notifications/cross-tab'
 import {
   showErrorToast,
   showSuccessToast,
@@ -62,6 +63,7 @@ export function LoginForm({ className }: { className?: string }) {
       }
 
       showSuccessToast('Signed in with passkey')
+      announceNotificationSessionChange()
       router.push('/dashboard')
       router.refresh()
     } catch (err) {
@@ -122,6 +124,7 @@ export function LoginForm({ className }: { className?: string }) {
       const result = await signIn(formData)
 
       if (result.success) {
+        announceNotificationSessionChange()
         showSuccessToast('Signed in successfully')
 
         // Auto-register passkey in background
