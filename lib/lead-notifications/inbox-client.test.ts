@@ -30,10 +30,12 @@ class Stream extends EventTarget {
 }
 
 const banners: string[] = []
+const bannerOptions: Array<NotificationOptions | undefined> = []
 class Banner {
   static permission = 'granted'
-  constructor(title: string) {
+  constructor(title: string, options?: NotificationOptions) {
     banners.push(title)
+    bannerOptions.push(options)
   }
   close() {}
 }
@@ -123,6 +125,7 @@ beforeEach(() => {
   vi.setSystemTime(new Date('2026-11-19T01:00:00Z'))
   localStorage.clear()
   banners.length = 0
+  bannerOptions.length = 0
   Stream.count = 0
   vi.stubGlobal('EventSource', Stream)
   vi.stubGlobal('BroadcastChannel', Channel)
@@ -162,6 +165,12 @@ it('preserves a healthy SSE stream on focus without flashing disconnected', asyn
   initialStream.send(frame(1, ['old', 'fresh']))
   await Promise.resolve()
   expect(banners).toEqual(['Company fresh'])
+  expect(bannerOptions).toEqual([
+    expect.objectContaining({
+      body: 'New web lead assigned to you',
+      icon: '/favicon.ico',
+    }),
+  ])
 })
 
 it('revalidates on focus and discards in-flight frames when the session expired', async () => {

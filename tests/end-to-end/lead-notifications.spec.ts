@@ -566,17 +566,24 @@ test('desktop alerts require opt-in, deduplicate tabs, and do not replay on relo
   context,
 }, testInfo) => {
   await signIn(context)
-  const alerts: string[] = []
+  const alerts: Array<{ title: string; icon?: string; body?: string }> = []
   let permissionRequests = 0
-  await context.exposeBinding('recordLeadAlert', (_source, title: string) => {
-    alerts.push(title)
-  })
+  await context.exposeBinding(
+    'recordLeadAlert',
+    (_source, alert: { title: string; icon?: string; body?: string }) => {
+      alerts.push(alert)
+    },
+  )
   await context.exposeBinding('recordPermissionRequest', () => {
     permissionRequests++
   })
   await context.addInitScript(() => {
     const callbacks = window as unknown as {
-      recordLeadAlert: (title: string) => void
+      recordLeadAlert: (alert: {
+        title: string
+        icon?: string
+        body?: string
+      }) => void
       recordPermissionRequest: () => void
     }
     class TestNotification {
@@ -586,8 +593,12 @@ test('desktop alerts require opt-in, deduplicate tabs, and do not replay on relo
         this.permission = 'granted'
         return 'granted'
       }
-      constructor(title: string) {
-        callbacks.recordLeadAlert(title)
+      constructor(title: string, options?: NotificationOptions) {
+        callbacks.recordLeadAlert({
+          title,
+          icon: options?.icon,
+          body: options?.body,
+        })
       }
       close() {}
     }
@@ -655,13 +666,23 @@ test('desktop alerts require opt-in, deduplicate tabs, and do not replay on relo
       p.evaluate(() => window.dispatchEvent(new Event('focus'))),
     ),
   )
-  await expect.poll(() => alerts).toEqual(['Company 2'])
+  const expectedAlert = [
+    {
+      title: 'Company 2',
+      icon: '/favicon.ico',
+      body: 'New web lead assigned to you',
+    },
+  ]
+  await expect.poll(() => alerts).toEqual(expectedAlert)
+  const favicon = await context.request.get('/favicon.ico')
+  expect(favicon.status()).toBe(200)
+  expect(favicon.headers()['content-type']).toMatch(/^image\//)
   for (const p of [page, second]) await expect(cards(p)).toHaveCount(2)
   await page.reload()
   await expect(cards(page)).toHaveCount(2)
   await expect(prompt).toHaveCount(0)
   expect(permissionRequests).toBe(1)
-  expect(alerts).toEqual(['Company 2'])
+  expect(alerts).toEqual(expectedAlert)
   await second.close()
   disconnected = true
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
@@ -673,7 +694,7 @@ test('desktop alerts require opt-in, deduplicate tabs, and do not replay on relo
   disconnected = false
   await page.evaluate(() => window.dispatchEvent(new Event('online')))
   await expect(cards(page)).toHaveCount(3)
-  expect(alerts).toEqual(['Company 2'])
+  expect(alerts).toEqual(expectedAlert)
 })
 
 for (const choice of ['Not now', 'denied', 'default'] as const) {

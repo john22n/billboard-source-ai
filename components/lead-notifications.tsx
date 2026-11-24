@@ -22,15 +22,24 @@ import { useNotificationPermission } from '@/hooks/useNotificationPermission'
 const urgencyLevels = [
   {
     label: 'Under 1 hour',
-    colors: 'border-l-emerald-600 text-emerald-800 dark:text-emerald-300',
+    card: 'border-emerald-800/50 bg-emerald-700/70 text-white dark:border-emerald-400/40 dark:bg-emerald-700/70',
+    muted: 'text-white/95',
+    clearButton:
+      'border-white/45 bg-black/20 text-white hover:bg-black/30 hover:text-white',
   },
   {
     label: '1–4 hours',
-    colors: 'border-l-amber-500 text-amber-800 dark:text-amber-300',
+    card: 'border-amber-600/60 bg-amber-500/70 text-amber-950 dark:border-amber-400/50 dark:bg-amber-500/70',
+    muted: 'text-amber-950/90',
+    clearButton:
+      'border-amber-950/35 bg-amber-950/10 text-amber-950 hover:bg-amber-950/20 hover:text-amber-950',
   },
   {
     label: 'Over 4 hours',
-    colors: 'border-l-red-600 text-red-800 dark:text-red-300',
+    card: 'border-red-800/50 bg-red-700/70 text-white dark:border-red-400/40 dark:bg-red-700/70',
+    muted: 'text-white/95',
+    clearButton:
+      'border-white/45 bg-black/20 text-white hover:bg-black/30 hover:text-white',
   },
 ]
 
@@ -56,9 +65,11 @@ function LeadNotificationItem({
   const urgency = urgencyLevels[age < 3_600_000 ? 0 : age <= 14_400_000 ? 1 : 2]
   return (
     <li
-      className={`rounded-xl border border-l-4 bg-card/85 p-3 shadow-md backdrop-blur-md ${urgency.colors}`}
+      className={`rounded-xl border p-3 shadow-md backdrop-blur-sm ${urgency.card}`}
     >
-      <div className="mb-1.5 flex items-center justify-between gap-2 text-xs font-medium">
+      <div
+        className={`mb-1.5 flex items-center justify-between gap-2 text-xs font-medium ${urgency.muted}`}
+      >
         <span className="flex items-center gap-1.5">
           <Bell className="size-3.5" aria-hidden="true" />
           {urgency.label}
@@ -69,19 +80,19 @@ function LeadNotificationItem({
         href={item.leadUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className="flex items-start justify-between gap-3 rounded-sm text-sm font-semibold text-foreground underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-4"
+        className="flex items-start justify-between gap-3 rounded-sm text-sm font-semibold underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-current"
       >
         <span className="break-words [overflow-wrap:anywhere]">
           {item.companyName}
         </span>
         <ExternalLink
-          className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+          className={`mt-0.5 size-3.5 shrink-0 ${urgency.muted}`}
           aria-hidden="true"
         />
         <span className="sr-only">Open in Nutshell (new tab)</span>
       </a>
       <div className="mt-1.5 flex items-center justify-between gap-3">
-        <p className="text-xs text-muted-foreground">
+        <p className={`text-xs ${urgency.muted}`}>
           Created{' '}
           <time dateTime={item.leadCreatedAt}>
             {new Date(item.leadCreatedAt).toLocaleString(undefined, {
@@ -95,7 +106,7 @@ function LeadNotificationItem({
         <Button
           variant="outline"
           size="sm"
-          className="h-7 px-2 text-xs"
+          className={`h-7 px-2 text-xs ${urgency.clearButton}`}
           aria-label={`Clear ${item.companyName}`}
           disabled={clearing !== null}
           onClick={() => onClear(item)}

@@ -32,6 +32,7 @@ export function createDesktopAlerts(
         if (!claimDesktopAlert(userId, item.id)) return
         const banner = new Notification(item.companyName, {
           body: 'New web lead assigned to you',
+          icon: '/favicon.ico',
           tag: `lead:${userId}:${item.id}`,
         })
         banners.add(banner)
