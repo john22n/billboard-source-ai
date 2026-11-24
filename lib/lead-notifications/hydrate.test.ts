@@ -117,7 +117,7 @@ it.each([
 it.each([
   [
     'other source',
-    { ...lead.leads[0], links: { sources: ['115-sources'], accounts: [] } },
+    { ...lead.leads[0], links: { sources: ['111-sources'], accounts: [] } },
     'excluded',
   ],
   [
@@ -144,6 +144,42 @@ it.each([
     }),
   ).toMatchObject({ status })
   expect(fetcher).toHaveBeenCalledOnce()
+})
+
+it('includes Free Estimtes Form (115-sources) leads alongside Contact Us Page', async () => {
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(
+      Response.json({
+        ...lead,
+        leads: [
+          {
+            ...lead.leads[0],
+            links: {
+              sources: ['115-sources'],
+              accounts: ['22-accounts'],
+            },
+          },
+        ],
+      }),
+    )
+    .mockResolvedValueOnce(Response.json(history))
+  expect(
+    await hydrateLead('101-leads', {
+      cutoff: new Date('2026-01-01T00:00:00Z'),
+      email: 'sky@example.test',
+      apiKey: 'key',
+      fetcher,
+    }),
+  ).toEqual({
+    status: 'eligible',
+    companyName: 'First',
+    leadUrl: 'https://app.nutshell.com/lead/101',
+    leadCreatedAt: new Date(1800000000000),
+    assigneeId: '301-users',
+    assigneeEmail: 'rep@example.test',
+    assignmentEventId: '502-events',
+  })
 })
 
 it('includes the exact launch boundary and uses lead-name fallback without a company', async () => {

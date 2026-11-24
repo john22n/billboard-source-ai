@@ -31,7 +31,7 @@ export function createDesktopAlerts(
         if (queuedGeneration !== generation || isCleared(item.id)) return
         if (!claimDesktopAlert(userId, item.id)) return
         const banner = new Notification(item.companyName, {
-          body: 'New Contact Us lead assigned to you',
+          body: 'New web lead assigned to you',
           tag: `lead:${userId}:${item.id}`,
         })
         banners.add(banner)

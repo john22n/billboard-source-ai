@@ -10,7 +10,7 @@ The local implementation adds authoritative REST hydration, a durable processor,
 
 ## Processor and notification behavior
 
-- Only **Contact Us Page (`35-sources`)** leads created at or after the configured launch cutoff qualify. The integration identity defaults to Sky, but the notification recipient is the unique app account whose email matches the initial assignee case-insensitively.
+- Only **Contact Us Page (`35-sources`)** and **Free Estimtes Form (`115-sources`)** leads created at or after the configured launch cutoff qualify. The integration identity defaults to Sky, but the notification recipient is the unique app account whose email matches the initial assignee case-insensitively.
 - Creation/assignment history—not the current owner or webhook actor—establishes the initial assignee. Traverse older history with bounded validated cursors to a matching creation anchor. An ambiguous/missing original assignment, team assignment, unsafe URL, or incomplete history remains pending. The creation-anchor/original-assignment assumption passed read-only validation for seven real leads; this is not a vendor retention/completeness guarantee.
 - For multiple linked companies, use the **first account in the lead's relationship order**, not response-array order. Use lead name when that company's name is blank or there are no linked accounts. A missing linked account object stays pending. This deterministic selection rule requires business validation for multi-company leads.
 - Freeze the initial assignee before app-account lookup. A missing/ambiguous email match stays pending, so correction can deliver later without routing to a later owner. Non-production processing requires an explicit recipient email allowlist.

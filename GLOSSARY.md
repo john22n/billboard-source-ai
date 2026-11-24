@@ -5,7 +5,7 @@ Notification vocabulary complements the existing sales and call-intake language 
 ## Language
 
 **Nutshell Web Lead**:
-A Nutshell sales opportunity originating through Contact Us Page. For this notification feature, other intake sources are excluded; it is distinct from the call-intake Lead captured in Billboard Source AI.
+A Nutshell sales opportunity originating through Contact Us Page (`35-sources`) or Free Estimtes Form (`115-sources`). For this notification feature, other intake sources are excluded; it is distinct from the call-intake Lead captured in Billboard Source AI.
 _Avoid_: Lead (without context)
 
 **Lead Notification**:

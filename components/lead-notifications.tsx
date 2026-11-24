@@ -185,7 +185,7 @@ export function LeadNotifications({ userId }: { userId: string }) {
 
   return (
     <section
-      aria-label="Contact Us leads"
+      aria-label="Web leads"
       className="pointer-events-none fixed right-3 top-16 z-40 w-[calc(100%-1.5rem)] max-w-xs sm:right-4"
     >
       <div className="pointer-events-auto max-h-[calc(100dvh-9rem)] space-y-2 overflow-y-auto rounded-2xl">
@@ -230,8 +230,8 @@ function PermissionPromptDialog({
         <DialogHeader>
           <DialogTitle>Enable lead notifications?</DialogTitle>
           <DialogDescription>
-            Get desktop alerts for new Contact Us leads assigned to you while
-            the app is open. Your browser will ask for permission next. In-app
+            Get desktop alerts for new web leads assigned to you while the app
+            is open. Your browser will ask for permission next. In-app
             notifications work either way.
           </DialogDescription>
         </DialogHeader>

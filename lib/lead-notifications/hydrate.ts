@@ -156,13 +156,18 @@ function leadBrowserUrl(htmlUrl: string) {
   return url.href
 }
 
+const eligibleWebSources = new Set(['35-sources', '115-sources'])
+
 function resolveLeadDisplay(raw: unknown, leadId: string, cutoff: Date) {
   const data = leadResponse.parse(raw)
   const matches = data.leads.filter((lead) => lead.id === leadId)
   if (matches.length !== 1) throw new PendingEvidence('lead_join_missing')
   const lead = matches[0]
   const leadCreatedAt = new Date(lead.createdTime.timestamp * 1000)
-  if (!lead.links.sources.includes('35-sources') || leadCreatedAt < cutoff)
+  if (
+    !lead.links.sources.some((source) => eligibleWebSources.has(source)) ||
+    leadCreatedAt < cutoff
+  )
     return { status: 'excluded' as const, reason: 'source_or_cutoff' as const }
   const leadUrl = leadBrowserUrl(lead.htmlUrl)
   const firstAccount = lead.links.accounts[0]

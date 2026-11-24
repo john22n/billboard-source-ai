@@ -242,9 +242,7 @@ test('signing out in another tab immediately removes an active SSE inbox without
     ),
     peer.goto('/issues?leadSsePrototype=true'),
   ])
-  await expect(
-    peer.getByRole('region', { name: 'Contact Us leads' }),
-  ).toHaveCount(1)
+  await expect(peer.getByRole('region', { name: 'Web leads' })).toHaveCount(1)
   await page
     .getByRole('button', { name: 'Toggle Sidebar', exact: true })
     .first()
@@ -254,9 +252,7 @@ test('signing out in another tab immediately removes an active SSE inbox without
     .click()
   await page.getByRole('menuitem').filter({ hasText: 'Log out' }).click()
   await expect(page).toHaveURL(/\/login/)
-  await expect(
-    peer.getByRole('region', { name: 'Contact Us leads' }),
-  ).toHaveCount(0)
+  await expect(peer.getByRole('region', { name: 'Web leads' })).toHaveCount(0)
   await peer.close()
 })
 
@@ -447,7 +443,7 @@ test('local SSE keeps recovery silent and synchronizes Clear across real tabs', 
     await context.clearCookies()
     await context.setOffline(false)
     await expect(
-      reopened.getByRole('region', { name: 'Contact Us leads' }),
+      reopened.getByRole('region', { name: 'Web leads' }),
     ).toHaveCount(0, { timeout: 20_000 })
   } finally {
     await context.setOffline(false)
@@ -516,14 +512,12 @@ test('lead inbox shows ages, opens without clearing, and retains failed clears',
     return route.fulfill({ json: { success: true } })
   })
   await page.goto('/issues')
-  const panel = page.getByRole('region', { name: 'Contact Us leads' })
+  const panel = page.getByRole('region', { name: 'Web leads' })
   await expect(panel.getByRole('listitem')).toHaveCount(3)
   await expect(
     page.getByRole('button', { name: /Lead notifications,/ }),
   ).toHaveCount(0)
-  await expect(
-    page.getByRole('dialog', { name: 'Contact Us leads' }),
-  ).toHaveCount(0)
+  await expect(page.getByRole('dialog', { name: 'Web leads' })).toHaveCount(0)
   const first = await panel.getByRole('listitem').nth(0).boundingBox()
   const second = await panel.getByRole('listitem').nth(1).boundingBox()
   expect(second!.y).toBeGreaterThanOrEqual(first!.y + first!.height)
@@ -625,7 +619,7 @@ test('desktop alerts require opt-in, deduplicate tabs, and do not replay on relo
   )
   await page.goto('/issues')
   const cards = (p: typeof page) =>
-    p.getByRole('region', { name: 'Contact Us leads' }).getByRole('listitem')
+    p.getByRole('region', { name: 'Web leads' }).getByRole('listitem')
   const prompt = page.getByRole('dialog', {
     name: 'Enable lead notifications?',
   })
@@ -672,7 +666,7 @@ test('desktop alerts require opt-in, deduplicate tabs, and do not replay on relo
   disconnected = true
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
   await expect(
-    page.getByRole('region', { name: 'Contact Us leads' }).getByRole('status'),
+    page.getByRole('region', { name: 'Web leads' }).getByRole('status'),
   ).toContainText('Updates unavailable')
   time += 1000
   notifications.push(item('3'))
@@ -818,7 +812,7 @@ for (const identityLoss of ['sign-out', 'account-switch'] as const) {
           }),
     )
     await page.goto('/issues')
-    const panel = page.getByRole('region', { name: 'Contact Us leads' })
+    const panel = page.getByRole('region', { name: 'Web leads' })
     await expect(panel.getByRole('listitem')).toHaveCount(1)
     const lockName = `lead-alerts:${userId}`
     await page.evaluate((name) => {
@@ -940,7 +934,7 @@ test('urgency boundaries tick without refresh and the inbox handles denied permi
         }),
   )
   await page.goto('/issues')
-  const panel = page.getByRole('region', { name: 'Contact Us leads' })
+  const panel = page.getByRole('region', { name: 'Web leads' })
   await expect(panel.getByRole('listitem')).toHaveCount(4)
   const row = (name: string) =>
     panel
@@ -1048,6 +1042,10 @@ test('real processor delivers only to the initial recipient and Clear survives r
     NUTSHELL_API_KEY: 'synthetic-local-test-key',
   })
   let assignmentReady = false
+  const sourceByLead: Record<string, string> = {
+    '77002-leads': '115-sources',
+    '77003-leads': '111-sources',
+  }
   const fetcher: typeof fetch = async (input) => {
     const url = new URL(String(input))
     const leadId = url.pathname.startsWith('/rest/leads/')
@@ -1071,9 +1069,7 @@ test('real processor delivers only to the initial recipient and Clear survives r
             htmlUrl: `https://app.nutshell.com/lead/${number}`,
             createdTime: { timestamp: created },
             links: {
-              sources: [
-                leadId === '77003-leads' ? '115-sources' : '35-sources',
-              ],
+              sources: [sourceByLead[leadId] ?? '35-sources'],
               accounts: secondRep ? [] : ['8-accounts'],
               owner: '999-users',
             },
@@ -1254,9 +1250,7 @@ test('real processor delivers only to the initial recipient and Clear survives r
     ).toEqual([])
     await page.reload()
     await expect(
-      page
-        .getByRole('region', { name: 'Contact Us leads' })
-        .getByRole('listitem'),
+      page.getByRole('region', { name: 'Web leads' }).getByRole('listitem'),
     ).toHaveCount(0)
     // Clearing one account never clears another account's backlog.
     await other.clearCookies()
@@ -1339,9 +1333,7 @@ test('focusing a healthy SSE tab revalidates silently without flashing disconnec
     await page.evaluate(() => window.dispatchEvent(new Event('focus')))
     await revalidated
     await expect(
-      page
-        .getByRole('region', { name: 'Contact Us leads' })
-        .getByRole('status'),
+      page.getByRole('region', { name: 'Web leads' }).getByRole('status'),
     ).toHaveCount(0)
     expect(streamCount).toBe(1)
 
@@ -1365,9 +1357,7 @@ test('focusing a healthy SSE tab revalidates silently without flashing disconnec
     )
     await page.evaluate(() => window.dispatchEvent(new Event('focus')))
     await expired
-    await expect(
-      page.getByRole('region', { name: 'Contact Us leads' }),
-    ).toHaveCount(0)
+    await expect(page.getByRole('region', { name: 'Web leads' })).toHaveCount(0)
   } finally {
     await pool.query(
       "DELETE FROM lead_notifications WHERE id IN ('99801-leads','99802-leads')",
